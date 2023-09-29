@@ -1,0 +1,44 @@
+cmake_minimum_required(VERSION 2.6...3.20)
+project(gaffa)
+
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(REPO_ROOT "${CMAKE_SOURCE_DIR}")
+
+function(hide_symbols target)
+    set_property(TARGET ${target} PROPERTY C_VISIBILITY_PRESET hidden)
+    set_property(TARGET ${target} PROPERTY VISIBILITY_INLINES_HIDDEN ON)
+endfunction()
+
+option(BUILD_WITH_ASAN "Build with ASAN support to find memory issues" FALSE)
+if(BUILD_WITH_ASAN)
+    add_compile_options(-fsanitize=address)
+endif()
+
+if(MSVC)
+    option(MSVC_DEBUG_EDIT_AND_CONTINUE "MSVC: Enable edit+continue for debug builds?" TRUE)
+    if(MSVC_DEBUG_EDIT_AND_CONTINUE)
+        set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /ZI")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /SAFESEH:NO")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SAFESEH:NO")
+    endif()
+endif()
+
+# Turn off exceptions, runtime checks, anything that emits libc/CRT calls
+option(NO_CPP_BALLAST "Enable to compile without RTTI, exceptions, etc" TRUE)
+if(NO_CPP_BALLAST)
+  if (MSVC)
+    add_definitions(-D_HAS_EXCEPTIONS=0)
+    add_compile_options(/GR-)
+    if(CMAKE_CXX_FLAGS MATCHES "/EHsc")
+      string(REPLACE "/EHsc" "/EHs-c-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    endif()
+  else()
+    add_compile_options(-fno-exceptions -fno-rtti -fno-stack-protector)
+  endif()
+  message(STATUS "CMAKE_CXX_FLAGS after possible REPLACE operation:")
+  message(STATUS "CMAKE_CXX_FLAGS='${CMAKE_CXX_FLAGS}'")
+  message(STATUS "")
+endif()
+
+add_subdirectory(src)
+
