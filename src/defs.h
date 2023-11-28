@@ -53,6 +53,8 @@ struct Val
 {
     inline Val(): type(PRIMTYPE_NIL) { u.ui = 0; }
     inline Val(bool b): type(PRIMTYPE_BOOL) { u.ui = b; }
+    inline Val(unsigned int i): type(PRIMTYPE_UINT) { u.ui = i; }
+    inline Val(int i): type(PRIMTYPE_SINT) { u.si = i; }
     inline Val(uint i): type(PRIMTYPE_UINT) { u.ui = i; }
     inline Val(sint i): type(PRIMTYPE_SINT) { u.si = i; }
     inline Val(real f): type(PRIMTYPE_FLOAT) { u.f = f; }

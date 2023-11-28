@@ -1,2 +1,1 @@
-int i = 0
-float f = 1.25
+m:mth(f(0))

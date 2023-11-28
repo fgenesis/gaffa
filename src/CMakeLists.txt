@@ -8,6 +8,8 @@ set(src
     util.cpp
     strings.cpp
     strings.h
+    gc.cpp
+    gc.h
 )
 
 add_library(gaffa ${src})

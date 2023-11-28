@@ -9,6 +9,7 @@ enum TokenType
     TT_INVALID,
     TT_LITERAL,
     TT_DECL,
+    TT_ASSIGN,
     TT_UNOP,
     TT_BINOP,
     TT_VARREF,

@@ -8,41 +8,40 @@ struct OpDef
     unsigned op;
     char s[4];
     int precedence;
-    PrimType resultType;
 };
 
 const OpDef s_binops[] =
 {
-    {OP_ADD,      "+",    10, PRIMTYPE_UNK},
-    {OP_SUB,      "-",    10, PRIMTYPE_UNK},
-    {OP_MUL,      "*",    5 , PRIMTYPE_UNK},
-    {OP_DIV,      "/",    5 , PRIMTYPE_UNK},
-    {OP_INTDIV,   "//",   5 , PRIMTYPE_UNK},
-    {OP_BIN_AND,  "&",    3 , PRIMTYPE_UNK},
-    {OP_BIN_OR,   "|",    3 , PRIMTYPE_UNK},
-    {OP_BIN_XOR,  "^",    3 , PRIMTYPE_UNK},
-    {OP_SHL,      "<<",   15, PRIMTYPE_UNK},
-    {OP_SHR,      ">>",   15, PRIMTYPE_UNK},
-    {OP_C_EQ,     "==",   20, PRIMTYPE_BOOL},
-    {OP_C_NEQ,    "!=",   20, PRIMTYPE_BOOL},
-    {OP_C_LT,     "<",    20, PRIMTYPE_BOOL},
-    {OP_C_GT,     ">",    20, PRIMTYPE_BOOL},
-    {OP_C_LTE,    "<=",   20, PRIMTYPE_BOOL},
-    {OP_C_GTE,    ">=",   20, PRIMTYPE_BOOL},
-    {OP_C_AND,    "&&",   30, PRIMTYPE_BOOL},
-    {OP_C_OR,     "||",   30, PRIMTYPE_BOOL},
-    {OP_EVAL_AND, "and",  40, PRIMTYPE_UNK},
-    {OP_EVAL_OR,  "or",   40, PRIMTYPE_UNK},
-    {OP_CONCAT,   "..",   15, PRIMTYPE_STRING},
+    {OP_ADD,      "+",    10, },
+    {OP_SUB,      "-",    10, },
+    {OP_MUL,      "*",    5 , },
+    {OP_DIV,      "/",    5 , },
+    {OP_INTDIV,   "//",   5 , },
+    {OP_BIN_AND,  "&",    3 , },
+    {OP_BIN_OR,   "|",    3 , },
+    {OP_BIN_XOR,  "^",    3 , },
+    {OP_SHL,      "<<",   15, },
+    {OP_SHR,      ">>",   15, },
+    {OP_C_EQ,     "==",   20, },
+    {OP_C_NEQ,    "!=",   20, },
+    {OP_C_LT,     "<",    20, },
+    {OP_C_GT,     ">",    20, },
+    {OP_C_LTE,    "<=",   20, },
+    {OP_C_GTE,    ">=",   20, },
+    {OP_C_AND,    "&&",   30, },
+    {OP_C_OR,     "||",   30, },
+    {OP_EVAL_AND, "and",  40, },
+    {OP_EVAL_OR,  "or",   40, },
+    {OP_CONCAT,   "..",   15, },
 };
 
 const OpDef s_unops[] =
 {
-    {UOP_POS,      "+",    0, PRIMTYPE_UNK},
-    {UOP_NEG,      "-",    0, PRIMTYPE_UNK},
-    {UOP_BIN_COMPL,"~",    0, PRIMTYPE_UNK},
-    {UOP_TRY,      "??",   0, PRIMTYPE_UNK},
-    {UOP_UNWRAP,   "*",    0, PRIMTYPE_UNK},
+    {UOP_POS,      "+",    0, },
+    {UOP_NEG,      "-",    0, },
+    {UOP_BIN_COMPL,"~",    0, },
+    {UOP_TRY,      "??",   0, },
+    {UOP_UNWRAP,   "*",    0, },
 };
 
 Top::Top(Parser* ps)
@@ -66,7 +65,7 @@ bool Parser::parse(const char* code, size_t n)
         if(_p == _end)
             return true;
         _skipws();
-        if(!_p_decl())
+        if(!_p_stmt())
             return false;
         _skipws();
     }
@@ -205,6 +204,8 @@ bool Parser::_p_literal()
     return _p_nil() || _p_bool() || _p_numeric() || _p_string();
 }
 
+// int i = ...
+// int a, float b = ...
 bool Parser::_p_decl()
 {
     Top top(this);
@@ -216,12 +217,25 @@ bool Parser::_p_decl()
         return false;
     const unsigned typenameid = _pool.put(tmp); // TODO: postfix '?'
 
+    return _emit(ASTNode(TT_DECL, Val(typenameid))) && _p_assign() && top.accept();
+}
+
+bool Parser::_p_stmt()
+{
+    return _p_decl() || _p_call();
+}
+
+bool Parser::_p_assign()
+{
+    Top top(this);
+
+    std::string tmp;
     if(!_p__ident(tmp))
         return false;
     const unsigned varnameid = _pool.put(tmp);
 
     return _skipws() && _eat('=') && _skipws() && _p_declexpr() && _skipws()
-        && _emit(ASTNode(TT_DECL, Val(_Str(typenameid)), varnameid))
+        && _emit(ASTNode(TT_ASSIGN, Val(_Str(varnameid)), varnameid))
         && top.accept();
 }
 
@@ -327,7 +341,7 @@ bool Parser::_p_call()
     if(_skipws() && _eat(':') && _skipws())
         tt = TT_MTHCALL;
     _emit(ASTNode(tt));
-    const size_t nodeidx = _ast.size();
+    const size_t nodeidx = _ast.size() - 1;
     if(tt == TT_MTHCALL && !_p_key())
         return false;
     return _p_args(_ast[nodeidx].n) && top.accept();

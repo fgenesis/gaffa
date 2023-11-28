@@ -73,6 +73,7 @@ private:
     bool _p_literal(); // any literal value: nil, bool, numeric
 
     bool _p_stmt();
+    bool _p_assign();
     bool _p_decl();
     bool _p__ident(std::string& s);
     bool _p_identAsLiteral();
