@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string>
+#include <sstream>
 #include "parser.h"
 #include "ast.h"
 
@@ -24,7 +25,16 @@ int main(int argc, char **argv)
     Parser p;
     if(!p.parse(code, strlen(code)))
     {
-        puts("parse error");
+        printf("%s\n", p.getError());
+        const char *pe = p.getParseErrorPos();
+        std::ostringstream os;
+        size_t n = 0;
+        while(++n < 60 && *pe && *pe != '\n' && *pe != '\r')
+            os << *pe++;
+        printf("%s\n", os.str().c_str());
+        printf("Error stack:\n");
+        for(size_t i = 0; i < p._errors.size(); ++i)
+            puts(p._errors[i].c_str());
         return 2;
     }
 

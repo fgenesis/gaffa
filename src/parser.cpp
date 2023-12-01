@@ -2,6 +2,7 @@
 #include "parser.h"
 #include "util.h"
 #include <string.h>
+#include <sstream>
 
 struct OpDef
 {
@@ -17,6 +18,7 @@ const OpDef s_binops[] =
     {OP_MUL,      "*",    5 , },
     {OP_DIV,      "/",    5 , },
     {OP_INTDIV,   "//",   5 , },
+    {OP_MOD,      "%",    5 , },
     {OP_BIN_AND,  "&",    3 , },
     {OP_BIN_OR,   "|",    3 , },
     {OP_BIN_XOR,  "^",    3 , },
@@ -37,6 +39,7 @@ const OpDef s_binops[] =
 
 const OpDef s_unops[] =
 {
+    {UOP_NOT,      "!",    0, },
     {UOP_POS,      "+",    0, },
     {UOP_NEG,      "-",    0, },
     {UOP_BIN_COMPL,"~",    0, },
@@ -45,20 +48,38 @@ const OpDef s_unops[] =
 };
 
 Top::Top(Parser* ps)
-: _ps(ps), _p(ps->_p), _astpos(ps->_ast.size()), _accepted(false)
+    : _ps(ps)
+    , _p(ps->_p)
+    , _linebegin(ps->_linebegin)
+    , _astpos(ps->_ast.size())
+    , _errpos(ps->_errors.size())
+    , _accepted(false)
 {
+}
+
+bool Top::accept()
+{
+    _ps->_errors.resize(_errpos); // rollback error
+    _accepted = true;
+    return true;
 }
 
 void Top::_rollback()
 {
     _ps->_p = _p;
     _ps->_ast.resize(_astpos);
+    // ... and accept error
 }
 
 bool Parser::parse(const char* code, size_t n)
 {
+    _line = 1;
     _end = code + n;
     _p = code;
+    _linebegin = code;
+    _maxerror.clear();
+    _errors.clear();
+    _maxerrorpos = code;
 
     for(;;)
     {
@@ -66,9 +87,32 @@ bool Parser::parse(const char* code, size_t n)
             return true;
         _skipws();
         if(!_p_stmt())
-            return false;
+            return _error("Expected statement");
         _skipws();
     }
+}
+
+const char* Parser::getError() const
+{
+    return _maxerror.c_str();
+}
+
+bool Parser::_error(const char* info, const char *info2)
+{
+    std::ostringstream os;
+    size_t charpos = _p - _linebegin + 1;
+    os << "(" << _line << "," << charpos << "): Parse error: " << info;
+    if(info2)
+        os << " " << info2;
+    _errors.push_back(os.str());
+
+    if(_p > _maxerrorpos)
+    {
+        _maxerrorpos = _p;
+        _maxerror = os.str();
+    }
+
+    return false;
 }
 
 bool Parser::_emit(const ASTNode& node)
@@ -95,35 +139,81 @@ bool Parser::_eat(const char* s)
     while(s[i])
     {
         if(_p[i] != s[i])
-            return false;
+            return _error("Expected ", s);
         ++i;
     }
     _p += i;
     return true;
 }
 
-static const bool isws(char c)
+bool Parser::_eatws(char c)
 {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    return _skipws() && _eat(c) && _skipws();
 }
 
-static const char *eatws(const char *p)
+bool Parser::_eatws(const char* s)
 {
-    while(isws(*p))
-        ++p;
-    return p;
+    return _skipws() && _eat(s) && _skipws();
 }
 
-bool Parser::_ws()
+
+struct WsNoms
 {
-    const char * const oldp = _p;
-    _p = eatws(_p);
-    return _p != oldp;
+    const char *p;
+    const char *pnl; // first char after newline, NULL if no newline was skipped
+    size_t nl;
+};
+
+static WsNoms eatws(const char *p)
+{
+    size_t nl = 0;
+    const char *pnl = NULL;
+    bool skiptoend = false;
+    while(char c = *p)
+        if(skiptoend || c == ' ' || c == '\t' || c == '\n' || c == '\r')
+        {
+            ++p; // it's whitespace, skip it
+            if(c == '\n' || c == '\r') // account for newlines for diagnostics
+            {
+                skiptoend = false;
+                ++nl;
+                if(*p != c && (*p == '\n' || *p == '\r'))
+                    ++p; // skip one extra char in case of windows line endings
+                pnl = p;
+            }
+
+        }
+        else if(c == '-' && p[1] == '-') // for simplicity, consider comments whitespace
+        {
+            skiptoend = true;
+            p += 2;
+        }
+        else
+            break;
+    WsNoms ret = {p, pnl, nl};
+    return ret;
 }
 
-bool Parser::_skipws()
+bool Parser::_ws() // mandatory whitespace
 {
-    _p = eatws(_p);
+    WsNoms nom = eatws(_p);
+    if(nom.p == _p)
+        return _error("Expected whitespace");
+
+    _p = nom.p;
+    _line += nom.nl;
+    if(nom.pnl)
+        _linebegin = nom.pnl;
+    return true;
+}
+
+bool Parser::_skipws() // optional whitespace
+{
+    WsNoms nom = eatws(_p);
+    _p = nom.p;
+    _line += nom.nl;
+    if(nom.pnl)
+        _linebegin = nom.pnl;
     return true;
 }
 
@@ -135,7 +225,8 @@ bool Parser::_p_nil()
 bool Parser::_p_bool()
 {
     return (_eat("true") && _emit(true))
-        || (_eat("false") && _emit(false));
+        || (_eat("false") && _emit(false))
+        || _error("Expected bool literal");
 }
 
 bool Parser::_p__decimal(MaybeNum& num)
@@ -144,7 +235,7 @@ bool Parser::_p__decimal(MaybeNum& num)
     bool ok = !!num;
     if(ok)
         _p += num.used;
-    return ok;
+    return ok || _error("Expected decimal");
 }
 
 bool Parser::_p__mantissa(real& f, uint i)
@@ -180,7 +271,7 @@ bool Parser::_p_numeric()
     }
 
     if(!intpart)
-        return false;
+        return _error("Expected numeric, don't have int part");
 
     if(neg)
         m.val.si = -m.val.si;
@@ -196,12 +287,12 @@ bool Parser::_p_numeric()
 
 bool Parser::_p_string()
 {
-    return false;
+    return false; // TODO
 }
 
 bool Parser::_p_literal()
 {
-    return _p_nil() || _p_bool() || _p_numeric() || _p_string();
+    return _p_nil() || _p_bool() || _p_numeric() || _p_string() || _error("Expected literal");
 }
 
 // int i = ...
@@ -212,17 +303,20 @@ bool Parser::_p_decl()
 
     std::string tmp; // TODO make this ptr + size
     if(!_p__ident(tmp))
-        return false;
+        return _error("Expected type name");
     if(!_ws())
-        return false;
+        return _error("Expected whitespace after type name");
     const unsigned typenameid = _pool.put(tmp); // TODO: postfix '?'
 
-    return _emit(ASTNode(TT_DECL, Val(typenameid))) && _p_assign() && top.accept();
+    return (_emit(ASTNode(TT_DECL, Val(typenameid))) && _p_assign() && top.accept())
+        || _error("Expected assignment after decl");
 }
 
 bool Parser::_p_stmt()
 {
-    return _p_decl() || _p_call();
+    return _skipws()
+        && (_p_decl() || _p_primexpr() || _eat(';'))
+        && _skipws();
 }
 
 bool Parser::_p_assign()
@@ -231,10 +325,10 @@ bool Parser::_p_assign()
 
     std::string tmp;
     if(!_p__ident(tmp))
-        return false;
+        return _error("Expected identifier");
     const unsigned varnameid = _pool.put(tmp);
 
-    return _skipws() && _eat('=') && _skipws() && _p_declexpr() && _skipws()
+    return _eatws('=') && _p_declexpr() && _skipws()
         && _emit(ASTNode(TT_ASSIGN, Val(_Str(varnameid)), varnameid))
         && top.accept();
 }
@@ -255,7 +349,7 @@ bool Parser::_p__ident(std::string& str)
 {
     const char *e = eatident(_p);
     if(e == _p)
-        return false;
+        return _error("Invalid identifier");
 
     str.assign(_p, e - _p);
     _p = e;
@@ -278,33 +372,129 @@ bool Parser::_p_declexpr()
 
 bool Parser::_p_expr()
 {
-    Top top(this);
-
-    return (_p_literal()
-        || _p_prefixexpr()
-        || (top.reset() && _p_expr() && _p_binop() && _p_expr())
-        || (top.reset() && _p_unop() && _p_expr())
-        ) && top.accept();
+    return _p_subexpr(); // TODO: precedence boundary
 }
 
+
+// very broken and WIP
+bool Parser::_p_subexpr()
+{
+    Top top(this);
+    const size_t phidx = _ast.size();
+    _emit(TT_PLACEHOLDER);
+
+    size_t opIdx;
+    bool unop = _p__unop(opIdx) && _p_subexpr();
+    if(!(unop || _p_simpleexpr()))
+        return false;
+
+    if(!_p__binop(opIdx))
+    {
+        if(unop)
+        {
+            _ast[phidx].tt = TT_UNOP;
+            _ast[phidx].n = opIdx;
+        }
+        return top.accept(); // no binop? expr ends here
+    }
+
+    // FIXME: decide whether to use RPN or not
+
+    _ast[phidx].tt = TT_BINOP;
+
+    if(!_p_subexpr())
+        return false;
+
+    for(size_t n;;)
+    {
+        _emit(ASTNode(TT_BINOP, _Nil(), opIdx));
+    }
+}
+
+bool Parser::_p_simpleexpr()
+{
+    return _p_literal() || _p_primexpr();
+}
+
+// NAME
+// (expr)
 bool Parser::_p_prefixexpr()
 {
     Top top(this);
-
-    return (_p_varref()
-        || _p_call()
-        || (_eat('(') && _skipws() && _p_expr() && _skipws() && _eat(')'))
+    return _skipws() && (
+           _p_varref()
+        || (_eatws('(') && _p_expr() && _eatws(')'))
         ) && top.accept();
 }
 
-bool Parser::_p_binop()
+// NAME           // var ref
+// f(x)           // call
+// obj:mth(x)     // method
+// obj:[EXPR](x)  // dynamic method
+bool Parser::_p_primexpr()
 {
-    return false;
+    if(!_p_prefixexpr())
+        return false;
+
+    Top top(this);
+    for(;;)
+    {
+        TokenType tt = TT_INVALID;
+        switch(*_p) // look-ahead
+        {
+            case '.': case '[':
+                if((!_p_index(true) && top.accept()))
+                    return false;
+                break;
+            case '(':
+                tt = TT_FNCALL;
+                break;
+            case ':':
+                ++_p;
+                tt = TT_MTHCALL;
+                break;
+            default:
+                return top.accept();
+        }
+
+        if(tt == TT_FNCALL || tt == TT_MTHCALL)
+        {
+            // notes:
+            // - TT_MTHCALL followed by TT_INDEX followed by TT_LITERAL is a simple method call
+            // - TT_MTHCALL followed by TT_INDEX followed by TT_EXPR is an expr method call
+            _emit(ASTNode(tt));
+            const size_t nodeidx = _ast.size() - 1;
+            if(tt == TT_MTHCALL && !_p_index(false))
+                return false;
+            size_t nargs = 0;
+            if(!_p_args(nargs) && top.accept())
+                return false;
+            _ast[nodeidx].n = nargs;
+        }
+    }
 }
 
-bool Parser::_p_unop()
+// caller must emit dummy ASTNode before both exprs that is then patched later
+bool Parser::_p__binop(size_t& opIdx)
 {
-    return false;
+    for(size_t i = 0; i < Countof(s_binops); ++i)
+        if(_eatws(s_binops[i].s))
+        {
+            opIdx = i;
+            return true;
+        }
+    return _error("Expected binary operator");
+}
+
+bool Parser::_p__unop(size_t& opIdx)
+{
+    for(size_t i = 0; i < Countof(s_unops); ++i)
+        if(_eatws(s_unops[i].s))
+        {
+            opIdx = i;
+            return true;
+        }
+    return _error("Expected unary operator");
 }
 
 bool Parser::_p_varref()
@@ -315,48 +505,21 @@ bool Parser::_p_varref()
         unsigned strid = _pool.put(name);
         return _emit(ASTNode(TT_VARREF, _Str(strid)));
     }
-
-    Top top(this);
-    _emit(ASTNode(TT_INDEX));
-    if(_p_prefixexpr() && _skipws())
-    {
-        if(_eat('.') && _skipws() && _p_identAsLiteral())
-            return top.accept();
-        if((_eat('[') && _skipws() && _p_expr() && _skipws() && _eat(']')))
-            return top.accept();
-    }
     return false;
 }
 
 
-// f(x)
-// obj:mth(x)
-// obj:[EXPR](x)
-bool Parser::_p_call()
-{
-    Top top(this);
-    if(!_p_prefixexpr())
-        return false;
-    TokenType tt = TT_FNCALL;
-    if(_skipws() && _eat(':') && _skipws())
-        tt = TT_MTHCALL;
-    _emit(ASTNode(tt));
-    const size_t nodeidx = _ast.size() - 1;
-    if(tt == TT_MTHCALL && !_p_key())
-        return false;
-    return _p_args(_ast[nodeidx].n) && top.accept();
-}
-
-// Identifier
+// .Identifier
 // [EXPR]
-bool Parser::_p_key()
+bool Parser::_p_index(bool dot)
 {
-    if(_p_identAsLiteral())
-        return true;
-
     Top top(this);
-    return _eat('[') && _skipws() && _p_expr() && _skipws() && _eat(']') && top.accept();
+    _emit(ASTNode(TT_INDEX));
+    return (((!dot || _eatws('.')) && _p_identAsLiteral())
+        || (_eatws('[') && _p_expr() && _eatws(']'))
+    ) && top.accept();
 }
+
 
 // EXPR
 // EXPR, EXPR, EXPR
@@ -370,12 +533,13 @@ size_t Parser::_p_exprlist()
         if(!_p_expr())
             return 0;
         ++n;
-        _skipws();
-        if(!_eat(','))
+        if(!_eatws(','))
             break;
     }
     if(n)
         top.accept();
+    else
+        _error("Expected non-empty expr list");
     return n;
 }
 
@@ -384,13 +548,13 @@ bool Parser::_p_args(size_t& outN)
 {
     Top top(this);
     size_t n = 0;
-    if(_eat('(') && _skipws())
+    if(_eatws('('))
     {
-        if(_eat(')'))
+        if(_eatws(')'))
             return top.accept(); // special case for empty arglist
 
         n = _p_exprlist();
-        if(n && _skipws() && _eat(')'))
+        if(n && _eatws(')'))
         {
             outN = n;
             return top.accept();

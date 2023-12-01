@@ -7,6 +7,7 @@
 enum TokenType
 {
     TT_INVALID,
+    TT_PLACEHOLDER,
     TT_LITERAL,
     TT_DECL,
     TT_ASSIGN,
@@ -14,12 +15,14 @@ enum TokenType
     TT_BINOP,
     TT_VARREF,
     TT_INDEX,
-    TT_FNCALL,
-    TT_MTHCALL,
+    TT_FNCALL,  // f()
+    TT_MTHCALL, // obj:mth()
+    TT_MTHEXPR, // obj:[expr]()
 };
 
 enum UnOpType
 {
+    UOP_NOT,
     UOP_POS,
     UOP_NEG,
     UOP_BIN_COMPL,
@@ -34,6 +37,7 @@ enum BinOpType
     OP_MUL,
     OP_DIV,
     OP_INTDIV,
+    OP_MOD,
     OP_BIN_AND,
     OP_BIN_OR,
     OP_BIN_XOR,
