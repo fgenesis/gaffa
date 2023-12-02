@@ -1,8 +1,11 @@
 
 -- hello world
 
--- m:mth(f(0)) -- dafuq
+m:mth(f(0)) -- dafuq
 
 --int a, b = 0, 0
 
-int a = -b
+var s = ""
+
+--int a = -b
+

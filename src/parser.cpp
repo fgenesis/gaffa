@@ -287,7 +287,38 @@ bool Parser::_p_numeric()
 
 bool Parser::_p_string()
 {
-    return false; // TODO
+    const char q = *_p;
+    if(!(q == '"' || q == '\''))
+        return false;
+
+    const char *p = ++_p;
+    bool ignorenext = false;
+    char c;
+    std::string tmp;
+    while( (c = *p++) )
+    {
+        if(c == '"' || c == '\'')
+            break;
+
+        if(c != '\\')
+            tmp += c;
+        else switch(*p)
+        {
+        case 'x': case 'X': // TODO: hex
+            assert(false);
+            break;
+        default:
+            tmp += *p++;
+        }
+    }
+
+    if(c != q)
+        return _error("Unterminated string");
+
+    unsigned ref = _pool.put(tmp);
+    _p = p;
+
+    return _emit(ASTNode(TT_LITERAL, _Str(ref)));
 }
 
 bool Parser::_p_literal()
