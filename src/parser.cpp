@@ -411,27 +411,21 @@ bool Parser::_p_expr()
 bool Parser::_p_subexpr()
 {
     Top top(this);
-    const size_t phidx = _ast.size();
-    _emit(TT_PLACEHOLDER);
+    const size_t phidx = _ast.size(); // keep the start of the left part in case we end up being a binop expr
 
     size_t opIdx;
-    bool unop = _p__unop(opIdx) && _p_subexpr();
-    if(!(unop || _p_simpleexpr()))
+    while(_p__unop(opIdx))
+        _emit(ASTNode(TT_UNOP, _Nil(), opIdx));
+
+    // left part
+    if(!_p_simpleexpr())
         return false;
 
     if(!_p__binop(opIdx))
-    {
-        if(unop)
-        {
-            _ast[phidx].tt = TT_UNOP;
-            _ast[phidx].n = opIdx;
-        }
         return top.accept(); // no binop? expr ends here
-    }
 
-    // FIXME: decide whether to use RPN or not
-
-    _ast[phidx].tt = TT_BINOP;
+    // it's a binop, insert node before left part expr
+    _ast.insert(_ast.begin() + phidx, ASTNode(TT_BINOP, _Nil(), opIdx));
 
     if(!_p_subexpr())
         return false;
