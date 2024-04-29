@@ -8,6 +8,16 @@
 #define __has_builtin(x) 0
 #endif
 
+#ifndef FORCEINLINE
+#  ifdef _MSC_VER
+#    define FORCEINLINE __forceinline
+#  elif defined(__GNUC__)
+#    define FORCEINLINE __inline__ __attribute__((__always_inline__))
+#  else
+#    define FORCEINLINE inline
+#  endif
+#endif
+
 namespace detail
 {
     template <typename T, size_t N>
