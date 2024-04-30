@@ -1,11 +1,12 @@
 
 -- hello world
 
-m:mth(f(0)) -- dafuq
+var z = m:mth(f(0)) -- dafuq
 
---int a, b = 0, 0
+int a, _ = 0, 1<<z
 
 var s = ""
+var x:int = 0xacab
 
 --int a = -b
 
