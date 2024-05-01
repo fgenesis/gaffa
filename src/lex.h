@@ -44,6 +44,11 @@ public:
         TOK_SHL,    // <<
         TOK_SHR,    // >>
         TOK_SINK,   // _
+        TOK_HASH,   // #
+        TOK_BITAND, // &
+        TOK_BITOR,  // |
+        TOK_LOGAND, // &&
+        TOK_LOGOR,  // ||
         // keywords
         TOK_NIL,    // nil
         TOK_TRUE,   // true
@@ -58,6 +63,9 @@ public:
         TOK_BREAK,  // break
         TOK_RETURN, // return
         TOK_CONTINUE,// continue
+        TOK_FALLTHROUGH,//fallthrough
+        TOK_AND,    // and
+        TOK_OR,     // or
         // rest
         TOK_LITSTR, // "...", '...'
         TOK_LITNUM, // 123, 123.45
@@ -80,6 +88,8 @@ public:
     Lexer(const char *text);
     Token next();
     bool done() const { return !*_p; }
+
+    static const char *GetTokenText(TokenType tt);
 
 private:
     const char *skipws();

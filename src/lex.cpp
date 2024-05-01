@@ -43,6 +43,11 @@ static const ShortEntry ShortTab[] =
     { "!",  Lexer::TOK_EXCL    },
     { "^",  Lexer::TOK_HAT     },
     { "~",  Lexer::TOK_TILDE   },
+    { "#",  Lexer::TOK_HASH    },
+    { "&&", Lexer::TOK_LOGAND  },
+    { "||", Lexer::TOK_LOGOR   },
+    { "&",  Lexer::TOK_BITAND  },
+    { "|",  Lexer::TOK_BITOR   },
 };
 
 struct Keyword
@@ -66,6 +71,8 @@ static const Keyword Keywords[] =
     { "break",     Lexer::TOK_BREAK    },
     { "return",    Lexer::TOK_RETURN   },
     { "continue",  Lexer::TOK_CONTINUE },
+    { "and",       Lexer::TOK_CONTINUE },
+    { "or",        Lexer::TOK_CONTINUE },
 };
 
 
@@ -164,7 +171,7 @@ static const char *eatnum(const char *p)
     bool dot = false;
     for(char c; (c = *p); )
     {
-        if( (c >= '0' && c < '9') || (c >= 'A' && c < 'Z') || (c >= 'a' && c < 'z'))
+        if( (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
         {} // nothing to do
         else if(c == '.')
         {
@@ -223,6 +230,23 @@ isident:
                 return tok(ShortTab[i].tt, p, p+len);
 
     return errtok("Unrecognized token");
+}
+
+const char* Lexer::GetTokenText(TokenType tt)
+{
+    for(size_t i = 0; i < Countof(Keywords); ++i)
+        if(Keywords[i].tt == tt)
+            return Keywords[i].kw;
+    for(size_t i = 0; i < Countof(ShortTab); ++i)
+        if(ShortTab[i].tt == tt)
+            return &ShortTab[i].s[0];
+    switch(tt)
+    {
+        case TOK_IDENT: return "identifier";
+        case TOK_LITNUM: return "number literal";
+        case TOK_LITSTR: return "string literal";
+    }
+    return NULL;
 }
 
 
