@@ -1,7 +1,9 @@
 #pragma once
 
 #include "lex.h"
-#include <vector>
+
+class HLIRBuilder;
+struct HLNode;
 
 class Parser
 {
@@ -22,24 +24,30 @@ public:
     };
 
     Parser(Lexer *lex, const char *fn);
-    bool parse();
-    std::vector<Val> constants;
+    HLNode *parse();
+    //std::vector<Val> constants;
+
+    HLIRBuilder *hlir;
 
 protected:
-    void grouping(); // after (
-    void unary(); // after op
-    void binary(); // after expr
-    void value();
-    void expr();
-    void parsePrecedence(Prec p);
+    HLNode *grouping(); // after (
+    HLNode *unary(); // after op
+    HLNode *binary(); // after expr
+    HLNode *expr();
+    HLNode *parsePrecedence(Prec p);
+    HLNode *litnum();
+    HLNode *litstr();
+    HLNode *ident();
 
 
 private:
     void advance();
     void eat(Lexer::TokenType tt);
-    void report(const Lexer::Token& tok);
+    void errorAt(const Lexer::Token& tok, const char *msg);
+    void error(const char *msg);
     void errorAtCurrent(const char *msg);
-    void emitConstant(const Val& v);
+    HLNode *emitConstant(const Val& v);
+    void outOfMemory();
 
     Lexer::Token curtok;
     Lexer::Token prevtok;
@@ -47,4 +55,20 @@ private:
     const char *_fn;
     bool hadError;
     bool panic;
+
+    typedef HLNode* (Parser::*ParseMth)(void);
+    //static const ParseMth NoMth;
+
+    struct ParseRule
+    {
+        Lexer::TokenType tok;
+        ParseMth prefix;
+        ParseMth infix;
+        Prec precedence;
+        unsigned param;
+    };
+
+    static const ParseRule Rules[];
+
+    static const ParseRule *GetRule(Lexer::TokenType tok);
 };

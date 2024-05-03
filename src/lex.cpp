@@ -71,8 +71,8 @@ static const Keyword Keywords[] =
     { "break",     Lexer::TOK_BREAK    },
     { "return",    Lexer::TOK_RETURN   },
     { "continue",  Lexer::TOK_CONTINUE },
-    { "and",       Lexer::TOK_CONTINUE },
-    { "or",        Lexer::TOK_CONTINUE },
+    { "and",       Lexer::TOK_AND },
+    { "or",        Lexer::TOK_OR },
 };
 
 
@@ -245,6 +245,7 @@ const char* Lexer::GetTokenText(TokenType tt)
         case TOK_IDENT: return "identifier";
         case TOK_LITNUM: return "number literal";
         case TOK_LITSTR: return "string literal";
+        default: ;
     }
     return NULL;
 }

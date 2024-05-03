@@ -25,6 +25,7 @@ static unsigned marksome(GCroot* root, unsigned n)
     while(n--)
     {
     }
+    return 0;
 }
 
 void gc_step(GCroot *root, size_t n)
@@ -56,11 +57,11 @@ void gc_step(GCroot *root, size_t n)
                     last = o;
                 }
             }
-            
+
         }
         root->gcstep = STEP_MARK;
     }
-    
+
     root->curobj = last;
 }
 

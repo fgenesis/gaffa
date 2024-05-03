@@ -1,12 +1,13 @@
 
 -- hello world
 
-var z = m:mth(f(0)) -- dafuq
+--var z = m:mth(f(0)) -- dafuq
 
-int a, _ = 0, 1<<z
+--int a, _ = 0, 1<<z
 
-var s = ""
-var x:int = 0xacab
+--var s = ""
+--var x:int = 0xacab
 
 --int a = -b
 
+(1 + 2 * 3) / (4 + 1)

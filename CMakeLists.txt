@@ -40,5 +40,6 @@ if(NO_CPP_BALLAST)
   message(STATUS "")
 endif()
 
+include_directories(include)
 add_subdirectory(src)
 

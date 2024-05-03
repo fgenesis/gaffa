@@ -1,4 +1,6 @@
 set(src
+    ../include/gaffa.h
+    gainternal.h
     lex.cpp
     lex.h
     parser.cpp

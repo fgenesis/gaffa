@@ -1,6 +1,8 @@
 #include "parser.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
+#include "hlir.h"
 
 
 static Val parsefloat(uint intpart, const char *s, const char *end)
@@ -34,7 +36,6 @@ static Val parsehex(const char *s, const char *end)
 static Val makenum(const char *s, const char *end)
 {
     size_t len = end - s;
-    bool hex = false;
     if(len > 2)
     {
         if(s[0] == '0')
@@ -61,71 +62,143 @@ static Val makenum(const char *s, const char *end)
     return u;
 }
 
+static Val makestr(const char *s, const char *end)
+{
+    return Val(_Str(0)); // TODO
+}
+
+
+const Parser::ParseRule Parser::Rules[] =
+{
+    { Lexer::TOK_LPAREN, &Parser::grouping, NULL,            Parser::PREC_NONE,  0          },
+    { Lexer::TOK_PLUS  , &Parser::unary,    &Parser::binary, Parser::PREC_ADD,   HLOP_ADD   },
+    { Lexer::TOK_MINUS , &Parser::unary,    &Parser::binary, Parser::PREC_ADD,   HLOP_SUB   },
+    { Lexer::TOK_STAR  , &Parser::unary,    &Parser::binary, Parser::PREC_MUL,   HLOP_MUL   },
+    { Lexer::TOK_SLASH , NULL,              &Parser::binary, Parser::PREC_MUL,   HLOP_DIV   },
+    { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            Parser::PREC_NONE,  0          },
+    { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            Parser::PREC_NONE,  0          },
+    { Lexer::TOK_IDENT , &Parser::ident,    NULL,            Parser::PREC_NONE,  0          },
+
+    { Lexer::TOK_E_ERROR,NULL,              NULL,            Parser::PREC_NONE,  0 }
+};
+
+const Parser::ParseRule * Parser::GetRule(Lexer::TokenType tok)
+{
+    for(size_t i = 0; Rules[i].tok != Lexer::TOK_E_ERROR; ++i)
+        if(Rules[i].tok == tok)
+            return &Rules[i];
+
+    return NULL;
+}
+
 Parser::Parser(Lexer* lex, const char *fn)
-    : _lex(lex), _fn(fn), hadError(false), panic(false)
+    : hlir(NULL), _lex(lex), _fn(fn), hadError(false), panic(false)
 {
     curtok.tt = Lexer::TOK_E_ERROR;
 
 }
 
-bool Parser::parse()
+HLNode *Parser::parse()
 {
+    advance();
+    HLNode *p = expr();
+    eat(Lexer::TOK_E_EOF);
+
+    return !hadError ? p : NULL;
+}
+
+HLNode *Parser::expr()
+{
+    return parsePrecedence(PREC_ASSIGNMENT);
+}
+
+HLNode *Parser::parsePrecedence(Prec p)
+{
+    advance();
+    const ParseRule *rule = GetRule(prevtok.tt);
+    if(!rule->prefix)
+    {
+        error("Expected expression");
+        return NULL;
+    }
+
+    HLNode *u = (this->*(rule->prefix))();
+
     for(;;)
     {
+        rule = GetRule(curtok.tt);
+        if(p > rule->precedence)
+            break;
 
+        advance();
+
+        HLNode *infixnode = (this->*(rule->infix))();
+        if(!infixnode)
+            return NULL;
+
+        ((HLBinary*)infixnode)->lhs = u;
+        u = infixnode;
     }
-    return !hadError;
+    return u;
+
 }
 
-void Parser::value()
+HLNode* Parser::litnum()
 {
-    switch(curtok.tt)
-    {
-        case Lexer::TOK_LITNUM:
-        {
-            Val num = makenum(curtok.begin, curtok.begin + curtok.u.len);
-            emitConstant(num);
-            return;
-        }
-
-        case Lexer::TOK_IDENT:
-        {
-
-        }
-    }
+    return emitConstant(makenum(curtok.begin, curtok.begin + curtok.u.len));
 }
 
-void Parser::expr()
+HLNode* Parser::litstr()
 {
-    parsePrecedence(PREC_ASSIGNMENT);
+    return emitConstant(makestr(curtok.begin, curtok.begin + curtok.u.len));
 }
 
-void Parser::parsePrecedence(Prec p)
+HLNode* Parser::ident()
 {
+    return NULL; // TODO
 }
 
-void Parser::grouping()
+HLNode *Parser::grouping()
 {
     // ( was eaten
-    expr();
+    HLNode *u = expr();
     eat(Lexer::TOK_RPAREN);
+    return u;
 }
 
-void Parser::unary()
+HLNode *Parser::unary()
 {
-    const Lexer::TokenType prev = prevtok.tt;
-    parsePrecedence(PREC_UNARY);
-    switch(prev)
+    const ParseRule *rule = GetRule(prevtok.tt);
+    HLNode *rhs = parsePrecedence(PREC_UNARY);
+
+    HLUnary *u = hlir->unary();
+    if(u)
     {
-        case Lexer::TOK_MINUS: // TODO
-        case Lexer::TOK_TILDE:
-        case Lexer::TOK_EXCL:
-        case Lexer::TOK_PLUS:
+        u->op = (HLOp)rule->param;
+        u->rhs = rhs;
     }
+    else
+        outOfMemory();
+
+    return u;
 }
 
-void Parser::binary()
+HLNode * Parser::binary()
 {
+    const ParseRule *rule = GetRule(prevtok.tt);
+    HLNode *rhs = parsePrecedence((Prec)(rule->precedence + 1));
+
+    HLBinary *u = hlir->binary();
+    if(u)
+    {
+        u->op = (HLOp)rule->param;
+        u->rhs = rhs;
+    }
+    else
+        outOfMemory();
+
+    // lhs is assigned by caller
+    return u;
 }
 
 void Parser::advance()
@@ -137,7 +210,7 @@ void Parser::advance()
         curtok = _lex->next();
         if(curtok.tt != Lexer::TOK_E_ERROR)
             break;
-        report(curtok);
+        errorAt(curtok, curtok.u.err);
     }
 }
 
@@ -154,21 +227,38 @@ void Parser::eat(Lexer::TokenType tt)
     errorAtCurrent(&buf[0]);
 }
 
-void Parser::report(const Lexer::Token& tok)
+void Parser::errorAt(const Lexer::Token& tok, const char *msg)
 {
     if(panic)
         return;
+
+    printf("(%s:%u): %s\n", _fn, tok.line, msg);
 
     hadError = true;
     panic = true;
 }
 
-void Parser::errorAtCurrent(const char* msg)
+void Parser::error(const char* msg)
 {
-    printf("(%s:%u): %s\n", _fn, curtok.line, msg);
-    // TODO
+    errorAt(prevtok, msg);
 }
 
-void Parser::emitConstant(const Val& v)
+void Parser::errorAtCurrent(const char* msg)
 {
+    errorAt(curtok, msg);
+}
+
+HLNode *Parser::emitConstant(const Val& v)
+{
+    HLConstantValue *u = hlir->constantValue();
+    if(u)
+        u->val = v;
+    else
+        outOfMemory();
+    return u;
+}
+
+void Parser::outOfMemory()
+{
+    errorAtCurrent("out of memory");
 }

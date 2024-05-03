@@ -2,6 +2,9 @@
 #include <string>
 #include <sstream>
 #include "lex.h"
+#include "parser.h"
+#include "hlir.h"
+#include "gainternal.h"
 
 static char s_content[64*1024];
 
@@ -14,6 +17,18 @@ const char *slurp(const char *fn)
     fclose(f);
     s_content[done] = 0;
     return &s_content[0];
+}
+
+static void *myalloc(void *ud, void *ptr, size_t osz, size_t nsz)
+{
+    if(ptr && !nsz)
+    {
+        printf("free  %u bytes\n", (unsigned)osz);
+        free(ptr);
+        return NULL;
+    }
+    printf("alloc %u bytes\n", (unsigned)nsz);
+    return realloc(ptr, nsz);
 }
 
 static void lexall(const char *code)
@@ -35,13 +50,23 @@ static void lexall(const char *code)
     }
 }
 
+
 int main(int argc, char **argv)
 {
+    const GaAlloc ga { myalloc, NULL };
+
     const char *code = slurp("test.txt");
     if(!code)
         return 1;
 
     lexall(code);
+
+    Lexer lex(code);
+    Parser pp(&lex, "test");
+    HLIRBuilder hb(ga);
+    pp.hlir = &hb;
+    HLNode *node = pp.parse();
+
 
     /*
     Parser p;
