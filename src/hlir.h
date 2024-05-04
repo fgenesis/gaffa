@@ -1,17 +1,7 @@
 #pragma once
 
 #include "gainternal.h"
-
-
-enum HLOp
-{
-	HLOP_NONE,
-	HLOP_ADD,
-	HLOP_SUB,
-	HLOP_MUL,
-	HLOP_DIV,
-	HLOP_JMP,
-};
+#include "lex.h"
 
 enum Comparison
 {
@@ -23,48 +13,87 @@ enum Comparison
 	JUMP_GTE
 };
 
-struct HLNode
+enum HLNodeType
 {
-	enum Type
-	{
-		NONE,
-		CONSTANT_VALUE,
-		UNARY,
-		BINARY,
-		CONDITIONAL,
-	};
-	Type type;
+	HLNODE_NONE,
+	HLNODE_CONSTANT_VALUE,
+	HLNODE_UNARY,
+	HLNODE_BINARY,
+	HLNODE_CONDITIONAL,
+	HLNODE_STMTLIST,
+	HLNODE_FORLOOP,
+	HLNODE_WHILELOOP,
+	HLNODE_CONST_DECL,
+	HLNODE_MUT_DECL,
 };
 
-struct HLConstantValue : public HLNode
+struct HLNode;
+
+struct HLConstantValue
 {
-	enum { EnumType = CONSTANT_VALUE };
+	enum { EnumType = HLNODE_CONSTANT_VALUE };
 	Val val;
 };
 
-struct HLUnary : public HLNode
+struct HLUnary
 {
-	enum { EnumType = UNARY };
-	HLOp op;
+	enum { EnumType = HLNODE_UNARY };
+	Lexer::TokenType tok;
 	HLNode *rhs;
 };
 
-struct HLBinary : public HLNode
+struct HLBinary
 {
-	enum { EnumType = BINARY };
-	HLOp op;
+	enum { EnumType = HLNODE_BINARY };
+	Lexer::TokenType tok;
 	HLNode *lhs;
 	HLNode *rhs;
 };
 
-struct HLConditional : public HLNode
+struct HLConditional
 {
-	enum { EnumType = CONDITIONAL };
+	enum { EnumType = HLNODE_CONDITIONAL };
 	HLNode *condition;
 	HLNode *ifblock;
 	HLNode *elseblock;
 };
 
+struct HLStmtList
+{
+	enum { EnumType = HLNODE_STMTLIST };
+	size_t used;
+	size_t cap;
+	HLNode **list;
+
+	HLNode *add(HLNode *node, const GaAlloc& ga); // returns node, unless memory allocation fails
+};
+
+struct HLDecl
+{
+	// const is the default, but HLNode::type can be set to HLNODE_MUT_DECL to make mutable
+	enum { EnumType = HLNODE_CONST_DECL }; 
+	HLNode *var;
+	HLNode *type; // if explicitly specified, otherwise NULL to auto-deduce
+	HLNode *value;
+};
+
+// All of the node types intentionally occupy the same memory.
+// This is so that a node type can be easily mutated into another,
+// while keeping pointers intact.
+// This is to make node-based optimization easier.
+struct HLNode
+{
+	HLNodeType type;
+	union
+	{
+		HLConstantValue constant;
+		HLUnary unary;
+		HLBinary binary;
+		HLConditional conditional;
+		HLStmtList stmtlist;
+		HLDecl decl;
+	} u;
+};
 
 
 class HLIRBuilder
@@ -73,10 +102,10 @@ public:
 	HLIRBuilder(const GaAlloc& a);
 	~HLIRBuilder();
 
-	inline HLConstantValue *constantValue() { return allocT<HLConstantValue>(); }
-	inline HLUnary *unary() { return allocT<HLUnary>(); }
-	inline HLBinary *binary() { return allocT<HLBinary>(); }
-	inline HLConditional *conditional() { return allocT<HLConditional>(); }
+	inline HLNode *constantValue() { return allocT<HLConstantValue>(); }
+	inline HLNode *unary() { return allocT<HLUnary>(); }
+	inline HLNode *binary() { return allocT<HLBinary>(); }
+	inline HLNode *conditional() { return allocT<HLConditional>(); }
 
 private:
 	struct Block
@@ -85,10 +114,13 @@ private:
 		size_t used;
 		size_t cap;
 		// payload follows
-		void *alloc(size_t sz);
+		HLNode *alloc();
 	};
-	template<typename T> inline T *allocT() { return (T*)alloc(sizeof(T), HLNode::Type(T::EnumType)); }
-	HLNode *alloc(size_t sz, HLNode::Type ty);
+	template<typename T> inline HLNode *allocT()
+	{
+		return alloc(HLNodeType(T::EnumType));
+	}
+	HLNode *alloc(HLNodeType ty);
 	void clear();
 	Block *allocBlock(size_t sz);
 	GaAlloc galloc;

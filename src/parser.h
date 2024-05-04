@@ -34,10 +34,28 @@ protected:
     HLNode *unary(); // after op
     HLNode *binary(); // after expr
     HLNode *expr();
+    HLNode *stmt();
     HLNode *parsePrecedence(Prec p);
+    HLNode *valblock();
+
+    // control flow
+    HLNode *conditional();
+    HLNode *forloop();
+    HLNode *whileloop();
+    HLNode *assignment();
+    HLNode *decl();
+    HLNode *block();
+    HLNode *returnstmt();
+    HLNode *decl();
+
+    // literal values
     HLNode *litnum();
     HLNode *litstr();
+    HLNode *btrue();
+    HLNode *bfalse();
     HLNode *ident();
+    HLNode *nil();
+    HLNode *tabcons();
 
 
 private:
@@ -46,7 +64,7 @@ private:
     void errorAt(const Lexer::Token& tok, const char *msg);
     void error(const char *msg);
     void errorAtCurrent(const char *msg);
-    HLNode *emitConstant(const Val& v);
+    HLNode *emitConstant(const Val& v); // anything but nil
     void outOfMemory();
 
     Lexer::Token curtok;
@@ -57,7 +75,6 @@ private:
     bool panic;
 
     typedef HLNode* (Parser::*ParseMth)(void);
-    //static const ParseMth NoMth;
 
     struct ParseRule
     {
@@ -65,7 +82,6 @@ private:
         ParseMth prefix;
         ParseMth infix;
         Prec precedence;
-        unsigned param;
     };
 
     static const ParseRule Rules[];

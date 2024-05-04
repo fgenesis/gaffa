@@ -42,6 +42,7 @@ static Val makenum(const char *s, const char *end)
         {
             if(s[1] == 'x' || s[1] == 'X')
                 return parsehex(&s[2], end);
+            // TODO: bin, oct
         }
     }
 
@@ -50,7 +51,7 @@ static Val makenum(const char *s, const char *end)
     {
         const unsigned char c = *s;
         if(c >= '0' && c <= '9')
-            u *= 10u;
+            u = u * 10u + (c - '0');
         else if(c == '.')
             return parsefloat(u, s, end);
         else
@@ -70,16 +71,32 @@ static Val makestr(const char *s, const char *end)
 
 const Parser::ParseRule Parser::Rules[] =
 {
-    { Lexer::TOK_LPAREN, &Parser::grouping, NULL,            Parser::PREC_NONE,  0          },
-    { Lexer::TOK_PLUS  , &Parser::unary,    &Parser::binary, Parser::PREC_ADD,   HLOP_ADD   },
-    { Lexer::TOK_MINUS , &Parser::unary,    &Parser::binary, Parser::PREC_ADD,   HLOP_SUB   },
-    { Lexer::TOK_STAR  , &Parser::unary,    &Parser::binary, Parser::PREC_MUL,   HLOP_MUL   },
-    { Lexer::TOK_SLASH , NULL,              &Parser::binary, Parser::PREC_MUL,   HLOP_DIV   },
-    { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            Parser::PREC_NONE,  0          },
-    { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            Parser::PREC_NONE,  0          },
-    { Lexer::TOK_IDENT , &Parser::ident,    NULL,            Parser::PREC_NONE,  0          },
+    // operators
+    { Lexer::TOK_LPAREN, &Parser::grouping, NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_PLUS  , &Parser::unary,    &Parser::binary, Parser::PREC_ADD   },
+    { Lexer::TOK_MINUS , &Parser::unary,    &Parser::binary, Parser::PREC_ADD   },
+    { Lexer::TOK_STAR  , &Parser::unary,    &Parser::binary, Parser::PREC_MUL   },
+    { Lexer::TOK_EXCL  , &Parser::unary,    &Parser::binary, Parser::PREC_MUL   },
+    { Lexer::TOK_SLASH , NULL,              &Parser::binary, Parser::PREC_MUL   },
 
-    { Lexer::TOK_E_ERROR,NULL,              NULL,            Parser::PREC_NONE,  0 }
+    // control structures
+    { Lexer::TOK_IF,     &Parser::conditional,NULL,          Parser::PREC_NONE  },
+    { Lexer::TOK_FOR,    &Parser::forloop,  NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_WHILE,  &Parser::whileloop,NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_RETURN, &Parser::returnstmt,NULL,           Parser::PREC_NONE  },
+    { Lexer::TOK_FOR,    &Parser::forloop,  NULL,            Parser::PREC_NONE  },
+
+    // values
+    { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_IDENT,  &Parser::ident,    NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_NIL,    &Parser::nil,      NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_TRUE ,  &Parser::btrue,    NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_FALSE , &Parser::bfalse,   NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_LCUR,   &Parser::tabcons,  NULL,            Parser::PREC_NONE  },
+
+    { Lexer::TOK_E_ERROR,NULL,              NULL,            Parser::PREC_NONE, }
 };
 
 const Parser::ParseRule * Parser::GetRule(Lexer::TokenType tok)
@@ -122,12 +139,14 @@ HLNode *Parser::parsePrecedence(Prec p)
         return NULL;
     }
 
-    HLNode *u = (this->*(rule->prefix))();
+    HLNode *node = (this->*(rule->prefix))();
 
     for(;;)
     {
         rule = GetRule(curtok.tt);
-        if(p > rule->precedence)
+
+        // No rule? Stop here, it's probably the end of the expr
+        if(!rule || p > rule->precedence)
             break;
 
         advance();
@@ -136,22 +155,39 @@ HLNode *Parser::parsePrecedence(Prec p)
         if(!infixnode)
             return NULL;
 
-        ((HLBinary*)infixnode)->lhs = u;
-        u = infixnode;
+        assert(infixnode->type == HLNODE_BINARY);
+        infixnode->u.binary.lhs = node;
+        node = infixnode;
     }
-    return u;
+    return node;
 
+}
+
+HLNode* Parser::conditional()
+{
+    return nullptr;
 }
 
 HLNode* Parser::litnum()
 {
-    return emitConstant(makenum(curtok.begin, curtok.begin + curtok.u.len));
+    return emitConstant(makenum(prevtok.begin, prevtok.begin + prevtok.u.len));
 }
 
 HLNode* Parser::litstr()
 {
-    return emitConstant(makestr(curtok.begin, curtok.begin + curtok.u.len));
+    return emitConstant(makestr(prevtok.begin, prevtok.begin + prevtok.u.len));
 }
+
+HLNode* Parser::btrue()
+{
+    return emitConstant(true);
+}
+
+HLNode* Parser::bfalse()
+{
+    return emitConstant(false);
+}
+
 
 HLNode* Parser::ident()
 {
@@ -171,16 +207,16 @@ HLNode *Parser::unary()
     const ParseRule *rule = GetRule(prevtok.tt);
     HLNode *rhs = parsePrecedence(PREC_UNARY);
 
-    HLUnary *u = hlir->unary();
-    if(u)
+    HLNode *node = hlir->unary();
+    if(node)
     {
-        u->op = (HLOp)rule->param;
-        u->rhs = rhs;
+        node->u.unary.tok = rule->tok;
+        node->u.unary.rhs = rhs;
     }
     else
         outOfMemory();
 
-    return u;
+    return node;
 }
 
 HLNode * Parser::binary()
@@ -188,17 +224,17 @@ HLNode * Parser::binary()
     const ParseRule *rule = GetRule(prevtok.tt);
     HLNode *rhs = parsePrecedence((Prec)(rule->precedence + 1));
 
-    HLBinary *u = hlir->binary();
-    if(u)
+    HLNode *node = hlir->binary();
+    if(node)
     {
-        u->op = (HLOp)rule->param;
-        u->rhs = rhs;
+        node->u.binary.tok = rule->tok;
+        node->u.binary.rhs = rhs;
     }
     else
         outOfMemory();
 
     // lhs is assigned by caller
-    return u;
+    return node;
 }
 
 void Parser::advance()
@@ -232,7 +268,7 @@ void Parser::errorAt(const Lexer::Token& tok, const char *msg)
     if(panic)
         return;
 
-    printf("(%s:%u): %s\n", _fn, tok.line, msg);
+    printf("(%s:%u): %s (Token: %s)\n", _fn, tok.line, msg, Lexer::GetTokenText(tok.tt));
 
     hadError = true;
     panic = true;
@@ -248,14 +284,24 @@ void Parser::errorAtCurrent(const char* msg)
     errorAt(curtok, msg);
 }
 
+HLNode *Parser::nil()
+{
+    HLNode *node = hlir->constantValue();
+    node->u.constant.val.type = PRIMTYPE_NIL;
+    return node;
+}
+
 HLNode *Parser::emitConstant(const Val& v)
 {
-    HLConstantValue *u = hlir->constantValue();
-    if(u)
-        u->val = v;
+    if(v.type == PRIMTYPE_NIL)
+        return NULL;
+
+    HLNode *node = hlir->constantValue();
+    if(node)
+        node->u.constant.val = v;
     else
         outOfMemory();
-    return u;
+    return node;
 }
 
 void Parser::outOfMemory()

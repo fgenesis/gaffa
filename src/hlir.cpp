@@ -13,21 +13,21 @@ HLIRBuilder::~HLIRBuilder()
 	clear();
 }
 
-HLNode* HLIRBuilder::alloc(size_t sz, HLNode::Type ty)
+HLNode* HLIRBuilder::alloc(HLNodeType ty)
 {
 	for(;;)
 	{
 		if(b)
 		{
-			HLNode *p = (HLNode*)b->alloc(sz);
+			HLNode *p = b->alloc();
 			if(p)
 			{
 				p->type = ty;
-				memset((char*)p + sizeof(p->type), 0, sz - sizeof(p->type));
+				memset(&p->u, 0, sizeof(p->u));
 				return p;
 			}
 		}
-		Block *newb = allocBlock(b ? b->cap * 2 : 64 * sizeof(void*));
+		Block *newb = allocBlock(b ? b->cap * 2 : 16 * sizeof(HLNode));
 		if(newb)
 		{
 			newb->prev = b;
@@ -64,12 +64,28 @@ HLIRBuilder::Block* HLIRBuilder::allocBlock(size_t sz)
 	return newb;
 }
 
-void* HLIRBuilder::Block::alloc(size_t sz)
+HLNode* HLIRBuilder::Block::alloc()
 {
 	size_t avail = cap - used;
-	if(avail < sz)
+	if(avail < sizeof(HLNode))
 		return NULL;
 	void *p = (char*)this + used;
-	used += sz;
-	return p;
+	used += sizeof(HLNode);
+	return (HLNode*)p;
+}
+
+HLNode *HLStmtList::add(HLNode* node, const GaAlloc& ga)
+{
+	if(used == cap)
+	{
+		const size_t newcap = 8 + (2 * cap) * sizeof(HLNode*);
+		HLNode **newlist = (HLNode**)ga.alloc(ga.ud, list, cap * sizeof(HLNode*), newcap);
+		if(!newlist)
+			return NULL;
+		list = newlist;
+		cap = newcap;
+	}
+
+	list[used++] = node;
+	return node;
 }

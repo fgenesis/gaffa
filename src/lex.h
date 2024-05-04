@@ -49,6 +49,7 @@ public:
         TOK_BITOR,  // |
         TOK_LOGAND, // &&
         TOK_LOGOR,  // ||
+        TOK_DOLLAR, // $
         // keywords
         TOK_NIL,    // nil
         TOK_TRUE,   // true

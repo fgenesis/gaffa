@@ -48,6 +48,7 @@ static const ShortEntry ShortTab[] =
     { "||", Lexer::TOK_LOGOR   },
     { "&",  Lexer::TOK_BITAND  },
     { "|",  Lexer::TOK_BITOR   },
+    { "$",  Lexer::TOK_DOLLAR  },
 };
 
 struct Keyword
@@ -71,8 +72,8 @@ static const Keyword Keywords[] =
     { "break",     Lexer::TOK_BREAK    },
     { "return",    Lexer::TOK_RETURN   },
     { "continue",  Lexer::TOK_CONTINUE },
-    { "and",       Lexer::TOK_AND },
-    { "or",        Lexer::TOK_OR },
+    { "and",       Lexer::TOK_AND      },
+    { "or",        Lexer::TOK_OR       },
 };
 
 

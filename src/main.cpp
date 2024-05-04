@@ -82,7 +82,7 @@ int main(int argc, char **argv)
         printf("Error stack:\n");
         for(size_t i = 0; i < p._errors.size(); ++i)
             puts(p._errors[i].c_str());
-        return 2;
+        return 2;>
     }
     */
 
