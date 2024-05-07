@@ -1,11 +1,12 @@
 #pragma once
 
 #include "lex.h"
+#include "gainternal.h"
 
 class HLIRBuilder;
 struct HLNode;
 
-class Parser
+class Parser : public GaAlloc
 {
 public:
     enum Prec
@@ -35,18 +36,17 @@ protected:
     HLNode *binary(); // after expr
     HLNode *expr();
     HLNode *stmt();
-    HLNode *parsePrecedence(Prec p);
-    HLNode *valblock();
+
+    HLNode *valblock(); // after $
 
     // control flow
     HLNode *conditional();
     HLNode *forloop();
     HLNode *whileloop();
     HLNode *assignment();
-    HLNode *decl();
+    HLNode *declOrStmt();
     HLNode *block();
     HLNode *returnstmt();
-    HLNode *decl();
 
     // literal values
     HLNode *litnum();
@@ -55,12 +55,16 @@ protected:
     HLNode *bfalse();
     HLNode *ident();
     HLNode *nil();
-    HLNode *tabcons();
+    HLNode *tablecons();
 
+    HLNode *stmtlist(Lexer::TokenType endtok);
 
 private:
     void advance();
+    HLNode *parsePrecedence(Prec p);
     void eat(Lexer::TokenType tt);
+    bool tryeat(Lexer::TokenType tt);
+    bool match(Lexer::TokenType tt);
     void errorAt(const Lexer::Token& tok, const char *msg);
     void error(const char *msg);
     void errorAtCurrent(const char *msg);

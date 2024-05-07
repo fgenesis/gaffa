@@ -71,7 +71,7 @@ struct HLStmtList
 struct HLDecl
 {
 	// const is the default, but HLNode::type can be set to HLNODE_MUT_DECL to make mutable
-	enum { EnumType = HLNODE_CONST_DECL }; 
+	enum { EnumType = HLNODE_CONST_DECL };
 	HLNode *var;
 	HLNode *type; // if explicitly specified, otherwise NULL to auto-deduce
 	HLNode *value;
@@ -106,6 +106,7 @@ public:
 	inline HLNode *unary() { return allocT<HLUnary>(); }
 	inline HLNode *binary() { return allocT<HLBinary>(); }
 	inline HLNode *conditional() { return allocT<HLConditional>(); }
+	inline HLNode *stmtlist() { return allocT<HLStmtList>(); }
 
 private:
 	struct Block

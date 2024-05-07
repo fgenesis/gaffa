@@ -118,15 +118,21 @@ Parser::Parser(Lexer* lex, const char *fn)
 HLNode *Parser::parse()
 {
     advance();
-    HLNode *p = expr();
-    eat(Lexer::TOK_E_EOF);
 
-    return !hadError ? p : NULL;
+    HLNode *root = stmtlist(Lexer::TOK_E_EOF);
+
+    return !hadError ? root : NULL;
 }
 
 HLNode *Parser::expr()
 {
     return parsePrecedence(PREC_ASSIGNMENT);
+}
+
+// does not include declarations: if(x) stmt (without {})
+HLNode* Parser::stmt()
+{
+    return nullptr;
 }
 
 HLNode *Parser::parsePrecedence(Prec p)
@@ -163,9 +169,55 @@ HLNode *Parser::parsePrecedence(Prec p)
 
 }
 
+HLNode* Parser::valblock()
+{
+    eat(Lexer::TOK_LCUR);
+    return block();
+}
+
 HLNode* Parser::conditional()
 {
     return nullptr;
+}
+
+HLNode* Parser::forloop()
+{
+    return nullptr;
+}
+
+HLNode* Parser::whileloop()
+{
+    return nullptr;
+}
+
+HLNode* Parser::assignment()
+{
+    return nullptr;
+}
+
+HLNode* Parser::returnstmt()
+{
+    return nullptr;
+}
+
+HLNode* Parser::declOrStmt()
+{
+    stmt();
+}
+
+HLNode* Parser::block()
+{
+    for(;;)
+    {
+        if(prevtok.tt == Lexer::TOK_E_ERROR)
+            break;
+
+        if(match(Lexer::TOK_RCUR))
+            break;
+
+
+        declOrStmt();
+    }
 }
 
 HLNode* Parser::litnum()
@@ -263,6 +315,18 @@ void Parser::eat(Lexer::TokenType tt)
     errorAtCurrent(&buf[0]);
 }
 
+bool Parser::tryeat(Lexer::TokenType tt)
+{
+  if(!match(tt))
+      return false;
+  advance();
+  return true;
+}
+bool Parser::match(Lexer::TokenType tt)
+{
+    return curtok.tt == tt;
+}
+
 void Parser::errorAt(const Lexer::Token& tok, const char *msg)
 {
     if(panic)
@@ -289,6 +353,26 @@ HLNode *Parser::nil()
     HLNode *node = hlir->constantValue();
     node->u.constant.val.type = PRIMTYPE_NIL;
     return node;
+}
+
+HLNode* Parser::tablecons()
+{
+    return nullptr;
+}
+
+HLNode* Parser::stmtlist(Lexer::TokenType endtok)
+{
+    HLNode *sl = hlir->stmtlist();
+    if(sl)
+        while(!match(endtok))
+        {
+            HLNode *p = declOrStmt();
+            if(p)
+                sl->u.stmtlist.add(p, *this);
+            else
+                break;
+        }
+    return sl;
 }
 
 HLNode *Parser::emitConstant(const Val& v)
