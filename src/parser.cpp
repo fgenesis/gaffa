@@ -78,13 +78,12 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_STAR  , &Parser::unary,    &Parser::binary, Parser::PREC_MUL   },
     { Lexer::TOK_EXCL  , &Parser::unary,    &Parser::binary, Parser::PREC_MUL   },
     { Lexer::TOK_SLASH , NULL,              &Parser::binary, Parser::PREC_MUL   },
+    { Lexer::TOK_QQM,    &Parser::unary,    NULL,            Parser::PREC_UNARY  },
 
     // control structures
     { Lexer::TOK_IF,     &Parser::conditional,NULL,          Parser::PREC_NONE  },
     { Lexer::TOK_FOR,    &Parser::forloop,  NULL,            Parser::PREC_NONE  },
     { Lexer::TOK_WHILE,  &Parser::whileloop,NULL,            Parser::PREC_NONE  },
-    { Lexer::TOK_RETURN, &Parser::returnstmt,NULL,           Parser::PREC_NONE  },
-    { Lexer::TOK_FOR,    &Parser::forloop,  NULL,            Parser::PREC_NONE  },
 
     // values
     { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            Parser::PREC_NONE  },
@@ -94,7 +93,7 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_TRUE ,  &Parser::btrue,    NULL,            Parser::PREC_NONE  },
     { Lexer::TOK_FALSE , &Parser::bfalse,   NULL,            Parser::PREC_NONE  },
     { Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            Parser::PREC_NONE  },
-    { Lexer::TOK_LCUR,   &Parser::tabcons,  NULL,            Parser::PREC_NONE  },
+    { Lexer::TOK_LCUR,   &Parser::tablecons,NULL,            Parser::PREC_NONE  },
 
     { Lexer::TOK_E_ERROR,NULL,              NULL,            Parser::PREC_NONE, }
 };
@@ -132,7 +131,84 @@ HLNode *Parser::expr()
 // does not include declarations: if(x) stmt (without {})
 HLNode* Parser::stmt()
 {
-    return nullptr;
+    advance();
+    return _stmtNoAdvance();
+}
+
+HLNode* Parser::_stmtNoAdvance()
+{
+    HLNode *ret = NULL;
+    HLNode *exp;
+    switch(prevtok.tt)
+    {
+        case Lexer::TOK_RETURN:
+            ret = hlir->retn();
+            ret->u.retn.what = expr();
+            break;
+
+        case Lexer::TOK_LCUR:
+            ret = block();
+            eat(Lexer::TOK_RCUR);
+            break;
+
+        case Lexer::TOK_CONTINUE:
+            ret = hlir->continu();
+            break;
+
+        case Lexer::TOK_BREAK:
+            ret = hlir->brk();
+            break;
+
+        case Lexer::TOK_LPAREN: // expression as statement -> same as single identifier
+            exp = expr();
+            goto asexpr;
+
+        case Lexer::TOK_IDENT:
+        {
+            exp = _ident(prevtok);
+            switch(curtok.tt)
+            {
+                case Lexer::TOK_CASSIGN: // x =
+                case Lexer::TOK_MASSIGN: // x :=
+                {
+                    ret = hlir->assignment();
+                    HLNode *idents = hlir->list();
+                    idents->u.list.add(exp, *this);
+                    ret->u.assignment.identlist = idents;
+                    ret->u.assignment.vallist = _assignmentWithPrefix();
+                }
+                break;
+
+                case Lexer::TOK_COMMA: // x, y =
+                {
+                    ret = hlir->assignment();
+                    HLNode *idents = hlir->list();
+                    idents->u.list.add(exp, *this);
+                    advance();
+                    do
+                        idents->u.list.add(ident(), *this);
+                    while(tryeat(Lexer::TOK_COMMA));
+                    ret->u.assignment.identlist = idents;
+                    ret->u.assignment.vallist = _assignmentWithPrefix();
+                }
+                break;
+
+                default: // single identifier, probably followed by ( to make a function call
+                asexpr:
+                {
+                    ret = hlir->fncall();
+                    ret->u.fncall.func = exp;
+                    ret->u.fncall.paramlist = _paramlist();
+                }
+            }
+        }
+        break;
+
+        default:
+            errorAtCurrent("can't parse as statement");
+    }
+
+    return ret;
 }
 
 HLNode *Parser::parsePrecedence(Prec p)
@@ -177,36 +253,144 @@ HLNode* Parser::valblock()
 
 HLNode* Parser::conditional()
 {
-    return nullptr;
+    // 'if' was consumed
+    HLNode *node = hlir->conditional();
+    eat(Lexer::TOK_LPAREN);
+    node->u.conditional.condition = expr();
+    eat(Lexer::TOK_RPAREN);
+    node->u.conditional.ifblock = stmt();
+    node->u.conditional.elseblock = tryeat(Lexer::TOK_ELSE) ? stmt() : NULL;
+    return node;
 }
 
 HLNode* Parser::forloop()
 {
-    return nullptr;
+    // 'for' was consumed
+    HLNode *node = hlir->forloop();
+    eat(Lexer::TOK_LPAREN);
+    node->u.forloop.iter = iterexpr();
+    eat(Lexer::TOK_RPAREN);
+    node->u.forloop.body = stmt();
+    return node;
 }
 
 HLNode* Parser::whileloop()
 {
-    return nullptr;
+    // 'while' was consumed
+    HLNode *node = hlir->whileloop();
+    eat(Lexer::TOK_LPAREN);
+    node->u.whileloop.cond = expr();
+    eat(Lexer::TOK_RPAREN);
+    node->u.whileloop.body = stmt();
+    return node;
 }
 
-HLNode* Parser::assignment()
+HLNode* Parser::_assignment(bool isconst)
 {
-    return nullptr;
+    // '='´or ':=' was consumed
+    HLNode *list = hlir->list();
+    do
+        list->u.list.add(expr(), *this);
+    while(tryeat(Lexer::TOK_COMMA));
+    return list;
 }
 
-HLNode* Parser::returnstmt()
+HLNode* Parser::_assignmentWithPrefix()
 {
-    return nullptr;
+    bool isconst = !tryeat(Lexer::TOK_MASSIGN);
+    if(!isconst)
+        eat(Lexer::TOK_CASSIGN);
+    return _assignment(isconst);
+}
+
+// var x, y
+// var x:int, y:float
+HLNode* Parser::_vardecllist()
+{
+    // 'var' already consumed
+    HLNode *node = hlir->list();
+    do
+    {
+        HLNode *def = hlir->vardef();
+        def->u.vardef.ident = ident();
+        if(tryeat(Lexer::TOK_COLON))
+            def->u.vardef.type = expr();
+        node->u.list.add(def, *this);
+    }
+    while(tryeat(Lexer::TOK_COMMA));
+    return node;
+}
+
+// int x, blah y, T z
+// int a, float z
+// T a, b, Q c, d, e
+HLNode* Parser::_cdecllist()
+{
+    HLNode *node = hlir->list();
+    HLNode *lasttype = NULL;
+    for(;;)
+    {
+        HLNode *def = hlir->vardef();
+        HLNode *id = ident();
+        if(lasttype && tryeat(Lexer::TOK_COLON))
+        {
+            def->u.vardef.type = lasttype;
+            def->u.vardef.ident = id;
+        }
+        else
+        {
+            def->u.vardef.type = id;
+            def->u.vardef.ident = ident();
+        }
+        node->u.list.add(def, *this);
+    }
+    return node;
+}
+
+HLNode* Parser::_paramlist()
+{
+    eat(Lexer::TOK_LPAREN);
+    HLNode *ret = _exprlist();
+    eat(Lexer::TOK_RPAREN);
+    return ret;
+}
+
+HLNode* Parser::_exprlist()
+{
+    HLNode *node = hlir->list();
+    do
+        node->u.list.add(expr(), *this);
+    while(tryeat(Lexer::TOK_COMMA));
+    return node;
 }
 
 HLNode* Parser::declOrStmt()
 {
-    stmt();
+    advance();
+
+    // var i ('var' + ident...)
+    if(prevtok.tt == Lexer::TOK_VAR)
+    {
+        HLNode *node = hlir->vardecllist();
+        node->u.vardecllist.decllist = _vardecllist();
+        node->u.vardecllist.vallist = _assignmentWithPrefix();
+        return node;
+    }
+    // int i (2 identifiers)
+    if(prevtok.tt == Lexer::TOK_IDENT && curtok.tt == Lexer::TOK_IDENT)
+    {
+        HLNode *node = hlir->vardecllist();
+        node->u.vardecllist.decllist = _cdecllist();
+        node->u.vardecllist.vallist = _assignmentWithPrefix();
+        return node;
+    }
+
+    return _stmtNoAdvance();
 }
 
 HLNode* Parser::block()
 {
+    HLNode *node = hlir->list();
     for(;;)
     {
         if(prevtok.tt == Lexer::TOK_E_ERROR)
@@ -215,9 +399,10 @@ HLNode* Parser::block()
         if(match(Lexer::TOK_RCUR))
             break;
 
-
-        declOrStmt();
+        HLNode *stmt = declOrStmt();
+        node->u.list.add(stmt, *this);
     }
+    return node;
 }
 
 HLNode* Parser::litnum()
@@ -243,7 +428,9 @@ HLNode* Parser::bfalse()
 
 HLNode* Parser::ident()
 {
-    return NULL; // TODO
+    HLNode *node = _ident(curtok);
+    advance();
+    return node;
 }
 
 HLNode *Parser::grouping()
@@ -360,15 +547,34 @@ HLNode* Parser::tablecons()
     return nullptr;
 }
 
+HLNode* Parser::_ident(const Lexer::Token& tok)
+{
+    if(tok.tt != Lexer::TOK_IDENT)
+    {
+        errorAt(tok, "expected identifier");
+        return NULL;
+    }
+
+    HLNode *node = hlir->ident();
+    node->u.ident.begin = tok.begin;
+    node->u.ident.len   = tok.u.len;
+    return node;
+}
+
+HLNode* Parser::iterexpr()
+{
+    return nullptr;
+}
+
 HLNode* Parser::stmtlist(Lexer::TokenType endtok)
 {
-    HLNode *sl = hlir->stmtlist();
+    HLNode *sl = hlir->list();
     if(sl)
         while(!match(endtok))
         {
             HLNode *p = declOrStmt();
             if(p)
-                sl->u.stmtlist.add(p, *this);
+                sl->u.list.add(p, *this);
             else
                 break;
         }

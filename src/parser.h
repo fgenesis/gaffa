@@ -17,8 +17,8 @@ public:
         PREC_AND,         // and
         PREC_EQUALITY,    // == !=
         PREC_COMPARISON,  // < > <= >=
-        PREC_ADD,        // + -
-        PREC_MUL,      // * /
+        PREC_ADD,         // + -
+        PREC_MUL,         // * /
         PREC_UNARY,       // ! - #
         PREC_CALL,        // . ()
         PREC_PRIMARY
@@ -36,17 +36,23 @@ protected:
     HLNode *binary(); // after expr
     HLNode *expr();
     HLNode *stmt();
+    HLNode *_stmtNoAdvance();
 
     HLNode *valblock(); // after $
 
     // control flow
-    HLNode *conditional();
+    HLNode *conditional(); // after if
     HLNode *forloop();
     HLNode *whileloop();
-    HLNode *assignment();
+    HLNode *_assignment(bool isconst);
+    HLNode *_assignmentWithPrefix();
+    HLNode *_vardecllist();
+    HLNode *_cdecllist();
+    HLNode *_paramlist(); // after ident
+
+    HLNode *_exprlist();
     HLNode *declOrStmt();
     HLNode *block();
-    HLNode *returnstmt();
 
     // literal values
     HLNode *litnum();
@@ -56,6 +62,9 @@ protected:
     HLNode *ident();
     HLNode *nil();
     HLNode *tablecons();
+    HLNode *_ident(const Lexer::Token& tok);
+
+    HLNode *iterexpr();
 
     HLNode *stmtlist(Lexer::TokenType endtok);
 

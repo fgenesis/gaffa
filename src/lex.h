@@ -21,7 +21,7 @@ public:
         TOK_MINUS,  // -
         TOK_STAR,   // *
         TOK_SLASH,  // /
-        TOK_ASSIGN, // =
+        TOK_CASSIGN,// =
         TOK_MASSIGN,// :=
         TOK_EQ,     // ==
         TOK_NEQ,    // !=
@@ -30,6 +30,7 @@ public:
         TOK_LTE,    // <=
         TOK_GTE,    // >=
         TOK_FATARROW,// =>
+        TOK_QQM,    // ??
         TOK_QM,     // ?
         TOK_EXCL,   // !
         TOK_DOT,    // .

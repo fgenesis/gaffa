@@ -20,11 +20,16 @@ enum HLNodeType
 	HLNODE_UNARY,
 	HLNODE_BINARY,
 	HLNODE_CONDITIONAL,
-	HLNODE_STMTLIST,
+	HLNODE_LIST,
 	HLNODE_FORLOOP,
 	HLNODE_WHILELOOP,
-	HLNODE_CONST_DECL,
-	HLNODE_MUT_DECL,
+	HLNODE_ASSIGNMENT,
+	HLNODE_VARDECLASSIGN,
+	HLNODE_VARDEF,
+	HLNODE_DECLLIST,
+	HLNODE_RETURN,
+	HLNODE_CALL,
+	HLNODE_IDENT,
 };
 
 struct HLNode;
@@ -58,9 +63,23 @@ struct HLConditional
 	HLNode *elseblock;
 };
 
-struct HLStmtList
+struct HLForLoop
 {
-	enum { EnumType = HLNODE_STMTLIST };
+	enum { EnumType = HLNODE_FORLOOP };
+	HLNode *iter;
+	HLNode *body;
+};
+
+struct HLWhileLoop
+{
+	enum { EnumType = HLNODE_WHILELOOP };
+	HLNode *cond;
+	HLNode *body;
+};
+
+struct HLList
+{
+	enum { EnumType = HLNODE_LIST };
 	size_t used;
 	size_t cap;
 	HLNode **list;
@@ -68,13 +87,53 @@ struct HLStmtList
 	HLNode *add(HLNode *node, const GaAlloc& ga); // returns node, unless memory allocation fails
 };
 
-struct HLDecl
+struct HLVarDef
+{
+	enum { EnumType = HLNODE_VARDEF };
+	HLNode *ident;
+	HLNode *type;
+};
+
+struct HLVarDeclList
 {
 	// const is the default, but HLNode::type can be set to HLNODE_MUT_DECL to make mutable
-	enum { EnumType = HLNODE_CONST_DECL };
-	HLNode *var;
-	HLNode *type; // if explicitly specified, otherwise NULL to auto-deduce
-	HLNode *value;
+	enum { EnumType = HLNODE_VARDECLASSIGN };
+	HLNode *decllist;
+	HLNode *vallist;
+};
+
+struct HLAssignment
+{
+	// const is the default, but HLNode::type can be set to HLNODE_MUT_DECL to make mutable
+	enum { EnumType = HLNODE_ASSIGNMENT };
+	HLNode *identlist;
+	HLNode *vallist;
+};
+
+struct HLReturn
+{
+	enum { EnumType = HLNODE_RETURN };
+	HLNode *what;
+};
+
+struct HLBranchAlways
+{
+	enum { EnumType = HLNODE_NONE };
+	HLNode *target;
+};
+
+struct HLFnCall
+{
+	enum { EnumType = HLNODE_CALL };
+	HLNode *func;
+	HLNode *paramlist;
+};
+
+struct HLIdent
+{
+	enum { EnumType = HLNODE_IDENT };
+	const char *begin;
+	size_t len;
 };
 
 // All of the node types intentionally occupy the same memory.
@@ -90,8 +149,16 @@ struct HLNode
 		HLUnary unary;
 		HLBinary binary;
 		HLConditional conditional;
-		HLStmtList stmtlist;
-		HLDecl decl;
+		HLList list;
+		HLIdent ident;
+		HLAssignment assignment;
+		HLVarDeclList vardecllist;
+		HLVarDef vardef;
+		HLForLoop forloop;
+		HLWhileLoop whileloop;
+		HLReturn retn;
+		HLBranchAlways branch;
+		HLFnCall fncall;
 	} u;
 };
 
@@ -103,10 +170,21 @@ public:
 	~HLIRBuilder();
 
 	inline HLNode *constantValue() { return allocT<HLConstantValue>(); }
-	inline HLNode *unary() { return allocT<HLUnary>(); }
-	inline HLNode *binary() { return allocT<HLBinary>(); }
-	inline HLNode *conditional() { return allocT<HLConditional>(); }
-	inline HLNode *stmtlist() { return allocT<HLStmtList>(); }
+	inline HLNode *unary()         { return allocT<HLUnary>();         }
+	inline HLNode *binary()        { return allocT<HLBinary>();        }
+	inline HLNode *conditional()   { return allocT<HLConditional>();   }
+	inline HLNode *list()          { return allocT<HLList>();          }
+	inline HLNode *forloop()       { return allocT<HLForLoop>();       }
+	inline HLNode *whileloop()     { return allocT<HLWhileLoop>();     }
+	inline HLNode *assignment()    { return allocT<HLAssignment>();   }
+	inline HLNode *vardecllist()   { return allocT<HLVarDeclList>();   }
+	inline HLNode *vardef()        { return allocT<HLVarDef>();        }
+	inline HLNode *retn()          { return allocT<HLReturn>();        }
+	inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
+	inline HLNode *brk()           { return allocT<HLBranchAlways>();  }
+	inline HLNode *fncall()        { return allocT<HLFnCall>();  }
+	inline HLNode *ident()         { return allocT<HLIdent>();  }
+
 
 private:
 	struct Block
@@ -117,9 +195,9 @@ private:
 		// payload follows
 		HLNode *alloc();
 	};
-	template<typename T> inline HLNode *allocT()
+	template<typename T> inline HLNode *allocT(HLNodeType ty = HLNodeType(T::EnumType))
 	{
-		return alloc(HLNodeType(T::EnumType));
+		return alloc(ty);
 	}
 	HLNode *alloc(HLNodeType ty);
 	void clear();

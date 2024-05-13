@@ -26,13 +26,14 @@ static const ShortEntry ShortTab[] =
     { "<<", Lexer::TOK_SHL,    },
     { "==", Lexer::TOK_EQ,     },
     { "=>", Lexer::TOK_FATARROW},
-    { "=",  Lexer::TOK_ASSIGN, },
-    { ":=", Lexer::TOK_MASSIGN,},
+    { "=",  Lexer::TOK_CASSIGN },
+    { ":=", Lexer::TOK_MASSIGN },
     { "!=", Lexer::TOK_NEQ,    },
     { "<=", Lexer::TOK_LTE,    },
     { ">=", Lexer::TOK_GTE,    },
     { "<",  Lexer::TOK_LT,     },
     { ">",  Lexer::TOK_GT,     },
+    { "??", Lexer::TOK_QQM,    },
     { "?",  Lexer::TOK_QM,     },
     { ",",  Lexer::TOK_COMMA,  },
     { "::", Lexer::TOK_DBLCOLON},
@@ -209,7 +210,7 @@ Lexer::Token Lexer::next()
     const char c = *p;
     if(c >= 'a' && c <= 'z') // keyword or ident
     {
-        // keyword (all keywords are lowercase
+        // keyword (all keywords are lowercase)
         for(size_t i = 0; i < Countof(Keywords); ++i)
             if(unsigned len = match(p, Keywords[i].kw))
                 return tok(Keywords[i].tt, p, p+len);

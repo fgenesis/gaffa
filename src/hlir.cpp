@@ -74,7 +74,7 @@ HLNode* HLIRBuilder::Block::alloc()
 	return (HLNode*)p;
 }
 
-HLNode *HLStmtList::add(HLNode* node, const GaAlloc& ga)
+HLNode *HLList::add(HLNode* node, const GaAlloc& ga)
 {
 	if(used == cap)
 	{
