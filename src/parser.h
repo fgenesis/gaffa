@@ -5,6 +5,7 @@
 
 class HLIRBuilder;
 struct HLNode;
+class StringPool;
 
 class Parser : public GaAlloc
 {
@@ -24,11 +25,12 @@ public:
         PREC_PRIMARY
     };
 
-    Parser(Lexer *lex, const char *fn);
+    Parser(Lexer *lex, const char *fn, const GaAlloc& ga, StringPool& strpool);
     HLNode *parse();
     //std::vector<Val> constants;
 
     HLIRBuilder *hlir;
+    StringPool& strpool;
 
 protected:
     HLNode *grouping(); // after (
@@ -46,8 +48,7 @@ protected:
     HLNode *whileloop();
     HLNode *_assignment(bool isconst);
     HLNode *_assignmentWithPrefix();
-    HLNode *_vardecllist();
-    HLNode *_cdecllist();
+    HLNode *_decllist();
     HLNode *_paramlist(); // after ident
 
     HLNode *_exprlist();
@@ -79,6 +80,7 @@ private:
     void errorAtCurrent(const char *msg);
     HLNode *emitConstant(const Val& v); // anything but nil
     void outOfMemory();
+    Val makestr(const char *s, const char *end);
 
     Lexer::Token curtok;
     Lexer::Token prevtok;

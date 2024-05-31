@@ -18,35 +18,43 @@ enum Constants
 enum TypeBits
 {
     TB_OPTION     = 1u << (sizeof(unsigned) - 1u), // is option type
-    TB_VEC        = 1u << (sizeof(unsigned) - 2u), // is vector type
-    PRIMTYPE_MASK = (~0u >> 2u)
+    TB_ARRAY        = 1u << (sizeof(unsigned) - 2u), // is array of type
+    PRIMTYPE_MASK = 0xff
 };
 
 enum PrimType
 {
-    PRIMTYPE_POISON = -1,   // if this ever reaches codegen, abort
-    PRIMTYPE_UNK    = 0,    // unresolved type; used for type inference
-
-    PRIMTYPE_TYPE,          // types have this type
-
-    PRIMTYPE_ANY,           // can hold any value
     PRIMTYPE_NIL,
     PRIMTYPE_BOOL,
-    PRIMTYPE_SINT,
     PRIMTYPE_UINT,
+    PRIMTYPE_SINT,
     PRIMTYPE_FLOAT,
     PRIMTYPE_STRING,
+    PRIMTYPE_TYPE,          // types have this type
     PRIMTYPE_TABLE,
+    PRIMTYPE_STRUCTTYPE,
+    PRIMTYPE_ANY,           // can hold any value
 };
 
-struct _Any {};
 struct _Nil {};
-struct _Type {};
-struct _Poison {};
-struct _Str
+
+struct Str
 {
-    _Str(unsigned id) : id(id) {}
-    const unsigned id;
+    size_t id;
+    size_t len;
+};
+
+struct Type
+{
+    unsigned pt;        // Primtype | TypeBits
+    unsigned nameStrId; // if the type has a known name, it goes here
+    Type *list;         // if the type is PRIMTYPE_STRUCTTYPE, this has the subtypes
+};
+
+template<typename T>
+struct Range
+{
+    T begin, end, step;
 };
 
 struct Val
@@ -55,17 +63,15 @@ struct Val
     inline Val(bool b): type(PRIMTYPE_BOOL) { u.ui = b; }
     inline Val(unsigned int i): type(PRIMTYPE_UINT) { u.ui = i; }
     inline Val(int i): type(PRIMTYPE_SINT) { u.si = i; }
-    inline Val(uint i): type(PRIMTYPE_UINT) { u.ui = i; }
-    inline Val(sint i): type(PRIMTYPE_SINT) { u.si = i; }
+    inline Val(uint i, _Nil _ = _Nil()): type(PRIMTYPE_UINT) { u.ui = i; }
+    inline Val(sint i, _Nil _ = _Nil()): type(PRIMTYPE_SINT) { u.si = i; }
     inline Val(real f): type(PRIMTYPE_FLOAT) { u.f = f; }
-    inline Val(_Any): type(PRIMTYPE_ANY) { u.ui = 0; }
-    inline Val(_Type): type(PRIMTYPE_TYPE) { u.ui = 0; }
-    inline Val(_Poison): type(PRIMTYPE_POISON) { u.ui = 0; }
     inline Val(_Nil): type(PRIMTYPE_NIL) { u.ui = 0; }
-    inline Val(_Str s): type(PRIMTYPE_STRING) { u.strid = s.id; }
+    inline Val(Str s): type(PRIMTYPE_STRING) { u.str = s; }
+    inline Val(Type t): type(PRIMTYPE_TYPE) { u.t = t; }
 
-
-    unsigned type;
+    // This must not be PRIMTYPE_ANY.
+    unsigned type; // PrimType | TypeBits
 
     union
     {
@@ -73,6 +79,17 @@ struct Val
         uint ui;
         real f;
         void *p;
-        unsigned strid;
+        Str str;
+        Range<uint> urange;
+        Range<sint> srange;
+        Range<real> frange;
+        Type t;
     } u;
+};
+
+// Dynamic value, has a runtime type attached
+struct DVal
+{
+    Val v;
+    Type *t;
 };

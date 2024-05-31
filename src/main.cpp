@@ -5,6 +5,8 @@
 #include "parser.h"
 #include "hlir.h"
 #include "gainternal.h"
+#include "strings.h"
+
 
 static char s_content[64*1024];
 
@@ -61,8 +63,9 @@ int main(int argc, char **argv)
 
     lexall(code);
 
+    StringPool strtab;
     Lexer lex(code);
-    Parser pp(&lex, "test");
+    Parser pp(&lex, "test", ga);
     HLIRBuilder hb(ga);
     pp.hlir = &hb;
     HLNode *node = pp.parse();

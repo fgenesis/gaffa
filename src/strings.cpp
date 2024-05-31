@@ -1,55 +1,70 @@
 #include "strings.h"
 #include <string.h>
 
-unsigned StringPool::put(const char* s)
+static const Str None {0, 0};
+
+
+Str StringPool::put(const char* s)
 {
     if(!s)
-        return 0;
+        return None;
 
     return put(s, strlen(s));
 }
 
-unsigned StringPool::put(const char* s, size_t n)
+Str StringPool::put(const char* s, size_t n)
 {
     if(!s)
-        return 0;
+        return None;
 
-    unsigned id = get(s, n);
-    if(id)
-        return id;
-
-    _pool.push_back(std::string(s, s+n));
-    return _pool.size();
+    Str ret = get(s, n);
+    if(!ret.id)
+    {
+        _pool.push_back(std::string(s, s+n));
+        ret.id = _pool.size();
+        ret.len = n;
+    }
+    return ret;
 
 }
 
-unsigned StringPool::put(const std::string& s)
+Str StringPool::put(const std::string& s)
 {
     return put(s.c_str(), s.size());
 }
 
-unsigned StringPool::get(const char* s) const
+Str StringPool::get(const char* s) const
 {
-    return s ? get(s, strlen(s)) : 0;
+    return s ? get(s, strlen(s)) : None;
 }
 
-unsigned StringPool::get(const char* s, size_t n) const
+Str StringPool::get(const char* s, size_t n) const
 {
     if(!s)
-        return 0;
+        return None;
 
     const size_t N = _pool.size();
     for(size_t i = 0; i < N; ++i)
     {
         const std::string& x = _pool[i];
         if(x.size() == n && !memcmp(s, x.c_str(), n))
-            return i+1;
+        {
+            Str ret;
+            ret.id = i+1;
+            ret.len = n;
+            return ret;
+        }
     }
 
-    return 0;
+    return None;
 }
 
-unsigned StringPool::get(const std::string& s) const
+Str StringPool::get(const std::string& s) const
 {
     return get(s.c_str(), s.size());
+}
+
+const std::string& StringPool::lookup(size_t id) const
+{
+    return _pool[id];
 }

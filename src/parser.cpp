@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include "hlir.h"
+#include "strings.h"
 
 
 static Val parsefloat(uint intpart, const char *s, const char *end)
@@ -63,9 +64,10 @@ static Val makenum(const char *s, const char *end)
     return u;
 }
 
-static Val makestr(const char *s, const char *end)
+Val Parser::makestr(const char *s, const char *end)
 {
-    return Val(_Str(0)); // TODO
+    Str q = strpool.put(s, end - s + 1);
+    return Val(q);
 }
 
 
@@ -81,9 +83,9 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_QQM,    &Parser::unary,    NULL,            Parser::PREC_UNARY  },
 
     // control structures
-    { Lexer::TOK_IF,     &Parser::conditional,NULL,          Parser::PREC_NONE  },
-    { Lexer::TOK_FOR,    &Parser::forloop,  NULL,            Parser::PREC_NONE  },
-    { Lexer::TOK_WHILE,  &Parser::whileloop,NULL,            Parser::PREC_NONE  },
+    //{ Lexer::TOK_IF,     &Parser::conditional,NULL,          Parser::PREC_NONE  },
+    //{ Lexer::TOK_FOR,    &Parser::forloop,  NULL,            Parser::PREC_NONE  },
+    //{ Lexer::TOK_WHILE,  &Parser::whileloop,NULL,            Parser::PREC_NONE  },
 
     // values
     { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            Parser::PREC_NONE  },
@@ -107,8 +109,9 @@ const Parser::ParseRule * Parser::GetRule(Lexer::TokenType tok)
     return NULL;
 }
 
-Parser::Parser(Lexer* lex, const char *fn)
-    : hlir(NULL), _lex(lex), _fn(fn), hadError(false), panic(false)
+Parser::Parser(Lexer* lex, const char *fn, const GaAlloc& ga, StringPool& strpool)
+    : GaAlloc(ga)
+    , hlir(NULL), strpool(strpool), _lex(lex), _fn(fn), hadError(false), panic(false)
 {
     curtok.tt = Lexer::TOK_E_ERROR;
 
@@ -297,53 +300,100 @@ HLNode* Parser::_assignment(bool isconst)
 
 HLNode* Parser::_assignmentWithPrefix()
 {
-    bool isconst = !tryeat(Lexer::TOK_MASSIGN);
-    if(!isconst)
+    bool mut = tryeat(Lexer::TOK_MASSIGN);
+    if(!mut)
         eat(Lexer::TOK_CASSIGN);
-    return _assignment(isconst);
+    return _assignment(!mut);
 }
 
 // var x, y
 // var x:int, y:float
-HLNode* Parser::_vardecllist()
-{
-    // 'var' already consumed
-    HLNode *node = hlir->list();
-    do
-    {
-        HLNode *def = hlir->vardef();
-        def->u.vardef.ident = ident();
-        if(tryeat(Lexer::TOK_COLON))
-            def->u.vardef.type = expr();
-        node->u.list.add(def, *this);
-    }
-    while(tryeat(Lexer::TOK_COMMA));
-    return node;
-}
-
 // int x, blah y, T z
 // int a, float z
 // T a, b, Q c, d, e
-HLNode* Parser::_cdecllist()
+// int x, y, var z,q
+HLNode* Parser::_decllist()
 {
-    HLNode *node = hlir->list();
+
+    HLNode * const node = hlir->list();
+
+    bool isvar = prevtok.tt == Lexer::TOK_VAR;
     HLNode *lasttype = NULL;
+    HLNode *first = NULL;
+    HLNode *second = NULL;
+
+    switch(prevtok.tt)
+    {
+        case Lexer::TOK_IDENT:
+            first = _ident(prevtok);
+            lasttype = first;
+            break;
+        case Lexer::TOK_VAR:
+            break; // nothing to do
+        default:
+            errorAt(prevtok, "expected type or 'var'");
+            return NULL;
+    }
+    goto begin;
+
     for(;;)
     {
-        HLNode *def = hlir->vardef();
-        HLNode *id = ident();
-        if(lasttype && tryeat(Lexer::TOK_COLON))
+        second = NULL;
+
+        // one decl done, need a comma to start another
+        if(!tryeat(Lexer::TOK_COMMA))
+            break;
+
+        // either 'var' or a type name. This switches context.
+        // In 'var' context, types are deduced, in 'C' context, they need to be known.
+        if(tryeat(Lexer::TOK_VAR))
         {
-            def->u.vardef.type = lasttype;
-            def->u.vardef.ident = id;
+            isvar = true;
+            lasttype = NULL;
+            first = NULL;
         }
         else
         {
-            def->u.vardef.type = id;
-            def->u.vardef.ident = ident();
+            first = ident(); // type name, if present
+            if(!match(Lexer::TOK_IDENT))
+            {
+                second = first;
+                first = NULL;
+            }
         }
+begin:
+
+        HLNode * const def = hlir->vardef();
+
+        if(!second)
+            second = ident(); // var name
+
+        if(isvar) // 'var x'
+        {
+            lasttype = NULL;
+            assert(!first);
+            def->u.vardef.ident = second; // always var name
+            if(tryeat(Lexer::TOK_COLON))
+                def->u.vardef.type = expr();
+        }
+        else // C-style decl
+        {
+            if(first)
+            {
+                def->u.vardef.type = first;
+                def->u.vardef.ident = second;
+                lasttype = first;
+            }
+            else
+            {
+                def->u.vardef.type = lasttype;
+                def->u.vardef.ident = second;
+            }
+        }
+
         node->u.list.add(def, *this);
     }
+
     return node;
 }
 
@@ -369,18 +419,12 @@ HLNode* Parser::declOrStmt()
     advance();
 
     // var i ('var' + ident...)
-    if(prevtok.tt == Lexer::TOK_VAR)
-    {
-        HLNode *node = hlir->vardecllist();
-        node->u.vardecllist.decllist = _vardecllist();
-        node->u.vardecllist.vallist = _assignmentWithPrefix();
-        return node;
-    }
     // int i (2 identifiers)
-    if(prevtok.tt == Lexer::TOK_IDENT && curtok.tt == Lexer::TOK_IDENT)
+    if((prevtok.tt == Lexer::TOK_VAR || prevtok.tt == Lexer::TOK_IDENT)
+        && curtok.tt == Lexer::TOK_IDENT)
     {
         HLNode *node = hlir->vardecllist();
-        node->u.vardecllist.decllist = _cdecllist();
+        node->u.vardecllist.decllist = _decllist();
         node->u.vardecllist.vallist = _assignmentWithPrefix();
         return node;
     }
@@ -544,7 +588,29 @@ HLNode *Parser::nil()
 
 HLNode* Parser::tablecons()
 {
-    return nullptr;
+    HLNode *node = hlir->list();
+
+    // { was just eaten
+    while(!tryeat(Lexer::TOK_RCUR))
+    {
+        HLNode *key = NULL;
+        if(tryeat(Lexer::TOK_LSQ))
+        {
+            key = expr();
+            eat(Lexer::TOK_RSQ);
+        }
+        else
+            key = ident();
+
+        HLNode *val = NULL;
+        if(tryeat(Lexer::TOK_CASSIGN))
+        {
+        }
+    }
+
+    node->tt = HLNODE_TABLECONS;
+
+    return node;
 }
 
 HLNode* Parser::_ident(const Lexer::Token& tok)
@@ -556,6 +622,7 @@ HLNode* Parser::_ident(const Lexer::Token& tok)
     }
 
     HLNode *node = hlir->ident();
+    Str s = strpool.put(
     node->u.ident.begin = tok.begin;
     node->u.ident.len   = tok.u.len;
     return node;

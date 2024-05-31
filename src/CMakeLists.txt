@@ -24,6 +24,7 @@ set(src
     table.h
     array.cpp
     array.h
+    rtdata.cpp
 )
 
 add_library(gaffa ${src})

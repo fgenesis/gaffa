@@ -3,15 +3,18 @@
 #include <string>
 #include <vector>
 
+#include "defs.h"
+
 class StringPool
 {
 public:
-    unsigned put(const char *s);
-    unsigned put(const char *s, size_t n);
-    unsigned put(const std::string& s);
-    unsigned get(const char *s) const;
-    unsigned get(const char *s, size_t n) const;
-    unsigned get(const std::string& s) const;
+    Str put(const char *s);
+    Str put(const char *s, size_t n);
+    Str put(const std::string& s);
+    Str get(const char *s) const;
+    Str get(const char *s, size_t n) const;
+    Str get(const std::string& s) const;
+    const std::string& lookup(size_t id) const;
 
 private:
     std::vector<std::string> _pool;
