@@ -78,8 +78,8 @@ HLNode *HLList::add(HLNode* node, const GaAlloc& ga)
 {
     if(used == cap)
     {
-        const size_t newcap = 8 + (2 * cap) * sizeof(HLNode*);
-        HLNode **newlist = (HLNode**)ga.alloc(ga.ud, list, cap * sizeof(HLNode*), newcap);
+        const size_t newcap = 4 + (2 * cap);
+        HLNode **newlist = (HLNode**)ga.alloc(ga.ud, list, cap * sizeof(HLNode*), newcap * sizeof(HLNode*));
         if(!newlist)
             return NULL;
         list = newlist;

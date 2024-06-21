@@ -19,6 +19,7 @@ enum HLNodeType
     HLNODE_CONSTANT_VALUE,
     HLNODE_UNARY,
     HLNODE_BINARY,
+    HLNODE_TERNARY,
     HLNODE_CONDITIONAL,
     HLNODE_LIST,
     HLNODE_FORLOOP,
@@ -30,7 +31,11 @@ enum HLNodeType
     HLNODE_RETURN,
     HLNODE_CALL,
     HLNODE_IDENT,
-    HLNODE_TABLECONS
+    HLNODE_TABLECONS,
+    HLNODE_ARRAYCONS,
+    HLNODE_RANGE,
+    HLNODE_ITER_DECLLIST,
+    HLNODE_ITER_EXPRLIST,
 };
 
 enum HLTypeFlags
@@ -60,6 +65,15 @@ struct HLBinary
     Lexer::TokenType tok;
     HLNode *lhs;
     HLNode *rhs;
+};
+
+struct HLTernary
+{
+    enum { EnumType = HLNODE_TERNARY };
+    Lexer::TokenType tok;
+    HLNode *a;
+    HLNode *b;
+    HLNode *c;
 };
 
 struct HLConditional
@@ -111,9 +125,8 @@ struct HLVarDeclList
 
 struct HLAssignment
 {
-    // const is the default, but HLNode::type can be set to HLNODE_MUT_DECL to make mutable
     enum { EnumType = HLNODE_ASSIGNMENT };
-    HLNode *identlist;
+    HLNode *dstlist;
     HLNode *vallist;
 };
 
@@ -143,6 +156,14 @@ struct HLIdent
     size_t len;
 };
 
+struct HLRange
+{
+    enum { EnumType = HLNODE_RANGE };
+    HLNode *begin;
+    HLNode *end;
+    HLNode *step;
+};
+
 // All of the node types intentionally occupy the same memory.
 // This is so that a node type can be easily mutated into another,
 // while keeping pointers intact.
@@ -155,6 +176,7 @@ struct HLNode
         HLConstantValue constant;
         HLUnary unary;
         HLBinary binary;
+        HLTernary ternary;
         HLConditional conditional;
         HLList list;
         HLIdent ident;
@@ -166,6 +188,7 @@ struct HLNode
         HLReturn retn;
         HLBranchAlways branch;
         HLFnCall fncall;
+        HLRange range;
     } u;
 };
 
@@ -179,6 +202,7 @@ public:
     inline HLNode *constantValue() { return allocT<HLConstantValue>(); }
     inline HLNode *unary()         { return allocT<HLUnary>();         }
     inline HLNode *binary()        { return allocT<HLBinary>();        }
+    inline HLNode *ternary()       { return allocT<HLTernary>();       }
     inline HLNode *conditional()   { return allocT<HLConditional>();   }
     inline HLNode *list()          { return allocT<HLList>();          }
     inline HLNode *forloop()       { return allocT<HLForLoop>();       }
@@ -191,6 +215,7 @@ public:
     inline HLNode *brk()           { return allocT<HLBranchAlways>();  }
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
     inline HLNode *ident()         { return allocT<HLIdent>();         }
+    //inline HLNode *range()         { return allocT<HLRange>();         }
 
 private:
     struct Block

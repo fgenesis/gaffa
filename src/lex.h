@@ -10,6 +10,7 @@ public:
     {
         TOK_E_ERROR,
         TOK_E_EOF,
+        TOK_E_UNDEF,
 
         TOK_LPAREN, // (
         TOK_RPAREN, // )

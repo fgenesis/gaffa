@@ -65,7 +65,7 @@ int main(int argc, char **argv)
 
     StringPool strtab;
     Lexer lex(code);
-    Parser pp(&lex, "test", ga);
+    Parser pp(&lex, "test", ga, strtab);
     HLIRBuilder hb(ga);
     pp.hlir = &hb;
     HLNode *node = pp.parse();

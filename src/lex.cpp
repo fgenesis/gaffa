@@ -177,6 +177,8 @@ static const char *eatnum(const char *p)
         {} // nothing to do
         else if(c == '.')
         {
+            if(p[1] == '.') // special case: don't treat '0..' as '0.'+'.'
+                break;
             if(dot)
                 break;
             dot = true;
