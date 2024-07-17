@@ -26,6 +26,12 @@ public:
         PREC_PRIMARY
     };
 
+    enum Context
+    {
+        CTX_DEFAULT = 0x00,
+        CTX_ASSIGN  = 0x01, // set right of =, unset in expr
+    };
+
     Parser(Lexer *lex, const char *fn, const GaAlloc& ga, StringPool& strpool);
     HLNode *parse();
     //std::vector<Val> constants;
@@ -37,9 +43,9 @@ private:
     struct ParseRule;
 
 protected:
-    HLNode *grouping(); // after (
-    HLNode *unary(); // after op
-    HLNode *binary(const ParseRule *rule, HLNode *lhs); // after expr
+    HLNode *grouping(Context ctx); // after (
+    HLNode *unary(Context ctx); // after op
+    HLNode *binary(Context ctx, const ParseRule *rule, HLNode *lhs); // after expr
     HLNode *expr();
     HLNode *stmt();
 
@@ -49,6 +55,8 @@ protected:
     HLNode *conditional(); // after if
     HLNode *forloop();
     HLNode *whileloop();
+
+    HLNode *_assignmentTarget();
     HLNode *_assignment(bool isconst);
     HLNode *_assignmentWithPrefix();
     HLNode *_decllist();
@@ -60,27 +68,27 @@ protected:
     HLNode *declOrStmt();
     HLNode *block();
 
-    HLNode *prefixexpr(); // ident | (expr)
-    HLNode *primexpr(); // prefixexpr { .ident | [expr] | :ident paramlist | paramlist }
+    HLNode *prefixexpr(Context ctx); // ident | (expr)
+    HLNode *primexpr(Context ctx); // prefixexpr { .ident | [expr] | :ident paramlist | paramlist }
 
     // functions
     HLNode *_paramlist(); // (a, b, c)
 
     // literal values
-    HLNode *litnum();
-    HLNode *litstr();
-    HLNode *btrue();
-    HLNode *bfalse();
+    HLNode *litnum(Context ctx);
+    HLNode *litstr(Context ctx);
+    HLNode *btrue(Context ctx);
+    HLNode *bfalse(Context ctx);
     HLNode *ident();
-    HLNode *_identPrev();
-    HLNode *nil();
-    HLNode *tablecons();
-    HLNode *arraycons();
+    HLNode *_identPrev(Context ctx);
+    HLNode *nil(Context ctx);
+    HLNode *tablecons(Context ctx);
+    HLNode *arraycons(Context ctx);
     HLNode *_ident(const Lexer::Token& tok);
 
-    HLNode *unaryRange();
-    HLNode *binaryRange(const ParseRule *rule, HLNode *lhs);
-    HLNode *postfixRange(const ParseRule *rule, HLNode* lhs);
+    HLNode *unaryRange(Context ctx);
+    HLNode *binaryRange(Context ctx, const ParseRule *rule, HLNode *lhs);
+    HLNode *postfixRange(Context ctx, const ParseRule *rule, HLNode* lhs);
     HLNode *_rangeStep();
 
     HLNode *iterdecls(); // for(var a,b = ...; var c = 0..)
@@ -112,8 +120,8 @@ private:
     bool hadError;
     bool panic;
 
-    typedef HLNode* (Parser::*UnaryMth)();
-    typedef HLNode* (Parser::*InfixMth)(const ParseRule *rule, HLNode *prefix);
+    typedef HLNode* (Parser::*UnaryMth)(Context ctx);
+    typedef HLNode* (Parser::*InfixMth)(Context ctx, const ParseRule *rule, HLNode *prefix);
 
     struct ParseRule
     {

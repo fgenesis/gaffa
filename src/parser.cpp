@@ -95,7 +95,7 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_NIL,    &Parser::nil,      NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_TRUE ,  &Parser::btrue,    NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_FALSE , &Parser::bfalse,   NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE  },
+    //{ Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_LCUR,   &Parser::tablecons,NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_LSQ,    &Parser::arraycons,NULL,            NULL,             Parser::PREC_NONE  },
 
@@ -242,7 +242,8 @@ HLNode *Parser::parsePrecedence(Prec p)
 
     advance();
 
-    HLNode *node = (this->*(rule->prefix))();
+    const Context ctx = p <= PREC_ASSIGNMENT ? CTX_ASSIGN : CTX_DEFAULT;
+    HLNode *node = (this->*(rule->prefix))(ctx);
 
     for(;;)
     {
@@ -254,7 +255,7 @@ HLNode *Parser::parsePrecedence(Prec p)
 
         advance();
 
-        node = (this->*(rule->infix))(rule, node);
+        node = (this->*(rule->infix))(ctx, rule, node);
         assert(node);
     }
     return node;
@@ -299,6 +300,17 @@ HLNode* Parser::whileloop()
     eat(Lexer::TOK_RPAREN);
     node->u.whileloop.body = stmt();
     return node;
+}
+
+HLNode* Parser::_assignmentTarget()
+{
+    if(match(Lexer::TOK_IDENT))
+        return ident();
+
+    //HLNode *prefix = prefixexpr();
+    assert(0);
+    return NULL; // FIXME
+
 }
 
 HLNode* Parser::_assignment(bool isconst)
@@ -487,35 +499,37 @@ HLNode* Parser::block()
     return node;
 }
 
-HLNode* Parser::prefixexpr()
+HLNode* Parser::prefixexpr(Context ctx)
 {
     return tryeat(Lexer::TOK_LPAREN)
-        ? grouping()
+        ? grouping(ctx)
         : ident();
 }
 
-HLNode* Parser::primexpr()
+HLNode* Parser::primexpr(Context ctx)
 {
-    HLNode *prefix = prefixexpr();
+    HLNode *prefix = prefixexpr(ctx);
 
+
+    return prefix;
 }
 
-HLNode* Parser::litnum()
+HLNode* Parser::litnum(Context ctx)
 {
     return emitConstant(makenum(prevtok.begin, prevtok.begin + prevtok.u.len));
 }
 
-HLNode* Parser::litstr()
+HLNode* Parser::litstr(Context ctx)
 {
     return emitConstant(makestr(prevtok.begin, prevtok.begin + prevtok.u.len));
 }
 
-HLNode* Parser::btrue()
+HLNode* Parser::btrue(Context ctx)
 {
     return emitConstant(true);
 }
 
-HLNode* Parser::bfalse()
+HLNode* Parser::bfalse(Context ctx)
 {
     return emitConstant(false);
 }
@@ -528,12 +542,12 @@ HLNode* Parser::ident()
     return node;
 }
 
-HLNode* Parser::_identPrev()
+HLNode* Parser::_identPrev(Context ctx)
 {
     return _ident(prevtok);
 }
 
-HLNode *Parser::grouping()
+HLNode *Parser::grouping(Context ctx)
 {
     // ( was eaten
     HLNode *u = expr();
@@ -541,7 +555,7 @@ HLNode *Parser::grouping()
     return u;
 }
 
-HLNode *Parser::unary()
+HLNode *Parser::unary(Context ctx)
 {
     const ParseRule *rule = GetRule(prevtok.tt);
     HLNode *rhs = parsePrecedence(PREC_UNARY);
@@ -556,12 +570,12 @@ HLNode *Parser::unary()
     return node;
 }
 
-HLNode * Parser::binary(const Parser::ParseRule *rule, HLNode *lhs)
+HLNode * Parser::binary(Context ctx, const Parser::ParseRule *rule, HLNode *lhs)
 {
     HLNode *rhs = parsePrecedence((Prec)(rule->precedence + 1));
 
     if(!rhs && rule->postfix)
-        return (this->*(rule->postfix))(rule, lhs);
+        return (this->*(rule->postfix))(ctx, rule, lhs);
 
     HLNode *node = ensure(hlir->binary());
     if(node)
@@ -665,14 +679,14 @@ void Parser::errorAtCurrent(const char* msg)
     errorAt(curtok, msg);
 }
 
-HLNode *Parser::nil()
+HLNode *Parser::nil(Context ctx)
 {
     HLNode *node = hlir->constantValue();
     node->u.constant.val.type = PRIMTYPE_NIL;
     return node;
 }
 
-HLNode* Parser::tablecons()
+HLNode* Parser::tablecons(Context ctx)
 {
     // { was just eaten while parsing an expr
     const unsigned beginline = prevtok.line;
@@ -717,7 +731,7 @@ HLNode* Parser::tablecons()
     return node;
 }
 
-HLNode* Parser::arraycons()
+HLNode* Parser::arraycons(Context ctx)
 {
     // [ was just eaten while parsing an expr
     const unsigned beginline = prevtok.line;
@@ -755,9 +769,9 @@ HLNode* Parser::_ident(const Lexer::Token& tok)
 }
 
 // ..n
-HLNode* Parser::unaryRange()
+HLNode* Parser::unaryRange(Context ctx)
 {
-    HLNode *node = unary();
+    HLNode *node = unary(ctx);
     if(node)
     {
         assert(node->type == HLNODE_UNARY);
@@ -769,7 +783,7 @@ HLNode* Parser::unaryRange()
 }
 
 // 0..
-HLNode* Parser::postfixRange(const ParseRule *rule, HLNode* lhs)
+HLNode* Parser::postfixRange(Context ctx, const ParseRule *rule, HLNode* lhs)
 {
     HLNode *node = ensure(hlir->ternary());
     if(node)
@@ -781,9 +795,9 @@ HLNode* Parser::postfixRange(const ParseRule *rule, HLNode* lhs)
 }
 
 // 0..n
-HLNode* Parser::binaryRange(const ParseRule *rule, HLNode* lhs)
+HLNode* Parser::binaryRange(Context ctx, const ParseRule *rule, HLNode* lhs)
 {
-    HLNode *node = binary(rule, lhs);
+    HLNode *node = binary(ctx, rule, lhs);
     if(node)
     {
         node->type = HLNODE_TERNARY;
@@ -799,7 +813,6 @@ HLNode* Parser::_rangeStep()
         ? expr()
         : NULL;
 }
-
 
 HLNode* Parser::iterdecls()
 {
