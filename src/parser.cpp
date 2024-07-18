@@ -5,6 +5,8 @@
 #include "hlir.h"
 #include "strings.h"
 
+static const Str InvalidStr {0, 0};
+
 
 static Val parsefloat(uint intpart, const char *s, const char *end)
 {
@@ -68,6 +70,20 @@ Val Parser::makestr(const char *s, const char *end)
 {
     Str q = strpool.put(s, end - s + 1);
     return Val(q);
+}
+
+Str Parser::_tokenStr(const Lexer::Token& tok)
+{
+    return strpool.put(tok.begin, tok.u.len);
+}
+
+Str Parser::_identStr(const Lexer::Token& tok)
+{
+    if(tok.tt == Lexer::TOK_IDENT)
+        return _tokenStr(tok);
+
+    errorAt(tok, "Expected identifier");
+    return InvalidStr;
 }
 
 
@@ -139,7 +155,7 @@ HLNode *Parser::expr()
 HLNode* Parser::stmt()
 {
     HLNode *ret = NULL;
-    HLNode *exp;
+    //HLNode *exp;
     switch(curtok.tt)
     {
         case Lexer::TOK_CONTINUE:
@@ -173,12 +189,12 @@ HLNode* Parser::stmt()
             ret = block();
             break;
 
-        case Lexer::TOK_LPAREN: // expression as statement -> same as single identifier
+        /*case Lexer::TOK_LPAREN: // expression as statement -> same as single identifier
             advance();
             exp = expr();
-            goto asexpr;
+            goto asexpr;*/
 
-        case Lexer::TOK_IDENT:
+        /*case Lexer::TOK_IDENT:
         {
             exp = ident();
             switch(curtok.tt)
@@ -216,11 +232,19 @@ HLNode* Parser::stmt()
                     ret->u.fncall.paramlist = _paramlist();
                 }
             }
+        }*/
+        // fall through
+
+        default: // assignment, function call with ignored returns
+        {
+            ret = suffixedexpr();
+            if(curtok.tt == Lexer::TOK_COMMA || curtok.tt == Lexer::TOK_CASSIGN)
+            {
+                ret = _restassign(ret);
+            }
+            // else it's just a function / method call, already handled
         }
         break;
-
-        default:
-            errorAtCurrent("can't parse as statement");
     }
 
     tryeat(Lexer::TOK_SEMICOLON);
@@ -302,33 +326,35 @@ HLNode* Parser::whileloop()
     return node;
 }
 
-HLNode* Parser::_assignmentTarget()
+// = EXPRLIST
+// This can follow after:
+// IDENT = ...
+// EXPR.ident = ...
+// EXPR[index] = ...
+HLNode* Parser::_assignmentWithPrefix(HLNode *lhs)
 {
-    if(match(Lexer::TOK_IDENT))
-        return ident();
-
-    //HLNode *prefix = prefixexpr();
-    assert(0);
-    return NULL; // FIXME
-
+    eat(Lexer::TOK_CASSIGN); // eat '='
+    HLNode *node = ensure(hlir->assignment());
+    if(node)
+    {
+        node->u.assignment.dstlist = lhs;
+        node->u.assignment.vallist = _exprlist();
+    }
+    return node;
 }
 
-HLNode* Parser::_assignment(bool isconst)
+HLNode* Parser::_restassign(HLNode* firstLhs)
 {
-    // '='´or ':=' was consumed
-    HLNode *list = hlir->list();
-    do
-        list->u.list.add(expr(), *this);
-    while(tryeat(Lexer::TOK_COMMA));
-    return list;
-}
+    HLNode *lhs = ensure(hlir->list());
+    if(!lhs)
+        return NULL;
 
-HLNode* Parser::_assignmentWithPrefix()
-{
-    bool mut = tryeat(Lexer::TOK_MASSIGN);
-    if(!mut)
-        eat(Lexer::TOK_CASSIGN);
-    return _assignment(!mut);
+    while(tryeat(Lexer::TOK_COMMA))
+    {
+        lhs->u.list.add(suffixedexpr(), *this);
+    }
+
+    return _assignmentWithPrefix(lhs);
 }
 
 // var x, y
@@ -431,10 +457,21 @@ HLNode* Parser::_paramlist()
     return ret;
 }
 
+HLNode* Parser::_fncall(HLNode* callee)
+{
+    HLNode *node = ensure(hlir->fncall());
+    if(node)
+    {
+        node->u.fncall.func = callee;
+        node->u.fncall.paramlist = _paramlist();
+    }
+    return node;
+}
+
 HLNode* Parser::_exprlist()
 {
-    HLNode *node = hlir->list();
-    do
+    HLNode *node = ensure(hlir->list());
+    if(node) do
         node->u.list.add(expr(), *this);
     while(tryeat(Lexer::TOK_COMMA));
     return node;
@@ -448,15 +485,7 @@ HLNode* Parser::trydecl()
     {
         lookAhead();
         if(lookahead.tt == Lexer::TOK_IDENT)
-        {
-            HLNode *node = ensure(hlir->vardecllist());
-            if(node)
-            {
-                node->u.vardecllist.decllist = _decllist();
-                node->u.vardecllist.vallist = _assignmentWithPrefix();
-            }
-            return node;
-        }
+            return decl();
     }
 
     return NULL;
@@ -464,9 +493,16 @@ HLNode* Parser::trydecl()
 
 HLNode* Parser::decl()
 {
-    HLNode *node = trydecl();
-    if(!node)
-        error("Expected declaration");
+    HLNode *node = ensure(hlir->vardecllist());
+    if(node)
+    {
+        node->u.vardecllist.decllist = _decllist();
+        if(tryeat(Lexer::TOK_MASSIGN))
+            node->u.vardecllist.mut = true;
+        else
+            eat(Lexer::TOK_CASSIGN);
+        node->u.vardecllist.vallist = _exprlist();
+    }
     return node;
 }
 
@@ -499,20 +535,101 @@ HLNode* Parser::block()
     return node;
 }
 
-HLNode* Parser::prefixexpr(Context ctx)
+// (expr)
+// ident
+HLNode* Parser::primaryexpr()
 {
     return tryeat(Lexer::TOK_LPAREN)
-        ? grouping(ctx)
+        ? grouping(CTX_DEFAULT)
         : ident();
 }
 
-HLNode* Parser::primexpr(Context ctx)
+/* EXPR followed by one of:
+  '.' ident
+  [expr]
+  (args)
+  :mth(args)
+*/
+HLNode* Parser::suffixedexpr()
 {
-    HLNode *prefix = prefixexpr(ctx);
+    HLNode *node = primaryexpr();
+    for(;;)
+    {
+        HLNode *next = NULL;
+        switch(curtok.tt)
+        {
+            case Lexer::TOK_DOT:
+                advance();
+                next = hlir->index();
+                next->u.index.lhs = node;
+                next->u.index.nameStrId = _identStr(curtok).id;
+                advance();
+                break;
 
+            case Lexer::TOK_RSQ:
+                advance();
+                next = hlir->index();
+                next->u.index.lhs = node;
+                next->u.index.expr = expr();
+                break;
 
-    return prefix;
+            case Lexer::TOK_LPAREN:
+                advance();
+                next = _fncall(node);
+                break;
+
+            case Lexer::TOK_COLON:
+                advance();
+                assert(false); // TODO: mth call
+                break;
+
+            default:
+                return node;
+
+        }
+        node = next;
+    }
 }
+
+/*
+// ident
+// prefixexpr[expr]
+// prefixexpr.ident
+// ie. anything that can be the target of an assignment
+HLNode* Parser::holder(Context ctx)
+{
+    if(match(Lexer::TOK_IDENT))
+        return ident();
+
+    HLNode *ex = prefixexpr(ctx);
+    HLNode *idx = NULL;
+
+    const Lexer::TokenType tt = curtok.tt;
+
+    switch(tt)
+    {
+        case Lexer::TOK_LSQ:
+            idx = expr();
+            break;
+
+        case Lexer::TOK_DOT:
+            idx = ident();
+            break;
+
+        default:
+            errorAtCurrent("Expected identifier, '[' or '.' to follow this expression");
+    }
+
+    HLNode *node = ensure(hlir->binary());
+    if(node)
+    {
+        node->u.binary.lhs = ex;
+        node->u.binary.rhs = idx;
+        node->u.binary.tok = tt;
+    }
+    return node;
+}
+*/
 
 HLNode* Parser::litnum(Context ctx)
 {
@@ -762,7 +879,7 @@ HLNode* Parser::_ident(const Lexer::Token& tok)
     }
 
     HLNode *node = hlir->ident();
-    Str s = strpool.put(tok.begin, tok.u.len);
+    Str s = _tokenStr(tok);
     node->u.ident.nameStrId = s.id;
     node->u.ident.len = s.len;
     return node;

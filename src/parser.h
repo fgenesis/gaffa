@@ -56,21 +56,27 @@ protected:
     HLNode *forloop();
     HLNode *whileloop();
 
-    HLNode *_assignmentTarget();
-    HLNode *_assignment(bool isconst);
-    HLNode *_assignmentWithPrefix();
+    HLNode *_assignmentWithPrefix(HLNode *lhs); // = EXPR or := EXPR
+    HLNode *_declAssignmentList();
+    HLNode *_restassign(HLNode *firstLhs); // returns list
     HLNode *_decllist();
 
-
+    HLNode *_fncall(HLNode *callee);
     HLNode *_exprlist();
     HLNode *trydecl();
     HLNode *decl();
     HLNode *declOrStmt();
     HLNode *block();
 
-    HLNode *prefixexpr(Context ctx); // ident | (expr)
-    HLNode *primexpr(Context ctx); // prefixexpr { .ident | [expr] | :ident paramlist | paramlist }
 
+    //HLNode *prefixexpr(Context ctx); // ident | (expr)
+
+    HLNode *primaryexpr(); // the start of any expr-as-statement
+    HLNode *suffixedexpr();
+
+    // prefixexpr { .ident | [expr] | :ident paramlist | paramlist }
+
+    //HLNode *holder(Context ctx);
     // functions
     HLNode *_paramlist(); // (a, b, c)
 
@@ -111,6 +117,8 @@ private:
     HLNode *emitConstant(const Val& v); // anything but nil
     void outOfMemory();
     Val makestr(const char *s, const char *end);
+    Str _tokenStr(const Lexer::Token& tok);
+    Str _identStr(const Lexer::Token& tok);
 
     Lexer::Token curtok;
     Lexer::Token prevtok;

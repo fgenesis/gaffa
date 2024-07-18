@@ -42,5 +42,6 @@
 
 --i = 5
 
---table t = {}
+table t = {}
 t.x = 5
+a,b = 1,2

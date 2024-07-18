@@ -36,6 +36,7 @@ enum HLNodeType
     HLNODE_RANGE,
     HLNODE_ITER_DECLLIST,
     HLNODE_ITER_EXPRLIST,
+    HLNODE_INDEX,
 };
 
 enum HLTypeFlags
@@ -117,10 +118,10 @@ struct HLVarDef
 
 struct HLVarDeclList
 {
-    // const is the default, but HLNode::type can be set to HLNODE_MUT_DECL to make mutable
     enum { EnumType = HLNODE_VARDECLASSIGN };
     HLNode *decllist;
     HLNode *vallist;
+    bool mut;
 };
 
 struct HLAssignment
@@ -164,6 +165,14 @@ struct HLRange
     HLNode *step;
 };
 
+struct HLIndex
+{
+    enum { EnumType = HLNODE_INDEX };
+    HLNode *lhs;
+    HLNode *expr;       // for []
+    unsigned nameStrId; // for .
+};
+
 // All of the node types intentionally occupy the same memory.
 // This is so that a node type can be easily mutated into another,
 // while keeping pointers intact.
@@ -189,6 +198,7 @@ struct HLNode
         HLBranchAlways branch;
         HLFnCall fncall;
         HLRange range;
+        HLIndex index;
     } u;
 };
 
@@ -216,6 +226,7 @@ public:
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
     inline HLNode *ident()         { return allocT<HLIdent>();         }
     //inline HLNode *range()         { return allocT<HLRange>();         }
+    inline HLNode *index()         { return allocT<HLIndex>();         }
 
 private:
     struct Block
