@@ -69,7 +69,7 @@ struct HLNode;
 struct HLConstantValue
 {
     enum { EnumType = HLNODE_CONSTANT_VALUE };
-    Val val;
+    ValU val;
 };
 
 struct HLUnary

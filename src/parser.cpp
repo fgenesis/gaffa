@@ -1,11 +1,11 @@
 #include "parser.h"
-#include <stdlib.h>
-#include <stdio.h>
-#include <assert.h>
 #include "hlir.h"
 #include "strings.h"
 
-static const Str InvalidStr {0, 0};
+#include <stdio.h>
+#include <stdlib.h>
+
+static const Str InvalidStr = {0, 0};
 
 
 static Val parsefloat(uint intpart, const char *s, const char *end)

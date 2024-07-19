@@ -1,7 +1,7 @@
 #include "strings.h"
 #include <string.h>
 
-static const Str None {0, 0};
+static const Str None = {0, 0};
 
 
 Str StringPool::put(const char* s)

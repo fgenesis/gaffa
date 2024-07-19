@@ -1,16 +1,11 @@
 #pragma once
 
-// Make sure some linux shit doesn't get pulled in
-#ifndef __STRICT_ANSI__
-#define __STRICT_ANSI__ 1
-#endif
-#ifndef __USE_MISC
-#define __USE_MISC 0
-#endif
+#include "compiler-fixup.h"
 
 #include <stddef.h>
 #include <stdint.h>
 #include <limits.h> // CHAR_BIT
+#include <assert.h>
 
 typedef size_t usize;
 typedef int64_t sint;
@@ -65,22 +60,9 @@ struct Range
     T begin, end, step;
 };
 
-struct Val
+// dumb type, no ctors
+struct ValU
 {
-    inline Val(): type(PRIMTYPE_NIL) { u.ui = 0; }
-    inline Val(bool b): type(PRIMTYPE_BOOL) { u.ui = b; }
-    inline Val(unsigned int i): type(PRIMTYPE_UINT) { u.ui = i; }
-    inline Val(int i): type(PRIMTYPE_SINT) { u.si = i; }
-    inline Val(uint i, _Nil _ = _Nil()): type(PRIMTYPE_UINT) { u.ui = i; }
-    inline Val(sint i, _Nil _ = _Nil()): type(PRIMTYPE_SINT) { u.si = i; }
-    inline Val(real f): type(PRIMTYPE_FLOAT) { u.f = f; }
-    inline Val(_Nil): type(PRIMTYPE_NIL) { u.ui = 0; }
-    inline Val(Str s): type(PRIMTYPE_STRING) { u.str = s; }
-    inline Val(Type t): type(PRIMTYPE_TYPE) { u.t = t; }
-
-    // This must not be PRIMTYPE_ANY.
-    unsigned type; // PrimType | TypeBits
-
     union
     {
         sint si;
@@ -93,6 +75,24 @@ struct Val
         Range<real> frange;
         Type t;
     } u;
+
+    // This must not be PRIMTYPE_ANY.
+    unsigned type; // PrimType | TypeBits
+};
+
+struct Val : public ValU
+{
+    inline Val(const ValU& v)           { *this = v; }
+    inline Val()                        { type = PRIMTYPE_NIL;    u.ui = 0; }
+    inline Val(bool b)                  { type = PRIMTYPE_BOOL;   u.ui = b; }
+    inline Val(unsigned int i)          { type = PRIMTYPE_UINT;   u.ui = i; }
+    inline Val(int i)                   { type = PRIMTYPE_SINT;   u.si = i; }
+    inline Val(uint i, _Nil _ = _Nil()) { type = PRIMTYPE_UINT;   u.ui = i; }
+    inline Val(sint i, _Nil _ = _Nil()) { type = PRIMTYPE_SINT;   u.si = i; }
+    inline Val(real f)                  { type = PRIMTYPE_FLOAT;  u.f = f; }
+    inline Val(_Nil)                    { type = PRIMTYPE_NIL;    u.ui = 0; }
+    inline Val(Str s)                   { type = PRIMTYPE_STRING; u.str = s; }
+    inline Val(Type t)                  { type = PRIMTYPE_TYPE;   u.t = t; }
 };
 
 // Dynamic value, has a runtime type attached

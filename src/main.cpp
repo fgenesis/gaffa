@@ -1,11 +1,13 @@
-#include <stdio.h>
-#include <string>
-#include <sstream>
 #include "lex.h"
 #include "parser.h"
 #include "hlir.h"
 #include "gainternal.h"
 #include "strings.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
+#include <sstream>
 
 
 static char s_content[64*1024];
@@ -55,7 +57,7 @@ static void lexall(const char *code)
 
 int main(int argc, char **argv)
 {
-    const GaAlloc ga { myalloc, NULL };
+    const GaAlloc ga = { myalloc, NULL };
 
     const char *code = slurp("test.txt");
     if(!code)

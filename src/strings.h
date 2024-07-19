@@ -1,9 +1,9 @@
 #pragma once
 
+#include "defs.h"
+
 #include <string>
 #include <vector>
-
-#include "defs.h"
 
 class StringPool
 {

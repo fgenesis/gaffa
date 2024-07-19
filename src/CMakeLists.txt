@@ -1,5 +1,6 @@
 set(src
     ../include/gaffa.h
+    compiler-fixup.h
     gainternal.h
     lex.cpp
     lex.h

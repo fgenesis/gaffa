@@ -60,7 +60,7 @@ struct ArithSubVM
     {
         return T();
     };
-
+/*
     GaOpcode Run(VM *vm, GaOpcode op)
     {
         size_t pc = vm->pc;
@@ -77,7 +77,7 @@ entry:
             size_t src2 = (op >> 24) & 0xff;
             switch(op & GA_OPMASK_ARITH_OP)
             {
-            case GA_SUBOP_ADD: R(dst) = R(src1) + R(src2);
+            case GA_ARITHOP_ADD: R(dst) = R(src1) + R(src2);
             }
 
             op = fetchop(vm, pc);
@@ -86,6 +86,6 @@ entry:
         vm->pc = pc;
         return op;
     }
-    
+*/
 };
 
