@@ -26,4 +26,8 @@ jobs:
           mkdir build
           cd build
           cmake .. -DCMAKE_C_COMPILER=$COMPILER -DCMAKE_CXX_COMPILER=$COMPILER++
+
+          # verify in CMakeCache.txt that the compiler is set to the correct one
+          grep -q $COMPILER CMakeCache.txt || exit 1
+
           make -j $(nproc)
