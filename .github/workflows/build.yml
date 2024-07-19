@@ -27,7 +27,7 @@ jobs:
           mkdir build
           cd build
 
-          if [ $COMPILER = "gcc" ]; then
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
             export CC=gcc
             export CXX=g++
           else
