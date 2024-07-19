@@ -21,6 +21,7 @@ static const ShortEntry ShortTab[] =
     { "+",  Lexer::TOK_PLUS,   },
     { "-",  Lexer::TOK_MINUS,  },
     { "*",  Lexer::TOK_STAR,   },
+    { "//", Lexer::TOK_SLASH2X },
     { "/",  Lexer::TOK_SLASH,  },
     { ">>", Lexer::TOK_SHR,    },
     { "<<", Lexer::TOK_SHL,    },
@@ -38,6 +39,7 @@ static const ShortEntry ShortTab[] =
     { ",",  Lexer::TOK_COMMA,  },
     { "::", Lexer::TOK_DBLCOLON},
     { ":",  Lexer::TOK_COLON   },
+    { "...",Lexer::TOK_TRIDOT, },
     { "..", Lexer::TOK_DOTDOT, },
     { ".",  Lexer::TOK_DOT,    },
     { ";",  Lexer::TOK_SEMICOLON},
@@ -79,7 +81,7 @@ static const Keyword Keywords[] =
 
 
 Lexer::Lexer(const char* text)
-    : _p(text),  _linebegin(text), _line(0)
+    : _p(text),  _linebegin(text), _line(1)
 {
 }
 

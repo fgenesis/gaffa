@@ -22,6 +22,7 @@ public:
         TOK_MINUS,  // -
         TOK_STAR,   // *
         TOK_SLASH,  // /
+        TOK_SLASH2X,// //
         TOK_CASSIGN,// =
         TOK_MASSIGN,// :=
         TOK_EQ,     // ==
@@ -34,12 +35,13 @@ public:
         TOK_QQM,    // ??
         TOK_QM,     // ?
         TOK_EXCL,   // !
+        TOK_TRIDOT, // ...
+        TOK_DOTDOT, // ..
         TOK_DOT,    // .
+        TOK_DBLCOLON,// ::
         TOK_COLON,  // :
         TOK_COMMA,  // ,
         TOK_ARROW,  // ->
-        TOK_DBLCOLON,// ::
-        TOK_DOTDOT, // ..
         TOK_SEMICOLON,// ;
         TOK_HAT,    // ^
         TOK_TILDE,  // ~
@@ -72,7 +74,7 @@ public:
         // rest
         TOK_LITSTR, // "...", '...'
         TOK_LITNUM, // 123, 123.45
-        TOK_IDENT,  // identifier
+        TOK_IDENT,  // identifier, including _
 
     };
 

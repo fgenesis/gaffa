@@ -12,24 +12,31 @@ class Parser : public GaAlloc
 public:
     enum Prec
     {
+        // weakest binding
         PREC_NONE,
-        PREC_ASSIGNMENT,  // =
-        PREC_OR,          // or
-        PREC_AND,         // and
         PREC_EQUALITY,    // == !=
         PREC_COMPARISON,  // < > <= >=
+        PREC_UNWRAP,      // =>
+        PREC_OR,          // or
+        PREC_AND,         // and
+        PREC_LOGIC_AND,   // &&
+        PREC_LOGIC_OR,    // ||
         PREC_RANGE,       // ..a  a..b  b..
+        PREC_BIT_OR,      // |
+        PREC_BIT_XOR,     // ^
+        PREC_BIT_AND,     // &
+        PREC_BIT_SHIFT,   // << >>
         PREC_ADD,         // + -
         PREC_MUL,         // * /
-        PREC_UNARY,       // ! - #
+        PREC_UNARY,       // ! - # ??
         PREC_CALL,        // . ()
         PREC_PRIMARY
+        // strongest binding
     };
 
     enum Context
     {
         CTX_DEFAULT = 0x00,
-        CTX_ASSIGN  = 0x01, // set right of =, unset in expr
     };
 
     Parser(Lexer *lex, const char *fn, const GaAlloc& ga, StringPool& strpool);
@@ -56,8 +63,17 @@ protected:
     HLNode *forloop();
     HLNode *whileloop();
 
+
+    // functions
+    HLNode *_functiondef(HLNode **pname);
+    HLNode *_funcparams();
+    HLNode *namedfunction();
+    HLNode *closurecons(Context ctx);
+    HLNode *functionbody();
+    void _funcattribs(unsigned *pfuncflags);
+    HLNode *_funcreturns(unsigned *pfuncflags);
+
     HLNode *_assignmentWithPrefix(HLNode *lhs); // = EXPR or := EXPR
-    HLNode *_declAssignmentList();
     HLNode *_restassign(HLNode *firstLhs); // returns list
     HLNode *_decllist();
 
@@ -86,6 +102,7 @@ protected:
     HLNode *btrue(Context ctx);
     HLNode *bfalse(Context ctx);
     HLNode *ident();
+    HLNode *typeident();
     HLNode *_identPrev(Context ctx);
     HLNode *nil(Context ctx);
     HLNode *tablecons(Context ctx);

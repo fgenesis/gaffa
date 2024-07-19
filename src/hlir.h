@@ -13,6 +13,21 @@ enum Comparison
     JUMP_GTE
 };
 
+enum IdentFlags
+{
+    IDENTFLAGS_NONE     = 0x00,
+    IDENTFLAGS_OPTIONAL = 0x01
+};
+
+enum FuncFlags
+{
+    FUNCFLAGS_VAR_ARG = 0x01,
+    FUNCFLAGS_VAR_RET = 0x02,
+    FUNCFLAGS_PURE    = 0x04,
+    FUNCFLAGS_DEDUCE_RET = 0x08,
+};
+
+
 enum HLNodeType
 {
     HLNODE_NONE,
@@ -26,6 +41,7 @@ enum HLNodeType
     HLNODE_WHILELOOP,
     HLNODE_ASSIGNMENT,
     HLNODE_VARDECLASSIGN,
+    HLNODE_AUTODECL,
     HLNODE_VARDEF,
     HLNODE_DECLLIST,
     HLNODE_RETURN,
@@ -37,6 +53,8 @@ enum HLNodeType
     HLNODE_ITER_DECLLIST,
     HLNODE_ITER_EXPRLIST,
     HLNODE_INDEX,
+    HLNODE_FUNCTION,
+    HLNODE_FUNCTIONHDR,
 };
 
 enum HLTypeFlags
@@ -116,6 +134,14 @@ struct HLVarDef
     HLNode *type;
 };
 
+struct HLAutoDecl
+{
+    enum { EnumType = HLNODE_AUTODECL };
+    HLNode *ident;
+    HLNode *value;
+    HLNode *type;
+};
+
 struct HLVarDeclList
 {
     enum { EnumType = HLNODE_VARDECLASSIGN };
@@ -155,6 +181,7 @@ struct HLIdent
     enum { EnumType = HLNODE_IDENT };
     unsigned nameStrId;
     size_t len;
+    IdentFlags flags;
 };
 
 struct HLRange
@@ -171,6 +198,21 @@ struct HLIndex
     HLNode *lhs;
     HLNode *expr;       // for []
     unsigned nameStrId; // for .
+};
+
+struct HLFunctionHdr
+{
+     enum { EnumType = HLNODE_FUNCTIONHDR };
+    HLNode *rettypes;
+    HLNode *paramlist; // list of HLVarDecl
+    FuncFlags flags;
+};
+
+struct HLFunction
+{
+    enum { EnumType = HLNODE_FUNCTION };
+    HLNode *decl;
+    HLNode *body;
 };
 
 // All of the node types intentionally occupy the same memory.
@@ -191,6 +233,7 @@ struct HLNode
         HLIdent ident;
         HLAssignment assignment;
         HLVarDeclList vardecllist;
+        HLAutoDecl autodecl;
         HLVarDef vardef;
         HLForLoop forloop;
         HLWhileLoop whileloop;
@@ -199,6 +242,8 @@ struct HLNode
         HLFnCall fncall;
         HLRange range;
         HLIndex index;
+        HLFunction func;
+        HLFunctionHdr fhdr;
     } u;
 };
 
@@ -219,6 +264,7 @@ public:
     inline HLNode *whileloop()     { return allocT<HLWhileLoop>();     }
     inline HLNode *assignment()    { return allocT<HLAssignment>();    }
     inline HLNode *vardecllist()   { return allocT<HLVarDeclList>();   }
+    inline HLNode *autodecl()      { return allocT<HLAutoDecl>();      }
     inline HLNode *vardef()        { return allocT<HLVarDef>();        }
     inline HLNode *retn()          { return allocT<HLReturn>();        }
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
@@ -227,6 +273,8 @@ public:
     inline HLNode *ident()         { return allocT<HLIdent>();         }
     //inline HLNode *range()         { return allocT<HLRange>();         }
     inline HLNode *index()         { return allocT<HLIndex>();         }
+    inline HLNode *func()          { return allocT<HLFunction>();         }
+    inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();         }
 
 private:
     struct Block

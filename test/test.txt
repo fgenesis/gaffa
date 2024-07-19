@@ -4,6 +4,7 @@
 --var z = m:mth(f(0)) -- dafuq
 
 --int a, _ = 0, 1<<z
+--int a = 1<<z
 
 --var s = ""
 --var x:int = 0xacab
@@ -42,6 +43,9 @@
 
 --i = 5
 
-table t = {}
-t.x = 5
-a,b = 1,2
+--table t = {[a]=2}
+--t.x = 5
+--t[0] = 6
+--a,b = 1,2
+
+func hello() {}

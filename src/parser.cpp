@@ -89,20 +89,43 @@ Str Parser::_identStr(const Lexer::Token& tok)
 
 const Parser::ParseRule Parser::Rules[] =
 {
-    // operators
+    // grouping
     { Lexer::TOK_LPAREN, &Parser::grouping, NULL,            NULL,             Parser::PREC_NONE  },
+
+    // math operators
     { Lexer::TOK_PLUS  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_ADD   },
     { Lexer::TOK_MINUS , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_ADD   },
     { Lexer::TOK_STAR  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_MUL   },
     { Lexer::TOK_EXCL  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_MUL   },
     { Lexer::TOK_SLASH , NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
-    { Lexer::TOK_QQM,    &Parser::unary,    NULL,            NULL,             Parser::PREC_UNARY  },
-    { Lexer::TOK_DOTDOT, &Parser::unaryRange,&Parser::binaryRange,&Parser::postfixRange, Parser::PREC_UNARY  },
+    { Lexer::TOK_SLASH2X,NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
 
-    // control structures
-    //{ Lexer::TOK_IF,     &Parser::conditional,NULL,          NULL,   Parser::PREC_NONE  },
-    //{ Lexer::TOK_FOR,    &Parser::forloop,  NULL,            NULL,   Parser::PREC_NONE  },
-    //{ Lexer::TOK_WHILE,  &Parser::whileloop,NULL,            NULL,   Parser::PREC_NONE  },
+    // bitwise
+    { Lexer::TOK_SHL   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_SHIFT },
+    { Lexer::TOK_SHR   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_SHIFT },
+    { Lexer::TOK_BITAND, NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_AND   },
+    { Lexer::TOK_BITOR , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_OR    },
+    { Lexer::TOK_HAT   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_XOR   },
+    { Lexer::TOK_TILDE , &Parser::unary,    NULL,            NULL,             Parser::PREC_BIT_XOR   },
+
+    // logical
+    { Lexer::TOK_EQ    , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY   },
+    { Lexer::TOK_NEQ   , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY   },
+    { Lexer::TOK_LT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
+    { Lexer::TOK_LTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
+    { Lexer::TOK_GT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
+    { Lexer::TOK_GTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
+    { Lexer::TOK_EXCL  , NULL,              &Parser::binary, NULL,             Parser::PREC_UNARY      },
+    { Lexer::TOK_LOGAND, NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_AND  },
+    { Lexer::TOK_LOGOR , NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_OR   },
+
+    // special
+    { Lexer::TOK_QQM,    &Parser::unary,    NULL,            NULL,             Parser::PREC_UNARY  },
+    { Lexer::TOK_FATARROW,NULL,             &Parser::binary, NULL,             Parser::PREC_UNWRAP  },
+    { Lexer::TOK_HASH  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_UNWRAP  },
+
+    // ranges
+    { Lexer::TOK_DOTDOT, &Parser::unaryRange,&Parser::binaryRange,&Parser::postfixRange, Parser::PREC_UNARY  },
 
     // values
     { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            NULL,             Parser::PREC_NONE  },
@@ -114,6 +137,7 @@ const Parser::ParseRule Parser::Rules[] =
     //{ Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_LCUR,   &Parser::tablecons,NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_LSQ,    &Parser::arraycons,NULL,            NULL,             Parser::PREC_NONE  },
+    { Lexer::TOK_FUNC,   &Parser::closurecons,NULL,            NULL,             Parser::PREC_NONE  },
 
     { Lexer::TOK_E_ERROR,NULL,              NULL,            NULL,             Parser::PREC_NONE, }
 };
@@ -148,14 +172,13 @@ HLNode *Parser::parse()
 
 HLNode *Parser::expr()
 {
-    return parsePrecedence(PREC_ASSIGNMENT);
+    return parsePrecedence(PREC_NONE);
 }
 
 // does not include declarations: if(x) stmt (without {})
 HLNode* Parser::stmt()
 {
     HLNode *ret = NULL;
-    //HLNode *exp;
     switch(curtok.tt)
     {
         case Lexer::TOK_CONTINUE:
@@ -173,6 +196,11 @@ HLNode* Parser::stmt()
             ret = forloop();
             break;
 
+        case Lexer::TOK_WHILE:
+            advance();
+            ret = whileloop();
+            break;
+
         case Lexer::TOK_IF:
             advance();
             ret = conditional();
@@ -188,52 +216,6 @@ HLNode* Parser::stmt()
             advance();
             ret = block();
             break;
-
-        /*case Lexer::TOK_LPAREN: // expression as statement -> same as single identifier
-            advance();
-            exp = expr();
-            goto asexpr;*/
-
-        /*case Lexer::TOK_IDENT:
-        {
-            exp = ident();
-            switch(curtok.tt)
-            {
-                case Lexer::TOK_CASSIGN: // x =
-                case Lexer::TOK_MASSIGN: // x :=
-                {
-                    ret = hlir->assignment();
-                    HLNode *idents = hlir->list();
-                    idents->u.list.add(exp, *this);
-                    ret->u.assignment.dstlist = idents;
-                    ret->u.assignment.vallist = _assignmentWithPrefix();
-                }
-                break;
-
-                case Lexer::TOK_COMMA: // x, y =
-                {
-                    ret = hlir->assignment();
-                    HLNode *idents = hlir->list();
-                    idents->u.list.add(exp, *this);
-                    advance();
-                    do
-                        idents->u.list.add(ident(), *this);
-                    while(tryeat(Lexer::TOK_COMMA));
-                    ret->u.assignment.dstlist = idents;
-                    ret->u.assignment.vallist = _assignmentWithPrefix();
-                }
-                break;
-
-                default: // single identifier, probably followed by ( to make a function call
-                asexpr:
-                {
-                    ret = hlir->fncall();
-                    ret->u.fncall.func = exp;
-                    ret->u.fncall.paramlist = _paramlist();
-                }
-            }
-        }*/
-        // fall through
 
         default: // assignment, function call with ignored returns
         {
@@ -266,7 +248,7 @@ HLNode *Parser::parsePrecedence(Prec p)
 
     advance();
 
-    const Context ctx = p <= PREC_ASSIGNMENT ? CTX_ASSIGN : CTX_DEFAULT;
+    const Context ctx = CTX_DEFAULT;
     HLNode *node = (this->*(rule->prefix))(ctx);
 
     for(;;)
@@ -274,7 +256,7 @@ HLNode *Parser::parsePrecedence(Prec p)
         rule = GetRule(curtok.tt);
 
         // No rule? Stop here, it's probably the end of the expr
-        if(!rule || p > rule->precedence)
+        if(!rule || p > rule->precedence || !rule->infix)
             break;
 
         advance();
@@ -324,6 +306,137 @@ HLNode* Parser::whileloop()
     eat(Lexer::TOK_RPAREN);
     node->u.whileloop.body = stmt();
     return node;
+}
+
+// named:
+//   func [optional, attribs] hello(funcparams)
+// closure:
+// ... = func [optional, attribs] (funcparams)
+HLNode* Parser::_functiondef(HLNode **pname)
+{
+    // 'func' was just eaten
+    HLNode *f = ensure(hlir->func());
+    HLNode *h = ensure(hlir->fhdr());
+    if(!(f && h))
+        return NULL;
+
+    unsigned flags = 0;
+
+    if(tryeat(Lexer::TOK_LSQ))
+        _funcattribs(&flags);
+
+    if(pname)
+        *pname = ident();
+
+    h->u.fhdr.paramlist = _funcparams();
+
+    if(tryeat(Lexer::TOK_ARROW))
+        h->u.fhdr.rettypes = _funcreturns(&flags);
+    else
+        flags |= FUNCFLAGS_DEDUCE_RET;
+
+    h->u.fhdr.flags = (FuncFlags)flags;
+
+    f->u.func.decl = h;
+    f->u.func.body = functionbody();
+    return f;
+}
+
+HLNode* Parser::_funcparams()
+{
+    eat(Lexer::TOK_LPAREN);
+    const unsigned openbegin = prevtok.line;
+    HLNode *node = match(Lexer::TOK_RPAREN) ? NULL : _decllist();
+    eatmatching(Lexer::TOK_RPAREN, '(', openbegin);
+    return node;
+}
+
+
+HLNode* Parser::namedfunction()
+{
+    // 'func' was just eaten
+    //
+    // make it a const variable assignment
+    // ie turn this:
+    //   func hello() {...}
+    // into this:
+    //   var hello = func() {...}
+    // with the extra property that the function knows its own identifier, to enable recursion
+
+    HLNode *decl = ensure(hlir->autodecl());
+    if(decl)
+        decl->u.autodecl.value = _functiondef(&decl->u.autodecl.ident);
+    return decl;
+}
+
+HLNode* Parser::closurecons(Context ctx)
+{
+    return _functiondef(NULL);
+}
+
+HLNode* Parser::functionbody()
+{
+    return stmt();
+}
+
+// [pure, this, that]
+void Parser::_funcattribs(unsigned *pfuncflags)
+{
+    // '[' was just eaten
+    const unsigned linebegin = prevtok.line;
+    const Str pure = this->strpool.put("pure");
+
+    while(match(Lexer::TOK_IDENT))
+    {
+        Str s = _identStr(curtok);
+        if(pure.id && s.id == pure.id)
+            *pfuncflags |= FUNCFLAGS_PURE;
+        else
+            errorAtCurrent("Expected function attrib: pure");
+
+        advance();
+        tryeat(Lexer::TOK_COMMA);
+
+    }
+    eatmatching(Lexer::TOK_RSQ, '[', linebegin);
+}
+
+// -> nil
+// -> ...
+// -> ?
+// -> int, float, blah
+// -> bool, int?, ...
+// (nil or '?' or a list of types)
+HLNode* Parser::_funcreturns(unsigned *pfuncflags)
+{
+    // '->' was just eaten
+
+    if(tryeat(Lexer::TOK_NIL))
+        return NULL;
+
+    HLNode *list = ensure(hlir->list());
+    if(list) for(;;)
+    {
+        if(match(Lexer::TOK_IDENT))
+        {
+            list->u.list.add(typeident(), *this);
+            if(!tryeat(Lexer::TOK_COMMA))
+                break;
+        }
+        else if(match(Lexer::TOK_QM) || tryeat(Lexer::TOK_TRIDOT))
+        {
+            *pfuncflags |= FUNCFLAGS_VAR_RET;
+            if(match(Lexer::TOK_COMMA))
+                errorAt(prevtok, "? or ... must be the last entry in a return type list");
+            break;
+        }
+        else
+        {
+            errorAtCurrent("Expected type, '?' or '...'");
+            break;
+        }
+    }
+    return list;
 }
 
 // = EXPRLIST
@@ -481,7 +594,7 @@ HLNode* Parser::_exprlist()
 // int i (2 identifiers)
 HLNode* Parser::trydecl()
 {
-    if(match(Lexer::TOK_VAR) || match(Lexer::TOK_IDENT))
+    if(match(Lexer::TOK_VAR) || match(Lexer::TOK_IDENT) || match(Lexer::TOK_FUNC))
     {
         lookAhead();
         if(lookahead.tt == Lexer::TOK_IDENT)
@@ -493,6 +606,9 @@ HLNode* Parser::trydecl()
 
 HLNode* Parser::decl()
 {
+    if(tryeat(Lexer::TOK_FUNC))
+        return namedfunction();
+
     HLNode *node = ensure(hlir->vardecllist());
     if(node)
     {
@@ -566,11 +682,12 @@ HLNode* Parser::suffixedexpr()
                 advance();
                 break;
 
-            case Lexer::TOK_RSQ:
+            case Lexer::TOK_LSQ:
                 advance();
                 next = hlir->index();
                 next->u.index.lhs = node;
                 next->u.index.expr = expr();
+                eat(Lexer::TOK_RSQ);
                 break;
 
             case Lexer::TOK_LPAREN:
@@ -656,6 +773,14 @@ HLNode* Parser::ident()
 {
     HLNode *node = _ident(curtok);
     advance();
+    return node;
+}
+
+HLNode* Parser::typeident()
+{
+    HLNode *node = ident();
+    if(tryeat(Lexer::TOK_QM))
+        node->u.ident.flags = IDENTFLAGS_OPTIONAL;
     return node;
 }
 
