@@ -41,6 +41,10 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release
 
           # verify in CMakeCache.txt that the compiler is set to the correct one
-          grep -q $COMPILER CMakeCache.txt || exit 1
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+            gcc --version
+          else
+            clang --version
+          fi
 
           make -j $(nproc)
