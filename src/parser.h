@@ -78,6 +78,7 @@ protected:
     HLNode *_decllist();
 
     HLNode *_fncall(HLNode *callee);
+    HLNode *_methodcall(HLNode *obj);
     HLNode *_exprlist();
     HLNode *trydecl();
     HLNode *decl();

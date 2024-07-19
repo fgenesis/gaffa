@@ -46,6 +46,7 @@ enum HLNodeType
     HLNODE_DECLLIST,
     HLNODE_RETURN,
     HLNODE_CALL,
+    HLNODE_MTHCALL,
     HLNODE_IDENT,
     HLNODE_TABLECONS,
     HLNODE_ARRAYCONS,
@@ -172,9 +173,18 @@ struct HLBranchAlways
 struct HLFnCall
 {
     enum { EnumType = HLNODE_CALL };
-    HLNode *func;
+    HLNode *callee;
     HLNode *paramlist;
 };
+
+struct HLMthCall
+{
+    enum { EnumType = HLNODE_MTHCALL };
+    HLNode *obj;
+    HLNode *mthname;
+    HLNode *paramlist;
+};
+
 
 struct HLIdent
 {
@@ -240,6 +250,7 @@ struct HLNode
         HLReturn retn;
         HLBranchAlways branch;
         HLFnCall fncall;
+        HLMthCall mthcall;
         HLRange range;
         HLIndex index;
         HLFunction func;
@@ -270,6 +281,7 @@ public:
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
     inline HLNode *brk()           { return allocT<HLBranchAlways>();  }
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
+    inline HLNode *mthcall()       { return allocT<HLMthCall>();        }
     inline HLNode *ident()         { return allocT<HLIdent>();         }
     //inline HLNode *range()         { return allocT<HLRange>();         }
     inline HLNode *index()         { return allocT<HLIndex>();         }

@@ -575,11 +575,27 @@ HLNode* Parser::_fncall(HLNode* callee)
     HLNode *node = ensure(hlir->fncall());
     if(node)
     {
-        node->u.fncall.func = callee;
+        node->u.fncall.callee = callee;
         node->u.fncall.paramlist = _paramlist();
     }
     return node;
 }
+
+HLNode* Parser::_methodcall(HLNode* obj)
+{
+    // ':' was just eaten
+    // TODO: allow lookup via :[expr]()
+
+    HLNode *node = ensure(hlir->mthcall());
+    if(node)
+    {
+        node->u.mthcall.obj = obj;
+        node->u.mthcall.mthname = ident();
+        node->u.mthcall.paramlist = _paramlist();
+    }
+    return node;
+}
+
 
 HLNode* Parser::_exprlist()
 {
@@ -619,6 +635,9 @@ HLNode* Parser::decl()
             eat(Lexer::TOK_CASSIGN);
         node->u.vardecllist.vallist = _exprlist();
     }
+
+    tryeat(Lexer::TOK_SEMICOLON);
+
     return node;
 }
 
@@ -632,20 +651,6 @@ HLNode* Parser::declOrStmt()
 
 HLNode* Parser::block()
 {
-    /*HLNode *node = hlir->list();
-    for(;;)
-    {
-        if(prevtok.tt == Lexer::TOK_E_ERROR)
-            break;
-
-        if(tryeat(Lexer::TOK_RCUR))
-            break;
-
-        HLNode *stmt = declOrStmt();
-        node->u.list.add(stmt, *this);
-    }
-    return node;*/
-
     HLNode *node = stmtlist(Lexer::TOK_RCUR);
     eat(Lexer::TOK_RCUR);
     return node;
@@ -697,7 +702,7 @@ HLNode* Parser::suffixedexpr()
 
             case Lexer::TOK_COLON:
                 advance();
-                assert(false); // TODO: mth call
+                next = _methodcall(node);
                 break;
 
             default:

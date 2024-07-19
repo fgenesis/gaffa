@@ -1,6 +1,7 @@
 
 -- hello world
 
+var z = m:mth()
 --var z = m:mth(f(0)) -- dafuq
 
 --int a, _ = 0, 1<<z
@@ -48,4 +49,8 @@
 --t[0] = 6
 --a,b = 1,2
 
-func hello() {}
+--func hello()
+--{
+--	int i = 0;
+--	return i+5;
+--}
