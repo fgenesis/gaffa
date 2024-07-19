@@ -1,0 +1,50 @@
+name: Build
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        cmake: ['2.6', '2.8', '3.0', '3.3', '3.20']
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup cmake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ matrix.cmake }}
+
+      - name: Install dependencies
+        run: sudo apt update -y && sudo apt install -y build-essential
+
+      - name: Verify cmake version
+        run: cmake --version
+
+      - name: Build with ${{ matrix.compiler }}
+        run: |
+          mkdir build
+          cd build
+
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+            export CC=gcc
+            export CXX=g++
+          else
+            export CC=clang
+            export CXX=clang++
+          fi
+
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+
+          # verify in CMakeCache.txt that the compiler is set to the correct one
+          if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+            gcc --version
+          else
+            clang --version
+          fi
+
+          make -j $(nproc)
