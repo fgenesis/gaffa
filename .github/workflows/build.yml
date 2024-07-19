@@ -23,6 +23,8 @@ jobs:
         run: cmake --version
 
       - name: Build with ${{ matrix.compiler }}
+        env:
+          COMPILER: ${{ matrix.compiler }}
         run: |
           mkdir build
           cd build
