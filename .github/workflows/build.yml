@@ -1,0 +1,29 @@
+name: Build
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+        cmake: [2.6, 2.8, 3.0, 3.3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup cmake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ matrix.cmake }}
+
+      - name: Verify cmake version
+        run: cmake --version
+
+      - name: Build with ${{ matrix.compiler }}
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_C_COMPILER=$COMPILER -DCMAKE_CXX_COMPILER=$COMPILER++
+          make -j $(nproc)
