@@ -23,23 +23,19 @@ jobs:
         run: cmake --version
 
       - name: Build with ${{ matrix.compiler }}
-        if: matrix.compiler == 'gcc'
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
 
-          # verify in CMakeCache.txt that the compiler is set to the correct one
-          grep -q $COMPILER CMakeCache.txt || exit 1
+          if [ $COMPILER = "gcc" ]; then
+            export CC=gcc
+            export CXX=g++
+          else
+            export CC=clang
+            export CXX=clang++
+          fi
 
-          make -j $(nproc)
-
-      - name: Build with ${{ matrix.compiler }}
-        if: matrix.compiler == 'clang'
-        run: |
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          cmake .. -DCMAKE_BUILD_TYPE=Release
 
           # verify in CMakeCache.txt that the compiler is set to the correct one
           grep -q $COMPILER CMakeCache.txt || exit 1
