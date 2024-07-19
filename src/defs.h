@@ -1,5 +1,13 @@
 #pragma once
 
+// Make sure some linux shit doesn't get pulled in
+#ifndef __STRICT_ANSI__
+#define __STRICT_ANSI__ 1
+#endif
+#ifndef __USE_MISC
+#define __USE_MISC 0
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 #include <limits.h> // CHAR_BIT
