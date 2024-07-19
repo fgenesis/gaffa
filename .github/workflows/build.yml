@@ -20,7 +20,7 @@ jobs:
           cmake-version: ${{ matrix.cmake }}
 
       - name: Install dependencies
-        run: apt update -y && apt install -y build-essential
+        run: sudo apt update -y && sudo apt install -y build-essential
 
       - name: Verify cmake version
         run: cmake --version
