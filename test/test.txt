@@ -1,8 +1,9 @@
 
 -- hello world
+var z = f()
 
-var z = m:mth()
---var z = m:mth(f(0)) -- dafuq
+var z = m:mth(f())
+var z = m:mth(f(0)) -- dafuq
 
 --int a, _ = 0, 1<<z
 --int a = 1<<z

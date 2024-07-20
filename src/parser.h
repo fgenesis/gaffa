@@ -90,6 +90,7 @@ protected:
 
     HLNode *primaryexpr(); // the start of any expr-as-statement
     HLNode *suffixedexpr();
+    HLNode *_suffixed(HLNode *prefix);
 
     // prefixexpr { .ident | [expr] | :ident paramlist | paramlist }
 
@@ -104,7 +105,7 @@ protected:
     HLNode *bfalse(Context ctx);
     HLNode *ident();
     HLNode *typeident();
-    HLNode *_identPrev(Context ctx);
+    HLNode *_identInExpr(Context ctx);
     HLNode *nil(Context ctx);
     HLNode *tablecons(Context ctx);
     HLNode *arraycons(Context ctx);

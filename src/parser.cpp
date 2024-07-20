@@ -130,7 +130,7 @@ const Parser::ParseRule Parser::Rules[] =
     // values
     { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_IDENT,  &Parser::_identPrev,NULL,            NULL,             Parser::PREC_NONE  },
+    { Lexer::TOK_IDENT,  &Parser::_identInExpr,NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_NIL,    &Parser::nil,      NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_TRUE ,  &Parser::btrue,    NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_FALSE , &Parser::bfalse,   NULL,            NULL,             Parser::PREC_NONE  },
@@ -564,9 +564,11 @@ begin:
 
 HLNode* Parser::_paramlist()
 {
-    eat(Lexer::TOK_LPAREN);
+    // '(' was eaten
+    assert(prevtok.tt == Lexer::TOK_LPAREN);
+    unsigned begin = prevtok.line;
     HLNode *ret = _exprlist();
-    eat(Lexer::TOK_RPAREN);
+    eatmatching(Lexer::TOK_RPAREN, '(', begin);
     return ret;
 }
 
@@ -591,6 +593,7 @@ HLNode* Parser::_methodcall(HLNode* obj)
     {
         node->u.mthcall.obj = obj;
         node->u.mthcall.mthname = ident();
+        eat(Lexer::TOK_LPAREN);
         node->u.mthcall.paramlist = _paramlist();
     }
     return node;
@@ -665,15 +668,21 @@ HLNode* Parser::primaryexpr()
         : ident();
 }
 
+HLNode* Parser::suffixedexpr()
+{
+    return _suffixed(primaryexpr());
+}
+
+
 /* EXPR followed by one of:
   '.' ident
   [expr]
   (args)
   :mth(args)
 */
-HLNode* Parser::suffixedexpr()
+HLNode* Parser::_suffixed(HLNode *prefix)
 {
-    HLNode *node = primaryexpr();
+    HLNode *node = prefix;
     for(;;)
     {
         HLNode *next = NULL;
@@ -789,9 +798,9 @@ HLNode* Parser::typeident()
     return node;
 }
 
-HLNode* Parser::_identPrev(Context ctx)
+HLNode* Parser::_identInExpr(Context ctx)
 {
-    return _ident(prevtok);
+    return _suffixed(_ident(prevtok));
 }
 
 HLNode *Parser::grouping(Context ctx)
