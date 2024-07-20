@@ -27,7 +27,7 @@ enum TypeBits
 
 enum PrimType
 {
-    PRIMTYPE_NIL,
+    PRIMTYPE_NIL, // must be 0
     PRIMTYPE_BOOL,
     PRIMTYPE_UINT,
     PRIMTYPE_SINT,

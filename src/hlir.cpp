@@ -13,7 +13,7 @@ HLIRBuilder::~HLIRBuilder()
     clear();
 }
 
-HLNode* HLIRBuilder::alloc(HLNodeType ty)
+HLNode* HLIRBuilder::alloc()
 {
     for(;;)
     {
@@ -22,8 +22,7 @@ HLNode* HLIRBuilder::alloc(HLNodeType ty)
             HLNode *p = b->alloc();
             if(p)
             {
-                p->type = ty;
-                memset(&p->u, 0, sizeof(p->u));
+                memset(p, 0, sizeof(*p));
                 return p;
             }
         }
@@ -88,4 +87,51 @@ HLNode *HLList::add(HLNode* node, const GaAlloc& ga)
 
     list[used++] = node;
     return node;
+}
+
+static inline void invalidate(HLNode *n)
+{
+    n->type = HLNODE_NONE;
+}
+
+static void fix0(HLNode *n)
+{
+    switch(n->type)
+    {
+        // -2, +2 is how to make explicit signed literals
+        case HLNODE_UNARY:
+            if(n->tok == Lexer::TOK_PLUS || n->tok == Lexer::TOK_MINUS)
+            {
+                HLNode *rhs = n->u.unary.rhs;
+                if(rhs->type == HLNODE_CONSTANT_VALUE && rhs->u.constant.val.type == PRIMTYPE_UINT)
+                {
+                    *n = *rhs;
+                    invalidate(rhs);
+                    n->u.constant.val.type = PRIMTYPE_SINT;
+                    return;
+                }
+            }
+            break;
+
+    }
+}
+
+
+void hlirPass0(HLNode *root)
+{
+    if(!root || root->type == HLNODE_NONE)
+        return;
+
+    fix0(root);
+
+    unsigned N = root->_nch;
+    HLNode **ch = &root->u.aslist[0];
+    if(N == HLList::Children)
+    {
+        ch = root->u.list.list;
+        N = root->u.list.used;
+    }
+
+    for(unsigned i = 0; i < N; ++i)
+        hlirPass0(ch[i]);
 }

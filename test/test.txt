@@ -4,10 +4,10 @@ var z = f()
 var z = m:mth(f())
 var z = m:mth(f(0)) -- dafuq
 
-int a, _ = 0, 1<<z
+int a, _ = +1, 1<<z
 int a = 1<<z
 
-var s = ""
+var s = "hi"
 var x:int = 0xacab
 
 int a = -b

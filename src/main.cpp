@@ -71,6 +71,8 @@ int main(int argc, char **argv)
     HLIRBuilder hb(ga);
     pp.hlir = &hb;
     HLNode *node = pp.parse();
+    if(node)
+        hlirPass0(node);
 
 
     /*

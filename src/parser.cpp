@@ -183,12 +183,12 @@ HLNode* Parser::stmt()
     {
         case Lexer::TOK_CONTINUE:
             advance();
-            ret = hlir->continu();
+            ret = ensure(hlir->continu());
             break;
 
         case Lexer::TOK_BREAK:
             advance();
-            ret = hlir->brk();
+            ret = ensure(hlir->brk());
             break;
 
         case Lexer::TOK_FOR:
@@ -208,7 +208,7 @@ HLNode* Parser::stmt()
 
         case Lexer::TOK_RETURN:
             advance();
-            ret = hlir->retn();
+            ret = ensure(hlir->retn());
             ret->u.retn.what = _exprlist();
             break;
 
@@ -270,6 +270,7 @@ HLNode *Parser::parsePrecedence(Prec p)
 
 HLNode* Parser::valblock()
 {
+    // '$' was just eaten
     eat(Lexer::TOK_LCUR);
     return block();
 }
@@ -277,34 +278,43 @@ HLNode* Parser::valblock()
 HLNode* Parser::conditional()
 {
     // 'if' was consumed
-    HLNode *node = hlir->conditional();
-    eat(Lexer::TOK_LPAREN);
-    node->u.conditional.condition = expr();
-    eat(Lexer::TOK_RPAREN);
-    node->u.conditional.ifblock = stmt();
-    node->u.conditional.elseblock = tryeat(Lexer::TOK_ELSE) ? stmt() : NULL;
+    HLNode *node = ensure(hlir->conditional());
+    if(node)
+    {
+        eat(Lexer::TOK_LPAREN);
+        node->u.conditional.condition = expr();
+        eat(Lexer::TOK_RPAREN);
+        node->u.conditional.ifblock = stmt();
+        node->u.conditional.elseblock = tryeat(Lexer::TOK_ELSE) ? stmt() : NULL;
+    }
     return node;
 }
 
 HLNode* Parser::forloop()
 {
     // 'for' was consumed
-    HLNode *node = hlir->forloop();
-    eat(Lexer::TOK_LPAREN);
-    node->u.forloop.iter = decl(); // must decl new var(s) for the loop
-    eat(Lexer::TOK_RPAREN);
-    node->u.forloop.body = stmt();
+    HLNode *node = ensure(hlir->forloop());
+    if(node)
+    {
+        eat(Lexer::TOK_LPAREN);
+        node->u.forloop.iter = decl(); // must decl new var(s) for the loop
+        eat(Lexer::TOK_RPAREN);
+        node->u.forloop.body = stmt();
+    }
     return node;
 }
 
 HLNode* Parser::whileloop()
 {
     // 'while' was consumed
-    HLNode *node = hlir->whileloop();
-    eat(Lexer::TOK_LPAREN);
-    node->u.whileloop.cond = expr();
-    eat(Lexer::TOK_RPAREN);
-    node->u.whileloop.body = stmt();
+    HLNode *node = ensure(hlir->whileloop());
+    if(node)
+    {
+        eat(Lexer::TOK_LPAREN);
+        node->u.whileloop.cond = expr();
+        eat(Lexer::TOK_RPAREN);
+        node->u.whileloop.body = stmt();
+    }
     return node;
 }
 
@@ -335,7 +345,7 @@ HLNode* Parser::_functiondef(HLNode **pname)
     else
         flags |= FUNCFLAGS_DEDUCE_RET;
 
-    h->u.fhdr.flags = (FuncFlags)flags;
+    h->flags = (FuncFlags)flags;
 
     f->u.func.decl = h;
     f->u.func.body = functionbody();
@@ -479,7 +489,9 @@ HLNode* Parser::_restassign(HLNode* firstLhs)
 HLNode* Parser::_decllist()
 {
     // curtok is ident or var
-    HLNode * const node = hlir->list();
+    HLNode * const node = ensure(hlir->list());
+    if(!node)
+        return NULL;
 
     bool isvar = curtok.tt == Lexer::TOK_VAR;
     HLNode *lasttype = NULL;
@@ -633,7 +645,7 @@ HLNode* Parser::decl()
     {
         node->u.vardecllist.decllist = _decllist();
         if(tryeat(Lexer::TOK_MASSIGN))
-            node->u.vardecllist.mut = true;
+            node->flags = DECLFLAG_MUTABLE;
         else
             eat(Lexer::TOK_CASSIGN);
         node->u.vardecllist.vallist = _exprlist();
@@ -753,7 +765,7 @@ HLNode* Parser::typeident()
 {
     HLNode *node = ident();
     if(tryeat(Lexer::TOK_QM))
-        node->u.ident.flags = IDENTFLAGS_OPTIONAL;
+        node->flags = IDENTFLAGS_OPTIONALTYPE;
     return node;
 }
 
@@ -778,7 +790,7 @@ HLNode *Parser::unary(Context ctx)
     HLNode *node = ensure(hlir->unary());
     if(node)
     {
-        node->u.unary.tok = rule->tok;
+        node->tok = rule->tok;
         node->u.unary.rhs = rhs;
     }
 
@@ -795,7 +807,7 @@ HLNode * Parser::binary(Context ctx, const Parser::ParseRule *rule, HLNode *lhs)
     HLNode *node = ensure(hlir->binary());
     if(node)
     {
-        node->u.binary.tok = rule->tok;
+        node->tok = rule->tok;
         node->u.binary.rhs = rhs;
         node->u.binary.lhs = lhs;
     }
@@ -896,9 +908,7 @@ void Parser::errorAtCurrent(const char* msg)
 
 HLNode *Parser::nil(Context ctx)
 {
-    HLNode *node = hlir->constantValue();
-    node->u.constant.val.type = PRIMTYPE_NIL;
-    return node;
+    return ensure(hlir->constantValue());
 }
 
 HLNode* Parser::tablecons(Context ctx)
@@ -906,7 +916,10 @@ HLNode* Parser::tablecons(Context ctx)
     // { was just eaten while parsing an expr
     const unsigned beginline = prevtok.line;
 
-    HLNode *node = hlir->list();
+    HLNode *node = ensure(hlir->list());
+    if(!node)
+        return NULL;
+
     node->type = HLNODE_TABLECONS;
 
     do
@@ -1040,23 +1053,29 @@ HLNode* Parser::_rangeStep()
 
 HLNode* Parser::iterdecls()
 {
-    HLNode *node = hlir->list();
-    do
-        node->u.list.add(decl(), *this);
-    while(tryeat(Lexer::TOK_SEMICOLON));
+    HLNode *node = ensure(hlir->list());
+    if(node)
+    {
+        do
+            node->u.list.add(decl(), *this);
+        while(tryeat(Lexer::TOK_SEMICOLON));
 
-    node->type = HLNODE_ITER_DECLLIST;
+        node->type = HLNODE_ITER_DECLLIST;
+    }
     return node;
 }
 
 HLNode* Parser::iterexprs()
 {
-    HLNode *node = hlir->list();
-    do
-        node->u.list.add(expr(), *this);
-    while(tryeat(Lexer::TOK_SEMICOLON));
+    HLNode *node = ensure(hlir->list());
+    if(node)
+    {
+        do
+            node->u.list.add(expr(), *this);
+        while(tryeat(Lexer::TOK_SEMICOLON));
 
-    node->type = HLNODE_ITER_EXPRLIST;
+        node->type = HLNODE_ITER_EXPRLIST;
+    }
     return node;
 }
 
@@ -1077,9 +1096,6 @@ HLNode* Parser::stmtlist(Lexer::TokenType endtok)
 
 HLNode *Parser::emitConstant(const Val& v)
 {
-    if(v.type == PRIMTYPE_NIL)
-        return NULL;
-
     HLNode *node = ensure(hlir->constantValue());
     if(node)
         node->u.constant.val = v;

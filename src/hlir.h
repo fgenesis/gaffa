@@ -15,8 +15,8 @@ enum Comparison
 
 enum IdentFlags
 {
-    IDENTFLAGS_NONE     = 0x00,
-    IDENTFLAGS_OPTIONAL = 0x01
+    IDENTFLAGS_NONE         = 0x00,
+    IDENTFLAGS_OPTIONALTYPE = 0x01
 };
 
 enum FuncFlags
@@ -27,6 +27,11 @@ enum FuncFlags
     FUNCFLAGS_DEDUCE_RET = 0x08,
 };
 
+enum DeclFlags
+{
+    DECLFLAG_DEFAULT = 0x00,
+    DECLFLAG_MUTABLE = 0x01
+};
 
 enum HLNodeType
 {
@@ -67,31 +72,30 @@ enum HLTypeFlags
 
 struct HLNode;
 
+// Important: Any must be the FIRST struct members!
+
 struct HLConstantValue
 {
-    enum { EnumType = HLNODE_CONSTANT_VALUE };
+    enum { EnumType = HLNODE_CONSTANT_VALUE, Children = 0 };
     ValU val;
 };
 
 struct HLUnary
 {
-    enum { EnumType = HLNODE_UNARY };
-    Lexer::TokenType tok;
+    enum { EnumType = HLNODE_UNARY, Children = 1 };
     HLNode *rhs;
 };
 
 struct HLBinary
 {
-    enum { EnumType = HLNODE_BINARY };
-    Lexer::TokenType tok;
+    enum { EnumType = HLNODE_BINARY, Children = 2 };
     HLNode *lhs;
     HLNode *rhs;
 };
 
 struct HLTernary
 {
-    enum { EnumType = HLNODE_TERNARY };
-    Lexer::TokenType tok;
+    enum { EnumType = HLNODE_TERNARY, Children = 3 };
     HLNode *a;
     HLNode *b;
     HLNode *c;
@@ -99,7 +103,7 @@ struct HLTernary
 
 struct HLConditional
 {
-    enum { EnumType = HLNODE_CONDITIONAL };
+    enum { EnumType = HLNODE_CONDITIONAL, Children = 3 };
     HLNode *condition;
     HLNode *ifblock;
     HLNode *elseblock;
@@ -107,21 +111,21 @@ struct HLConditional
 
 struct HLForLoop
 {
-    enum { EnumType = HLNODE_FORLOOP };
+    enum { EnumType = HLNODE_FORLOOP, Children = 2 };
     HLNode *iter;
     HLNode *body;
 };
 
 struct HLWhileLoop
 {
-    enum { EnumType = HLNODE_WHILELOOP };
+    enum { EnumType = HLNODE_WHILELOOP, Children = 2 };
     HLNode *cond;
     HLNode *body;
 };
 
 struct HLList
 {
-    enum { EnumType = HLNODE_LIST };
+    enum { EnumType = HLNODE_LIST, Children = 0xff };
     size_t used;
     size_t cap;
     HLNode **list;
@@ -131,14 +135,14 @@ struct HLList
 
 struct HLVarDef
 {
-    enum { EnumType = HLNODE_VARDEF };
+    enum { EnumType = HLNODE_VARDEF, Children = 2 };
     HLNode *ident;
     HLNode *type;
 };
 
 struct HLAutoDecl
 {
-    enum { EnumType = HLNODE_AUTODECL };
+    enum { EnumType = HLNODE_AUTODECL, Children = 3 };
     HLNode *ident;
     HLNode *value;
     HLNode *type;
@@ -146,41 +150,40 @@ struct HLAutoDecl
 
 struct HLVarDeclList
 {
-    enum { EnumType = HLNODE_VARDECLASSIGN };
+    enum { EnumType = HLNODE_VARDECLASSIGN, Children = 2 };
     HLNode *decllist;
     HLNode *vallist;
-    bool mut;
 };
 
 struct HLAssignment
 {
-    enum { EnumType = HLNODE_ASSIGNMENT };
+    enum { EnumType = HLNODE_ASSIGNMENT, Children = 2 };
     HLNode *dstlist;
     HLNode *vallist;
 };
 
 struct HLReturn
 {
-    enum { EnumType = HLNODE_RETURN };
+    enum { EnumType = HLNODE_RETURN, Children = 1 };
     HLNode *what;
 };
 
 struct HLBranchAlways
 {
-    enum { EnumType = HLNODE_NONE };
+    enum { EnumType = HLNODE_NONE, Children = 1 };
     HLNode *target;
 };
 
 struct HLFnCall
 {
-    enum { EnumType = HLNODE_CALL };
+    enum { EnumType = HLNODE_CALL, Children = 2 };
     HLNode *callee;
     HLNode *paramlist;
 };
 
 struct HLMthCall
 {
-    enum { EnumType = HLNODE_MTHCALL };
+    enum { EnumType = HLNODE_MTHCALL, Children = 3 };
     HLNode *obj;
     HLNode *mthname;
     HLNode *paramlist;
@@ -189,20 +192,20 @@ struct HLMthCall
 
 struct HLIdent
 {
-    enum { EnumType = HLNODE_IDENT };
+    enum { EnumType = HLNODE_IDENT, Children = 0 };
     unsigned nameStrId;
     size_t len;
-    IdentFlags flags;
+    //IdentFlags flags;
 };
 
 struct HLSink
 {
-    enum { EnumType = HLNODE_SINK };
+    enum { EnumType = HLNODE_SINK, Children = 0 };
 };
 
 struct HLIndex
 {
-    enum { EnumType = HLNODE_INDEX };
+    enum { EnumType = HLNODE_INDEX, Children = 2 };
     HLNode *lhs;
     HLNode *expr;       // for []
     unsigned nameStrId; // for .
@@ -210,15 +213,15 @@ struct HLIndex
 
 struct HLFunctionHdr
 {
-     enum { EnumType = HLNODE_FUNCTIONHDR };
+     enum { EnumType = HLNODE_FUNCTIONHDR, Children = 2 };
     HLNode *rettypes;
     HLNode *paramlist; // list of HLVarDecl
-    FuncFlags flags;
+    //FuncFlags flags;
 };
 
 struct HLFunction
 {
-    enum { EnumType = HLNODE_FUNCTION };
+    enum { EnumType = HLNODE_FUNCTION, Children = 2 };
     HLNode *decl;
     HLNode *body;
 };
@@ -229,7 +232,6 @@ struct HLFunction
 // This is to make node-based optimization easier.
 struct HLNode
 {
-    HLNodeType type;
     union
     {
         HLConstantValue constant;
@@ -253,7 +255,13 @@ struct HLNode
         HLFunction func;
         HLFunctionHdr fhdr;
         HLSink sink;
+
+        HLNode *aslist[3];
     } u;
+    unsigned char type; // HLNodeType
+    unsigned char tok;  // Lexer::TokenType
+    unsigned char flags; // any of the flags above, depends on type
+    unsigned char _nch; // number of child nodes
 };
 
 
@@ -295,13 +303,21 @@ private:
         // payload follows
         HLNode *alloc();
     };
-    template<typename T> inline HLNode *allocT(HLNodeType ty = HLNodeType(T::EnumType))
+    template<typename T> inline HLNode *allocT()
     {
-        return alloc(ty);
+        HLNode *node = alloc();
+        if(node)
+        {
+            node->type = HLNodeType(T::EnumType);
+            node->_nch = T::Children;
+        }
+        return node;
     }
-    HLNode *alloc(HLNodeType ty);
+    HLNode *alloc();
     void clear();
     Block *allocBlock(size_t sz);
     GaAlloc galloc;
     Block *b;
 };
+
+void hlirPass0(HLNode *root);
