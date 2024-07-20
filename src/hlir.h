@@ -56,6 +56,7 @@ enum HLNodeType
     HLNODE_INDEX,
     HLNODE_FUNCTION,
     HLNODE_FUNCTIONHDR,
+    HLNODE_SINK
 };
 
 enum HLTypeFlags
@@ -194,12 +195,9 @@ struct HLIdent
     IdentFlags flags;
 };
 
-struct HLRange
+struct HLSink
 {
-    enum { EnumType = HLNODE_RANGE };
-    HLNode *begin;
-    HLNode *end;
-    HLNode *step;
+    enum { EnumType = HLNODE_SINK };
 };
 
 struct HLIndex
@@ -251,10 +249,10 @@ struct HLNode
         HLBranchAlways branch;
         HLFnCall fncall;
         HLMthCall mthcall;
-        HLRange range;
         HLIndex index;
         HLFunction func;
         HLFunctionHdr fhdr;
+        HLSink sink;
     } u;
 };
 
@@ -281,13 +279,13 @@ public:
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
     inline HLNode *brk()           { return allocT<HLBranchAlways>();  }
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
-    inline HLNode *mthcall()       { return allocT<HLMthCall>();        }
+    inline HLNode *mthcall()       { return allocT<HLMthCall>();       }
     inline HLNode *ident()         { return allocT<HLIdent>();         }
-    //inline HLNode *range()         { return allocT<HLRange>();         }
     inline HLNode *index()         { return allocT<HLIndex>();         }
-    inline HLNode *func()          { return allocT<HLFunction>();         }
-    inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();         }
-
+    inline HLNode *func()          { return allocT<HLFunction>();      }
+    inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();   }
+    inline HLNode *sink()          { return allocT<HLSink>();          }
+    
 private:
     struct Block
     {

@@ -722,46 +722,6 @@ HLNode* Parser::_suffixed(HLNode *prefix)
     }
 }
 
-/*
-// ident
-// prefixexpr[expr]
-// prefixexpr.ident
-// ie. anything that can be the target of an assignment
-HLNode* Parser::holder(Context ctx)
-{
-    if(match(Lexer::TOK_IDENT))
-        return ident();
-
-    HLNode *ex = prefixexpr(ctx);
-    HLNode *idx = NULL;
-
-    const Lexer::TokenType tt = curtok.tt;
-
-    switch(tt)
-    {
-        case Lexer::TOK_LSQ:
-            idx = expr();
-            break;
-
-        case Lexer::TOK_DOT:
-            idx = ident();
-            break;
-
-        default:
-            errorAtCurrent("Expected identifier, '[' or '.' to follow this expression");
-    }
-
-    HLNode *node = ensure(hlir->binary());
-    if(node)
-    {
-        node->u.binary.lhs = ex;
-        node->u.binary.rhs = idx;
-        node->u.binary.tok = tt;
-    }
-    return node;
-}
-*/
-
 HLNode* Parser::litnum(Context ctx)
 {
     return emitConstant(makenum(prevtok.begin, prevtok.begin + prevtok.u.len));
@@ -781,7 +741,6 @@ HLNode* Parser::bfalse(Context ctx)
 {
     return emitConstant(false);
 }
-
 
 HLNode* Parser::ident()
 {
@@ -992,17 +951,20 @@ HLNode* Parser::arraycons(Context ctx)
     // [ was just eaten while parsing an expr
     const unsigned beginline = prevtok.line;
 
-    HLNode *node = hlir->list();
-    node->type = HLNODE_ARRAYCONS;
-
-    do
+    HLNode *node = ensure(hlir->list());
+    if(node)
     {
-        if(match(Lexer::TOK_RSQ))
-            break;
+        node->type = HLNODE_ARRAYCONS;
 
-        node->u.list.add(expr(), *this);
+        do
+        {
+            if(match(Lexer::TOK_RSQ))
+                break;
+
+            node->u.list.add(expr(), *this);
+        }
+        while(tryeat(Lexer::TOK_COMMA) || tryeat(Lexer::TOK_SEMICOLON));
     }
-    while(tryeat(Lexer::TOK_COMMA) || tryeat(Lexer::TOK_SEMICOLON));
 
     eatmatching(Lexer::TOK_RSQ, '[', beginline);
 
@@ -1011,16 +973,22 @@ HLNode* Parser::arraycons(Context ctx)
 
 HLNode* Parser::_ident(const Lexer::Token& tok)
 {
+    if(tok.tt == Lexer::TOK_SINK)
+        return ensure(hlir->sink());
+
     if(tok.tt != Lexer::TOK_IDENT)
     {
         errorAt(tok, "expected identifier");
         return NULL;
     }
 
-    HLNode *node = hlir->ident();
-    Str s = _tokenStr(tok);
-    node->u.ident.nameStrId = s.id;
-    node->u.ident.len = s.len;
+    HLNode *node = ensure(hlir->ident());
+    if(node)
+    {
+        Str s = _tokenStr(tok);
+        node->u.ident.nameStrId = s.id;
+        node->u.ident.len = s.len;
+    }
     return node;
 }
 
