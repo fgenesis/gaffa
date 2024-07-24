@@ -85,6 +85,9 @@ protected:
     HLNode *declOrStmt();
     HLNode *block();
 
+    HLNode *fncall(Context ctx, const ParseRule *rule, HLNode *lhs);
+    HLNode *mthcall(Context ctx, const ParseRule *rule, HLNode *lhs);
+
 
     //HLNode *prefixexpr(Context ctx); // ident | (expr)
 
@@ -103,6 +106,7 @@ protected:
     HLNode *litstr(Context ctx);
     HLNode *btrue(Context ctx);
     HLNode *bfalse(Context ctx);
+    HLNode *name();
     HLNode *ident();
     HLNode *typeident();
     HLNode *_identInExpr(Context ctx);
@@ -128,7 +132,7 @@ private:
     HLNode *parsePrecedence(Prec p);
     void eat(Lexer::TokenType tt);
     bool tryeat(Lexer::TokenType tt);
-    bool match(Lexer::TokenType tt);
+    bool match(Lexer::TokenType tt) const;
     void eatmatching(Lexer::TokenType tt, char opening, unsigned linebegin);
     void errorAt(const Lexer::Token& tok, const char *msg);
     void error(const char *msg);

@@ -14,7 +14,7 @@ OToABC:
 - 3 bytes target, src1, src2
 
 oXXX:
-- 
+-
 
 
 
@@ -40,7 +40,7 @@ enum GaOpMasks
     GA_OPMASK_ARITH_TYPEMASK = (0x03 << 4), // 2 bits, one of GaOpTypes
 
     // for checking that (op & GA_OPMASK_ARITH_IDMASK) == GA_OPMASK_ARITH_ID
-    GA_OPMASK_ARITH_ID       = (0x01 << 6), // 2 bits, 
+    GA_OPMASK_ARITH_ID       = (0x01 << 6), // 2 bits,
     GA_OPMASK_ARITH_IDMASK    = (0x03 << 6), // 2 bits,
 };
 
@@ -115,7 +115,7 @@ struct Reg
 
 };
 
-class VM
+class VMBlah
 {
 public:
     void run();

@@ -1,3 +1,7 @@
+// High-level intermediate representation
+// aka AST.
+// This is produced by the parser.
+
 #pragma once
 
 #include "gainternal.h"
@@ -53,6 +57,7 @@ enum HLNodeType
     HLNODE_CALL,
     HLNODE_MTHCALL,
     HLNODE_IDENT,
+    HLNODE_NAME,
     HLNODE_TABLECONS,
     HLNODE_ARRAYCONS,
     HLNODE_RANGE,
@@ -151,7 +156,7 @@ struct HLAutoDecl
 struct HLVarDeclList
 {
     enum { EnumType = HLNODE_VARDECLASSIGN, Children = 2 };
-    HLNode *decllist;
+    HLNode *decllist; // list of HLVarDef
     HLNode *vallist;
 };
 
@@ -185,17 +190,20 @@ struct HLMthCall
 {
     enum { EnumType = HLNODE_MTHCALL, Children = 3 };
     HLNode *obj;
-    HLNode *mthname;
+    HLNode *mth; // name or expr
     HLNode *paramlist;
 };
-
 
 struct HLIdent
 {
     enum { EnumType = HLNODE_IDENT, Children = 0 };
     unsigned nameStrId;
-    size_t len;
-    //IdentFlags flags;
+};
+
+struct HLName
+{
+    enum { EnumType = HLNODE_NAME, Children = 0 };
+    unsigned nameStrId;
 };
 
 struct HLSink
@@ -207,8 +215,7 @@ struct HLIndex
 {
     enum { EnumType = HLNODE_INDEX, Children = 2 };
     HLNode *lhs;
-    HLNode *expr;       // for []
-    unsigned nameStrId; // for .
+    HLNode *idx; // name or expr
 };
 
 struct HLFunctionHdr
@@ -222,7 +229,7 @@ struct HLFunctionHdr
 struct HLFunction
 {
     enum { EnumType = HLNODE_FUNCTION, Children = 2 };
-    HLNode *decl;
+    HLNode *hdr;
     HLNode *body;
 };
 
@@ -241,6 +248,7 @@ struct HLNode
         HLConditional conditional;
         HLList list;
         HLIdent ident;
+        HLName name;
         HLAssignment assignment;
         HLVarDeclList vardecllist;
         HLAutoDecl autodecl;
@@ -258,6 +266,7 @@ struct HLNode
 
         HLNode *aslist[3];
     } u;
+    unsigned line;
     unsigned char type; // HLNodeType
     unsigned char tok;  // Lexer::TokenType
     unsigned char flags; // any of the flags above, depends on type
@@ -289,11 +298,12 @@ public:
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
     inline HLNode *mthcall()       { return allocT<HLMthCall>();       }
     inline HLNode *ident()         { return allocT<HLIdent>();         }
+    inline HLNode *name()          { return allocT<HLName>();          }
     inline HLNode *index()         { return allocT<HLIndex>();         }
     inline HLNode *func()          { return allocT<HLFunction>();      }
     inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();   }
     inline HLNode *sink()          { return allocT<HLSink>();          }
-    
+
 private:
     struct Block
     {
@@ -320,4 +330,3 @@ private:
     Block *b;
 };
 
-void hlirPass0(HLNode *root);

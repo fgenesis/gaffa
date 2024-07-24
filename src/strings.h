@@ -8,6 +8,7 @@
 class StringPool
 {
 public:
+    StringPool();
     Str put(const char *s);
     Str put(const char *s, size_t n);
     Str put(const std::string& s);

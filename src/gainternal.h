@@ -7,6 +7,8 @@
 #include "gaffa.h"
 #include "defs.h"
 
+#include <assert.h>
+
 struct GaAlloc
 {
 	GaffaAllocFunc alloc;

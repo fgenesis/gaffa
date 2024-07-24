@@ -1,56 +1,62 @@
 -- hello world
-var z = f()
 
-var z = m:mth(f())
-var z = m:mth(f(0)) -- dafuq
+int z := g(2)(3)
+var a:float, b:int, c = obj:method(g())
+z = obj:[s+"_thing"]()
 
-int a, _ = +1, 1<<z
-int a = 1<<z
+--var z = m:mth(f())
+--var z = m:mth(f(0)) -- dafuq
+--
+--int a, _ = +1, 1<<z
+--int a = 1<<z
+--
+--var s = "hi"
+--var x:int = 0xacab
+--
+--int a = -b
+--
+--(1 + 2 * 3) / (4 + 1)
+--
+--int x = 1+2*3+4
+--
+--int y, z = 1,2
+--
+--table t = {}
+--table t = {key=1}
+--table t = {1}
+--table t = {1,key=2,[1+1]=3,}
+--
+--urange r = (0..!5+1)
+--uarray a = [1,2,3]
+--
+--int a = b + c + d
+--
+--if(true)
+--{
+--}
+--else if(x)
+--{
+--}
+--else
+--{
+--}
+--
+--for(var i = 0..) {}
+--
+--var i := 0
+--
+--i = 5
+--
+--table t = {[a]=2}
+--t.x = 5
+--t[0] = 6
+--a,b = 1,2
+--
+--func hello()
+--{
+--	int i = 0;
+--	return i+5;
+--}
+--
+--type intpair = { a = int, b = int }
 
-var s = "hi"
-var x:int = 0xacab
-
-int a = -b
-
-(1 + 2 * 3) / (4 + 1)
-
-int x = 1+2*3+4
-
-int y, z = 1,2
-
-table t = {}
-table t = {key=1}
-table t = {1}
-table t = {1,key=2,[1+1]=3,}
-
-urange r = (0..!5+1)
-uarray a = [1,2,3]
-
-int a = b + c + d
-
-if(true)
-{
-}
-else if(x)
-{
-}
-else
-{
-}
-
-for(var i = 0..) {}
-
-var i := 0
-
-i = 5
-
-table t = {[a]=2}
-t.x = 5
-t[0] = 6
-a,b = 1,2
-
-func hello()
-{
-	int i = 0;
-	return i+5;
-}

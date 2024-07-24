@@ -18,6 +18,29 @@
 #  endif
 #endif
 
+#ifndef NOINLINE
+#  ifdef _MSV_VER
+#    define NOINLINE __declspec(noinline)
+#  elif defined(__GNUC__)
+#    define __attribute__((noinline))
+#  else
+#    define NOINLINE
+#  endif
+#endif
+
+#ifndef TAIL_RETURN
+#  ifdef __clang__
+#    if __clang_major__+0 >= 13
+#      define TAIL_RETURN(x) __attribute__((musttail)) return(x)
+#    endif
+#  endif
+#endif
+
+#ifndef TAIL_RETURN
+#define TAIL_RETURN(x) return(x) // Hope the compiler is smart enough
+#endif
+
+
 namespace detail
 {
     template <typename T, size_t N>

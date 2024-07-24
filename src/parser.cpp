@@ -90,7 +90,8 @@ Str Parser::_identStr(const Lexer::Token& tok)
 const Parser::ParseRule Parser::Rules[] =
 {
     // grouping
-    { Lexer::TOK_LPAREN, &Parser::grouping, NULL,            NULL,             Parser::PREC_NONE  },
+    { Lexer::TOK_LPAREN, &Parser::grouping, &Parser::fncall, NULL,             Parser::PREC_CALL  },
+    { Lexer::TOK_COLON,  NULL,              &Parser::mthcall,NULL,             Parser::PREC_CALL  },
 
     // math operators
     { Lexer::TOK_PLUS  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_ADD   },
@@ -347,7 +348,7 @@ HLNode* Parser::_functiondef(HLNode **pname)
 
     h->flags = (FuncFlags)flags;
 
-    f->u.func.decl = h;
+    f->u.func.hdr = h;
     f->u.func.body = functionbody();
     return f;
 }
@@ -472,6 +473,7 @@ HLNode* Parser::_restassign(HLNode* firstLhs)
     if(!lhs)
         return NULL;
 
+    lhs->u.list.add(firstLhs, *this);
     while(tryeat(Lexer::TOK_COMMA))
     {
         lhs->u.list.add(suffixedexpr(), *this);
@@ -501,7 +503,7 @@ HLNode* Parser::_decllist()
     switch(curtok.tt)
     {
         case Lexer::TOK_IDENT:
-            first = ident();
+            first = typeident();
             lasttype = first;
             break;
         case Lexer::TOK_VAR:
@@ -531,7 +533,7 @@ HLNode* Parser::_decllist()
         }
         else
         {
-            first = ident(); // type name, if present
+            first = typeident(); // type name, if present
             if(!match(Lexer::TOK_IDENT))
             {
                 second = first;
@@ -579,18 +581,19 @@ HLNode* Parser::_paramlist()
     // '(' was eaten
     assert(prevtok.tt == Lexer::TOK_LPAREN);
     unsigned begin = prevtok.line;
-    HLNode *ret = _exprlist();
+    HLNode *ret = match(Lexer::TOK_RPAREN) ? NULL : _exprlist();
     eatmatching(Lexer::TOK_RPAREN, '(', begin);
     return ret;
 }
 
 HLNode* Parser::_fncall(HLNode* callee)
 {
+    // '(' was already eaten
     HLNode *node = ensure(hlir->fncall());
     if(node)
     {
         node->u.fncall.callee = callee;
-        node->u.fncall.paramlist = _paramlist();
+        node->u.fncall.paramlist = _paramlist(); // this eats everything up to and including the terminating ')'
     }
     return node;
 }
@@ -598,13 +601,19 @@ HLNode* Parser::_fncall(HLNode* callee)
 HLNode* Parser::_methodcall(HLNode* obj)
 {
     // ':' was just eaten
-    // TODO: allow lookup via :[expr]()
 
     HLNode *node = ensure(hlir->mthcall());
     if(node)
     {
         node->u.mthcall.obj = obj;
-        node->u.mthcall.mthname = ident();
+        if(tryeat(Lexer::TOK_LSQ))
+        {
+            node->u.mthcall.mth = expr();
+            eat(Lexer::TOK_RSQ);
+        }
+        else
+            node->u.mthcall.mth = name();
+
         eat(Lexer::TOK_LPAREN);
         node->u.mthcall.paramlist = _paramlist();
     }
@@ -671,6 +680,19 @@ HLNode* Parser::block()
     return node;
 }
 
+// when used in binary expr "operator ("
+HLNode* Parser::fncall(Context ctx, const ParseRule *rule, HLNode *lhs)
+{
+    // '(' was just eaten
+    return _fncall(lhs);
+}
+
+HLNode* Parser::mthcall(Context ctx, const ParseRule *rule, HLNode *lhs)
+{
+    // ':' was just eaten
+    return _methodcall(lhs);
+}
+
 // (expr)
 // ident
 HLNode* Parser::primaryexpr()
@@ -704,7 +726,7 @@ HLNode* Parser::_suffixed(HLNode *prefix)
                 advance();
                 next = hlir->index();
                 next->u.index.lhs = node;
-                next->u.index.nameStrId = _identStr(curtok).id;
+                next->u.index.idx = name();
                 advance();
                 break;
 
@@ -712,14 +734,14 @@ HLNode* Parser::_suffixed(HLNode *prefix)
                 advance();
                 next = hlir->index();
                 next->u.index.lhs = node;
-                next->u.index.expr = expr();
+                next->u.index.idx = expr();
                 eat(Lexer::TOK_RSQ);
                 break;
 
-            case Lexer::TOK_LPAREN:
+            /*case Lexer::TOK_LPAREN:
                 advance();
                 next = _fncall(node);
-                break;
+                break;*/
 
             case Lexer::TOK_COLON:
                 advance();
@@ -752,6 +774,24 @@ HLNode* Parser::btrue(Context ctx)
 HLNode* Parser::bfalse(Context ctx)
 {
     return emitConstant(false);
+}
+
+HLNode* Parser::name()
+{
+    if(curtok.tt != Lexer::TOK_IDENT)
+    {
+        errorAtCurrent("expected name"); // TODO: expected %s name + "method", etc
+        return NULL;
+    }
+    advance();
+
+    HLNode *node = ensure(hlir->name());
+    if(node)
+    {
+        Str s = _tokenStr(prevtok);
+        node->u.name.nameStrId = s.id;
+    }
+    return node;
 }
 
 HLNode* Parser::ident()
@@ -818,6 +858,7 @@ HLNode* Parser::ensure(HLNode* node)
 {
     if(!node)
         outOfMemory();
+    node->line = curtok.line; // HACK: FIXME: pass line as param
     return node;
 }
 
@@ -867,7 +908,8 @@ bool Parser::tryeat(Lexer::TokenType tt)
     advance();
     return true;
 }
-bool Parser::match(Lexer::TokenType tt)
+
+bool Parser::match(Lexer::TokenType tt) const
 {
     return curtok.tt == tt;
 }
@@ -1000,7 +1042,6 @@ HLNode* Parser::_ident(const Lexer::Token& tok)
     {
         Str s = _tokenStr(tok);
         node->u.ident.nameStrId = s.id;
-        node->u.ident.len = s.len;
     }
     return node;
 }

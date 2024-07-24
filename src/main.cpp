@@ -3,6 +3,8 @@
 #include "hlir.h"
 #include "gainternal.h"
 #include "strings.h"
+#include "gaimpdbg.h"
+#include "mlir.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,7 +65,7 @@ int main(int argc, char **argv)
     if(!code)
         return 1;
 
-    lexall(code);
+    //lexall(code);
 
     StringPool strtab;
     Lexer lex(code);
@@ -71,8 +73,13 @@ int main(int argc, char **argv)
     HLIRBuilder hb(ga);
     pp.hlir = &hb;
     HLNode *node = pp.parse();
-    if(node)
-        hlirPass0(node);
+    if(!node)
+        return 1;
+
+    hlirDebugDump(strtab, node);
+
+    MLIRContainer mc;
+    mc.import(node, strtab);
 
 
     /*

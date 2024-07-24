@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef __GNUG__
+#ifdef __GNUC__
 #include <features.h>
 #undef __USE_MISC
 #endif

@@ -26,6 +26,12 @@ set(src
     array.cpp
     array.h
     rtdata.cpp
+    symstore.cpp
+    symstore.h
+    mlir.cpp
+    mlir.h
+    gaimpdbg.cpp
+    gaimpdbg.h
 )
 
 add_library(gaffa ${src})
