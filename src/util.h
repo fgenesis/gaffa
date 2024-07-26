@@ -22,7 +22,7 @@
 #  ifdef _MSV_VER
 #    define NOINLINE __declspec(noinline)
 #  elif defined(__GNUC__)
-#    define __attribute__((noinline))
+#    define NOINLINE __attribute__((noinline))
 #  else
 #    define NOINLINE
 #  endif

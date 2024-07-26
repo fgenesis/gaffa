@@ -6,8 +6,6 @@ set(src
     lex.h
     parser.cpp
     parser.h
-    ast.cpp
-    ast.h
     defs.h
     util.h
     util.cpp

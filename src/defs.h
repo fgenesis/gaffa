@@ -101,3 +101,40 @@ struct DVal
     Val v;
     Type *t;
 };
+
+enum UnOpType
+{
+    UOP_NOT,
+    UOP_POS,
+    UOP_NEG,
+    UOP_BIN_COMPL,
+    UOP_TRY,
+    UOP_UNWRAP,
+};
+
+enum BinOpType
+{
+    OP_ADD,
+    OP_SUB,
+    OP_MUL,
+    OP_DIV,
+    OP_INTDIV,
+    OP_MOD,
+    OP_BIN_AND,
+    OP_BIN_OR,
+    OP_BIN_XOR,
+    OP_SHL,
+    OP_SHR,
+    OP_C_EQ,
+    OP_C_NEQ,
+    OP_C_LT,
+    OP_C_GT,
+    OP_C_LTE,
+    OP_C_GTE,
+    OP_C_AND,
+    OP_C_OR,
+    OP_EVAL_AND,
+    OP_EVAL_OR,
+    OP_CONCAT,
+};
+
