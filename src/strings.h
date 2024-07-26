@@ -16,6 +16,7 @@ public:
     Str get(const char *s, size_t n) const;
     Str get(const std::string& s) const;
     const std::string& lookup(size_t id) const;
+    Str importFrom(const StringPool& other, size_t idInOther);
 
 private:
     std::vector<std::string> _pool;

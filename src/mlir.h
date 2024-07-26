@@ -8,27 +8,29 @@
 
 #include "gainternal.h"
 #include "symstore.h"
+#include "strings.h"
 
 #include <vector>
 
 
 struct HLNode;
-class StringPool;
 
 enum MLCmd
 {
-    ML_DECLARE,
+    ML_DECL,
+    ML_CLOSE,
     ML_VAL,
     ML_OP,
 };
 
 enum MLSymbolRefContext
 {
-    SYMREF_STANDARD = 0x01,  // Just any symbol (plain old variable, no special properties)
+    SYMREF_STANDARD = 0x00,  // Just any symbol (plain old variable, no special properties)
+    SYMREF_MUTABLE  = 0x01,  // Can assign to this symbol
     SYMREF_TYPE     = 0x02,  // Symbol is used as a type
     SYMREF_CALL     = 0x04,  // Symbol is called (-> symbol is function-ish)
     SYMREF_INDEX    = 0x08,  // Symbol is indexed (sym.thing or sym[])
-    SYMREF_HASMTH   = 0x10   // Symbol is used in a method call context (sym:method())
+    SYMREF_HASMTH   = 0x10,  // Symbol is used in a method call context (sym:method())
 };
 
 struct MLExternalSymbol
@@ -53,13 +55,17 @@ struct MLExternalSymbol
 
 struct MLDeclSym // create a symbol
 {
+    enum { Cmd = ML_DECL };
     unsigned typeidx; // symbol idx of type
     unsigned nameid;
 };
 
-struct MLPopSyms
+// Close up to 32 symbols at once (ie. end of their scope was reached)
+struct MLCloseSyms
 {
-    unsigned n;
+    enum { Cmd = ML_CLOSE };
+    unsigned n; // > 0, < 32
+    unsigned close; // bitmask; if set, identifier was captured as upvalue and must be moved to the heap
 };
 
 struct MLConditional
@@ -128,29 +134,38 @@ class MLIRContainer
 public:
     MLIRContainer();
 
-    GaffaError import(HLNode *root, const StringPool& pool);
+    GaffaError import(HLNode *root, const StringPool& pool, const char *fn);
 
 
     Symstore syms;
 
 private:
-    template<typename T> void _add(const T& t)
+    template<typename T> void add(const T& t)
     {
         const size_t N = sizeof(T) / sizeof(unsigned);
+        static_assert(N, "oops");
         const unsigned *p = reinterpret_cast<const unsigned*>(&t);
-        _add(p, N);
+        _add(p, N, T::Cmd);
     }
 
-    void _add(const unsigned *p, const size_t n);
+    enum PrepassResult
+    {
+        SKIP_CHILDREN     = 0x1,
+    };
+
+    void _add(const unsigned *p, const size_t n, unsigned cmd);
     void _processRec(HLNode *n);
-    bool _pre(HLNode *n);
+    ScopeType _precheckScope(HLNode *n);
+    unsigned  _pre(HLNode *n); // -> PrepassResult
     void _post(HLNode *n);
-    void _decl(HLNode *n, MLSymbolRefContext ref);
-    void _refer(HLNode *n, MLSymbolRefContext ref);
-    void _checkblock(HLNode *n, bool push);
+    void _decl(HLNode *n, MLSymbolRefContext ref, unsigned typeidx);
+    unsigned _refer(HLNode *n, MLSymbolRefContext ref); // returns symbol index of type, 0 for auto-deduct
+    void _codegen(HLNode *n);
 
     std::vector<unsigned> mops;
     const StringPool *curpool;
+    StringPool symbolnames;
+    const char *_fn;
 };
 
 

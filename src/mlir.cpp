@@ -7,6 +7,17 @@
 
 #include <stdio.h>
 
+static const char *symscopename(Symstore::Lookup info)
+{
+    switch(info.where)
+    {
+        case SCOPEREF_CONSTANT: return "constant";
+        case SCOPEREF_LOCAL:    return "local";
+        case SCOPEREF_UPVAL:    return "upvalue";
+        case SCOPEREF_EXTERNAL: return "extern";
+    }
+}
+
 
 static inline void invalidate(HLNode *n)
 {
@@ -19,7 +30,13 @@ void MLIRContainer::_processRec(HLNode *n)
     if(!n || n->type == HLNODE_NONE)
         return;
 
-    if(_pre(n))
+    const ScopeType pushscope = _precheckScope(n);
+    if(pushscope != SCOPE_NONE)
+        syms.push(pushscope);
+
+    const unsigned act = _pre(n);
+
+    if(!(act & SKIP_CHILDREN))
     {
         unsigned N = n->_nch;
         HLNode **ch = &n->u.aslist[0];
@@ -34,18 +51,54 @@ void MLIRContainer::_processRec(HLNode *n)
     }
 
     _post(n);
+
+    if(pushscope)
+    {
+        Symstore::Frame f;
+        syms.pop(f);
+        // TODO: close in inverse order
+    }
 }
 
-void MLIRContainer::_checkblock(HLNode* n, bool push)
+ScopeType MLIRContainer::_precheckScope(HLNode* n)
+{
+    switch(n->type)
+    {
+        case HLNODE_FUNCTION:
+            return SCOPE_FUNCTION;
+
+        case HLNODE_CONDITIONAL:
+        case HLNODE_WHILELOOP:
+        case HLNODE_FORLOOP:
+        case HLNODE_BLOCK:
+            return SCOPE_BLOCK;
+    }
+
+    return SCOPE_NONE;
+}
+
+void MLIRContainer::_codegen(HLNode* n)
 {
     switch(n->type)
     {
 
     }
+
+    unsigned N = n->_nch;
+    HLNode **ch = &n->u.aslist[0];
+    if(N == HLList::Children)
+    {
+        ch = n->u.list.list;
+        N = n->u.list.used;
+    }
+    for(unsigned i = 0; i < N; ++i)
+        _codegen(ch[i]);
 }
 
-bool MLIRContainer::_pre(HLNode* n)
+
+unsigned MLIRContainer::_pre(HLNode* n)
 {
+    unsigned ret = 0;
     switch(n->type)
     {
         // -2, +2 is how to make explicit signed literals
@@ -58,26 +111,70 @@ bool MLIRContainer::_pre(HLNode* n)
                     *n = *rhs;
                     invalidate(rhs);
                     n->u.constant.val.type = PRIMTYPE_SINT;
-                    return false;
+                    return SKIP_CHILDREN;
                 }
             }
             break;
 
         case HLNODE_IDENT:
             _refer(n, SYMREF_STANDARD);
-            return false;
+            return SKIP_CHILDREN;
 
         case HLNODE_AUTODECL:
-            _refer(n->u.autodecl.type, SYMREF_TYPE);
-            _decl(n->u.autodecl.ident, SYMREF_STANDARD);
+        {
+            unsigned typeidx = _refer(n->u.autodecl.type, SYMREF_TYPE);
+            _decl(n->u.autodecl.ident, SYMREF_STANDARD, typeidx);
             _processRec(n->u.autodecl.value);
-            return false;
+            return SKIP_CHILDREN;
+        }
 
         case HLNODE_VARDECLASSIGN: // var x, y, z = ...
         {
             // Process exprs on the right first, to make sure that it can't refer the symbols on the left
             _processRec(n->u.vardecllist.vallist);
-            return false;
+            _processRec(n->u.vardecllist.decllist);
+            return SKIP_CHILDREN;
+        }
+
+        case HLNODE_VARDEF:
+        {
+            unsigned typeidx = _refer(n->u.vardef.type, SYMREF_TYPE);
+            unsigned flags = SYMREF_STANDARD;
+            if(n->flags & DECLFLAG_MUTABLE)
+                flags |= SYMREF_MUTABLE;
+            _decl(n->u.vardef.ident, (MLSymbolRefContext)flags, typeidx);
+        }
+        break;
+
+        case HLNODE_ASSIGNMENT:
+        {
+            const HLNode *dstlist = n->u.assignment.dstlist;
+            const size_t N = dstlist->u.list.used;
+            const HLNode * const * ch = dstlist->u.list.list;
+            for(size_t i = 0; i < N; ++i)
+            {
+                const HLNode *c = ch[i];
+                if(c->type == HLNODE_IDENT) // Assgnment directly to variable? Must be declared first
+                {
+                    Symstore::Lookup info = syms.lookup(c->u.ident.nameStrId, c->line, SYMREF_STANDARD);
+                    if(info.where == SCOPEREF_EXTERNAL)
+                    {
+                        const std::string& name = curpool->lookup(c->u.ident.nameStrId);
+                        // TODO: annotation in code with line preview and squiggles -- how to get this info here?
+                        printf("(%s:%u) error: attempt to assign to undeclared identifier '%s'\n",
+                            _fn, c->line, name.c_str());
+                    }
+                    else if(!(info.sym->usagemask & SYMREF_MUTABLE))
+                    {
+                        const std::string& name = curpool->lookup(c->u.ident.nameStrId);
+                        const char *how = symscopename(info);
+                        // TODO: annotation in code with line preview and squiggles -- how to get this info here?
+                        printf("(%s:%u) error: assignment to fixed %s '%s' -- previously defined in line %u\n",
+                            _fn, c->line, how, name.c_str(), info.sym->linedefined);
+                    }
+                }
+            }
+
         }
 
         case HLNODE_CALL:
@@ -88,20 +185,21 @@ bool MLIRContainer::_pre(HLNode* n)
         case HLNODE_MTHCALL:
             if(n->u.mthcall.obj->type == HLNODE_IDENT)
                 _refer(n->u.fncall.callee, SYMREF_HASMTH);
+            break;
 
     }
 
-
-    return true;
+    return ret;
 }
 
 void MLIRContainer::_post(HLNode* n)
 {
-    switch(n->type)
+    /*switch(n->type)
     {
         case HLNODE_VARDECLASSIGN: // var x, y, z = ...
         {
-            // Process exprs on the right first, to make sure that it can't refer the symbols on the left
+            // Exprs on the right have been processed in _pre().
+            // The decls come after make sure that the exprs can't reference the variables declared on the left.
             const HLNode *decls = n->u.vardecllist.decllist;
             assert(decls->type == HLNODE_LIST);
 
@@ -112,17 +210,14 @@ void MLIRContainer::_post(HLNode* n)
             {
                 HLNode *c = ch[i];
                 assert(c->type == HLNODE_VARDEF);
-                _refer(c->u.vardef.type, SYMREF_TYPE);
-                _decl(c->u.vardef.ident, SYMREF_STANDARD);
+
             }
-
-
         }
         break;
-    }
+    }*/
 }
 
-void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref)
+void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref, unsigned typeidx)
 {
     if(!n)
         return;
@@ -131,40 +226,43 @@ void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref)
 
     const std::string& name = curpool->lookup(n->u.ident.nameStrId);
     if(clash)
-        printf("Symbol clash: %s (already defined in line %u)\n", name.c_str(), clash->linedefined);
-    else
-        printf("Declare %s in line %u\n", name.c_str(), n->line);
+    {
+        printf("(%s:%u) error: redefinition of '%s' -- first defined in line %u\n", _fn, n->line, name.c_str(), clash->linedefined);
+        // TODO: report error + abort
+    }
 
+    //printf("Declare %s in line %u\n", name.c_str(), n->line);
+
+    MLDeclSym d;
+    d.nameid = symbolnames.importFrom(*curpool, n->u.ident.nameStrId).id; // compress string IDs
+    d.typeidx = typeidx;
+    add(d);
 }
 
-void MLIRContainer::_refer(HLNode* n, MLSymbolRefContext ref)
+unsigned MLIRContainer::_refer(HLNode* n, MLSymbolRefContext ref)
 {
     if(!n)
-        return;
+        return 0;
+
     assert(n->type == HLNODE_IDENT);
     Symstore::Lookup info = syms.lookup(n->u.ident.nameStrId, n->line, ref);
 
-    const char *how = NULL;
-    switch(info.where)
-    {
-        case SCOPEREF_CONSTANT: how = "constant"; break;
-        case SCOPEREF_LOCAL: how = "local"; break;
-        case SCOPEREF_UPVAL: how = "upval"; break;
-        case SCOPEREF_EXTERNAL: how = "extern"; break;
-    }
-
+    /*const char *how = symscopename(info);
     const std::string& name = curpool->lookup(info.sym->nameStrId);
+    printf("Using %s in line %u as %s from line %u (symindex %d)\n",
+        name.c_str(), n->line, how, info.sym->linedefined, info.symindex);*/
 
-    printf("Using %s in line %u as %s from line %u\n", name.c_str(), n->line, how, info.sym->linedefined);
+    return info.symindex;
 }
 
 MLIRContainer::MLIRContainer()
-    : curpool(NULL)
+    : curpool(NULL), _fn(NULL)
 {
 }
 
-void MLIRContainer::_add(const unsigned* p, const size_t n)
+void MLIRContainer::_add(const unsigned* p, const size_t n, unsigned cmd)
 {
+    mops.push_back(cmd);
     for(size_t i = 0; i < n; ++i)
         mops.push_back(p[i]);
 }
@@ -188,8 +286,9 @@ static std::string whatisit(unsigned ref)
     return s;
 }
 
-GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool)
+GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool, const char *fn)
 {
+    this->_fn = fn;
     this->curpool = &pool;
     syms.push(SCOPE_FUNCTION);
     _processRec(root);
@@ -198,7 +297,7 @@ GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool)
 
     if(size_t N = syms.missing.size())
     {
-        printf("There are %u external symbols referenced:\n", unsigned(N));
+        printf("%s: There are %u external symbols referenced:\n", fn, unsigned(N));
         for(size_t i = 0; i < N; ++i)
         {
             const Symstore::Sym& s = syms.missing[i];
@@ -207,6 +306,12 @@ GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool)
             printf("(%u)  %s (%s)\n", s.lineused, name.c_str(), wh.c_str()); // TODO: first use in line xxx
         }
     }
+
+    for(size_t i = 0; i < mops.size(); ++i)
+    {
+        printf("%08x\n", mops[i]);
+    }
+
     this->curpool = NULL;
     return GAFFA_E_OK;
 }

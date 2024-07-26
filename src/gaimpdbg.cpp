@@ -13,6 +13,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_TERNARY:        return "ternary";
         case HLNODE_CONDITIONAL:    return "if";
         case HLNODE_LIST:           return "(list)";
+        case HLNODE_BLOCK:          return "(block)";
         case HLNODE_FORLOOP:        return "for";
         case HLNODE_WHILELOOP:      return "while";
         case HLNODE_ASSIGNMENT:     return "assign";
@@ -53,6 +54,11 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
     const char *label = getLabel((HLNodeType)n->type);
     indent(level);
     printf("%s", label);
+
+    if(n->_nch == HLList::Children)
+    {
+        printf(" # %u", (unsigned)n->u.list.used);
+    }
 
     if(n->type == HLNODE_IDENT)
     {

@@ -256,6 +256,14 @@ const char* Lexer::GetTokenText(TokenType tt)
     return NULL;
 }
 
+bool Lexer::IsKeyword(TokenType tt)
+{
+    for(size_t i = 0; i < Countof(Keywords); ++i)
+        if(Keywords[i].tt == tt)
+            return true;
+    return false;
+}
+
 
 Lexer::Token Lexer::tok(TokenType tt, const char *where, const char *end)
 {

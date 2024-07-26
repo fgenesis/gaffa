@@ -93,8 +93,10 @@ public:
     Lexer(const char *text);
     Token next();
     bool done() const { return !*_p; }
+    const char *getLineBegin() const { return _linebegin; }
 
     static const char *GetTokenText(TokenType tt);
+    static bool IsKeyword(TokenType tt);
 
 private:
     const char *skipws();

@@ -1,11 +1,14 @@
 #include "symstore.h"
 
 Symstore::Symstore()
+    : _indexbase(1)
 {
 }
 
 void Symstore::push(ScopeType boundary)
 {
+    if(!frames.empty())
+        _indexbase += frames.back().syms.size();
     Frame f;
     f.boundary = boundary;
     frames.push_back(f);
@@ -20,6 +23,7 @@ void Symstore::pop(Frame& f)
 {
     f = frames.back();
     frames.pop_back();
+    _indexbase -= f.syms.size();
 }
 
 static Symstore::Sym *findinframe(std::vector<Symstore::Sym>& syms, unsigned strid)
@@ -31,10 +35,15 @@ static Symstore::Sym *findinframe(std::vector<Symstore::Sym>& syms, unsigned str
     return NULL;
 }
 
+static unsigned indexinframe(std::vector<Symstore::Sym>& syms, const Symstore::Sym *sym)
+{
+    return sym - &syms[0];
+}
+
 
 Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, unsigned usage)
 {
-    Lookup res = { NULL, SCOPEREF_LOCAL };
+    Lookup res = { NULL, SCOPEREF_LOCAL, 0 };
     for(size_t k = frames.size(); k --> 0; )
     {
         Frame& f = frames[k];
@@ -44,6 +53,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, unsigned usage)
             if(!s->lineused)
                 s->lineused = line;
             res.sym = s;
+            res.symindex = _indexbase + indexinframe(f.syms, s);
             return res;
         }
 
@@ -51,7 +61,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, unsigned usage)
         if(f.boundary == SCOPE_FUNCTION && res.where == SCOPEREF_LOCAL)
             res.where = SCOPEREF_UPVAL;
     }
-    // Symbol not found, must be supplied as external (globaL) symbol
+    // Symbol not found, must be supplied as external (global) symbol
     res.where = SCOPEREF_EXTERNAL;
 
     // Record as missing
@@ -64,6 +74,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, unsigned usage)
         missing.push_back(add);
         s = &missing.back();
     }
+    res.symindex = -1 - (int)indexinframe(missing, s);
     res.sym = s;
     return res;
 }
@@ -84,7 +95,7 @@ const Symstore::Sym *Symstore::decl(unsigned strid, unsigned line, unsigned usag
     s.linedefined = line;
     s.nameStrId = strid;
     s.lineused = 0;
-    s.usagemask = 0;
+    s.usagemask = usage;
     frames.back().syms.push_back(s);
 
     return NULL;

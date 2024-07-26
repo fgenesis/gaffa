@@ -6,6 +6,7 @@
 
 enum ScopeType
 {
+	SCOPE_NONE = 0,
 	SCOPE_BLOCK,
 	SCOPE_VALBLOCK,
 	SCOPE_FUNCTION
@@ -38,6 +39,7 @@ public:
 	{
 		const Sym *sym;
 		ScopeReferral where;
+		int symindex;
 	};
 
 	Symstore();
@@ -56,5 +58,6 @@ public:
 
 private:
 
+	unsigned _indexbase;
 	std::vector<Frame> frames;
 };

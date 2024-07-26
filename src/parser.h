@@ -37,6 +37,7 @@ public:
     enum Context
     {
         CTX_DEFAULT = 0x00,
+        // TODO: inside of value block
     };
 
     Parser(Lexer *lex, const char *fn, const GaAlloc& ga, StringPool& strpool);
@@ -106,14 +107,14 @@ protected:
     HLNode *litstr(Context ctx);
     HLNode *btrue(Context ctx);
     HLNode *bfalse(Context ctx);
-    HLNode *name();
-    HLNode *ident();
+    HLNode *name(const char *whatfor);
+    HLNode *ident(const char *whatfor);
     HLNode *typeident();
     HLNode *_identInExpr(Context ctx);
     HLNode *nil(Context ctx);
     HLNode *tablecons(Context ctx);
     HLNode *arraycons(Context ctx);
-    HLNode *_ident(const Lexer::Token& tok);
+    HLNode *_ident(const Lexer::Token& tok, const char *whatfor);
 
     HLNode *unaryRange(Context ctx);
     HLNode *binaryRange(Context ctx, const ParseRule *rule, HLNode *lhs);
@@ -134,14 +135,15 @@ private:
     bool tryeat(Lexer::TokenType tt);
     bool match(Lexer::TokenType tt) const;
     void eatmatching(Lexer::TokenType tt, char opening, unsigned linebegin);
-    void errorAt(const Lexer::Token& tok, const char *msg);
-    void error(const char *msg);
-    void errorAtCurrent(const char *msg);
+    void errorAt(const Lexer::Token& tok, const char *msg, const char *hint = NULL);
+    void error(const char *msg, const char *hint = NULL);
+    void errorAtCurrent(const char *msg, const char *hint = NULL);
     HLNode *emitConstant(const Val& v); // anything but nil
     void outOfMemory();
     Val makestr(const char *s, const char *end);
     Str _tokenStr(const Lexer::Token& tok);
     Str _identStr(const Lexer::Token& tok);
+    bool _checkname(const Lexer::Token& tok, const char *whatfor);
 
     Lexer::Token curtok;
     Lexer::Token prevtok;

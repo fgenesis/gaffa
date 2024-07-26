@@ -73,3 +73,9 @@ const std::string& StringPool::lookup(size_t id) const
 {
     return _pool[id];
 }
+
+Str StringPool::importFrom(const StringPool& other, size_t idInOther)
+{
+    const std::string& s = other.lookup(idInOther);
+    return put(s);
+}
