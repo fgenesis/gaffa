@@ -153,7 +153,8 @@ const Parser::ParseRule Parser::Rules[] =
     // special
     { Lexer::TOK_QQM,    &Parser::unary,    NULL,            NULL,             Parser::PREC_UNARY  },
     { Lexer::TOK_FATARROW,NULL,             &Parser::binary, NULL,             Parser::PREC_UNWRAP  },
-    { Lexer::TOK_HASH  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_UNWRAP  },
+    { Lexer::TOK_HASH  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_UNARY  },
+    { Lexer::TOK_CONCAT, NULL,              &Parser::binary, NULL,             Parser::PREC_CONCAT  },
 
     // ranges
     { Lexer::TOK_DOTDOT, &Parser::unaryRange,&Parser::binaryRange,&Parser::postfixRange, Parser::PREC_UNARY  },
@@ -373,7 +374,7 @@ HLNode* Parser::_functiondef(HLNode **pname)
 
     h->u.fhdr.paramlist = _funcparams();
 
-    if(tryeat(Lexer::TOK_ARROW))
+    if(tryeat(Lexer::TOK_RARROW))
         h->u.fhdr.rettypes = _funcreturns(&flags);
     else
         flags |= FUNCFLAGS_DEDUCE_RET;

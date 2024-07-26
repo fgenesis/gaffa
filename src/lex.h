@@ -41,7 +41,8 @@ public:
         TOK_DBLCOLON,// ::
         TOK_COLON,  // :
         TOK_COMMA,  // ,
-        TOK_ARROW,  // ->
+        TOK_LARROW, // ->
+        TOK_RARROW, // <-
         TOK_SEMICOLON,// ;
         TOK_HAT,    // ^
         TOK_TILDE,  // ~
@@ -54,6 +55,7 @@ public:
         TOK_LOGAND, // &&
         TOK_LOGOR,  // ||
         TOK_DOLLAR, // $
+        TOK_CONCAT, // ++
         // keywords
         TOK_NIL,    // nil
         TOK_TRUE,   // true

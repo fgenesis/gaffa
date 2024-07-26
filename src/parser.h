@@ -14,14 +14,15 @@ public:
     {
         // weakest binding
         PREC_NONE,
-        PREC_EQUALITY,    // == !=
-        PREC_COMPARISON,  // < > <= >=
         PREC_UNWRAP,      // =>
         PREC_OR,          // or
         PREC_AND,         // and
         PREC_LOGIC_AND,   // &&
         PREC_LOGIC_OR,    // ||
+        PREC_EQUALITY,    // == !=
+        PREC_COMPARISON,  // < > <= >=
         PREC_RANGE,       // ..a  a..b  b..
+        PREC_CONCAT,      // ++
         PREC_BIT_OR,      // |
         PREC_BIT_XOR,     // ^
         PREC_BIT_AND,     // &
