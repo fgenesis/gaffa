@@ -7,6 +7,7 @@ set(src
     parser.cpp
     parser.h
     defs.h
+    defs.cpp
     util.h
     util.cpp
     strings.cpp

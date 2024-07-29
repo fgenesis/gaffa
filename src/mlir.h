@@ -33,15 +33,6 @@ enum MLSymbolRefContext
     SYMREF_HASMTH   = 0x10,  // Symbol is used in a method call context (sym:method())
 };
 
-struct MLExternalSymbol
-{
-    enum Flags
-    {
-        IS_TYPE // if set, this symbol is used as a type
-    };
-    unsigned strid; // var name
-    unsigned flags;
-};
 
 // When parsing the ML code, we keep a stack of symbols and refer to those via index
 // External symbols are at the top and stay constant

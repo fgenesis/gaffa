@@ -22,6 +22,7 @@ public:
         TOK_MINUS,  // -
         TOK_STAR,   // *
         TOK_SLASH,  // /
+        TOK_PERC,   // %
         TOK_SLASH2X,// //
         TOK_CASSIGN,// =
         TOK_MASSIGN,// :=

@@ -18,11 +18,17 @@ enum Constants
     INT_BITS =  sizeof(uint) * CHAR_BIT,
 };
 
+struct Type
+{
+    size_t id;
+};
+
+// The highest 2 bits of the type id are used as tags
 enum TypeBits
 {
-    TB_OPTION     = 1u << (sizeof(unsigned) - 1u), // is option type
-    TB_ARRAY        = 1u << (sizeof(unsigned) - 2u), // is array of type
-    PRIMTYPE_MASK = 0xff
+    TB_OPTION  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 1u), // is option type
+    TB_ARRAY   = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 2u), // is array of type
+    TB_TYPEMASK = ~(TB_OPTION | TB_ARRAY)
 };
 
 enum PrimType
@@ -35,8 +41,14 @@ enum PrimType
     PRIMTYPE_STRING,
     PRIMTYPE_TYPE,          // types have this type
     PRIMTYPE_TABLE,
-    PRIMTYPE_STRUCTTYPE,
     PRIMTYPE_ANY,           // can hold any value
+    // Ranges can only be made from the 3 primitive numeric types,
+    // so there' no reason to allocate extra TypeBits for a range type
+    PRIMTYPE_URANGE,
+    PRIMTYPE_SRANGE,
+    PRIMTYPE_FRANGE,
+    // These are the engine-level types. Runtime-created types are any IDs after this.
+    PRIMTYPE_MAX
 };
 
 struct _Nil {};
@@ -45,13 +57,6 @@ struct Str
 {
     size_t id;
     size_t len;
-};
-
-struct Type
-{
-    unsigned pt;        // Primtype | TypeBits
-    unsigned nameStrId; // if the type has a known name, it goes here
-    Type *list;         // if the type is PRIMTYPE_STRUCTTYPE, this has the subtypes
 };
 
 template<typename T>
@@ -77,33 +82,27 @@ struct ValU
     } u;
 
     // This must not be PRIMTYPE_ANY.
-    unsigned type; // PrimType | TypeBits
+    Type type; // Runtime type of this value (PrimType | TypeBits)
 };
 
 struct Val : public ValU
 {
     inline Val(const ValU& v)           { *this = v; }
-    inline Val()                        { type = PRIMTYPE_NIL;    u.ui = 0; }
-    inline Val(bool b)                  { type = PRIMTYPE_BOOL;   u.ui = b; }
-    inline Val(unsigned int i)          { type = PRIMTYPE_UINT;   u.ui = i; }
-    inline Val(int i)                   { type = PRIMTYPE_SINT;   u.si = i; }
-    inline Val(uint i, _Nil _ = _Nil()) { type = PRIMTYPE_UINT;   u.ui = i; }
-    inline Val(sint i, _Nil _ = _Nil()) { type = PRIMTYPE_SINT;   u.si = i; }
-    inline Val(real f)                  { type = PRIMTYPE_FLOAT;  u.f = f; }
-    inline Val(_Nil)                    { type = PRIMTYPE_NIL;    u.ui = 0; }
-    inline Val(Str s)                   { type = PRIMTYPE_STRING; u.str = s; }
-    inline Val(Type t)                  { type = PRIMTYPE_TYPE;   u.t = t; }
-};
-
-// Dynamic value, has a runtime type attached
-struct DVal
-{
-    Val v;
-    Type *t;
+    inline Val()                        { type.id = PRIMTYPE_NIL;    u.ui = 0; }
+    inline Val(bool b)                  { type.id = PRIMTYPE_BOOL;   u.ui = b; }
+    inline Val(unsigned int i)          { type.id = PRIMTYPE_UINT;   u.ui = i; }
+    inline Val(int i)                   { type.id = PRIMTYPE_SINT;   u.si = i; }
+    inline Val(uint i, _Nil _ = _Nil()) { type.id = PRIMTYPE_UINT;   u.ui = i; }
+    inline Val(sint i, _Nil _ = _Nil()) { type.id = PRIMTYPE_SINT;   u.si = i; }
+    inline Val(real f)                  { type.id = PRIMTYPE_FLOAT;  u.f = f; }
+    inline Val(_Nil)                    { type.id = PRIMTYPE_NIL;    u.ui = 0; }
+    inline Val(Str s)                   { type.id = PRIMTYPE_STRING; u.str = s; }
+    inline Val(Type t)                  { type.id = PRIMTYPE_TYPE;   u.t = t; }
 };
 
 enum UnOpType
 {
+    UOP_INVALID,
     UOP_NOT,
     UOP_POS,
     UOP_NEG,
@@ -114,6 +113,7 @@ enum UnOpType
 
 enum BinOpType
 {
+    OP_INVALID,
     OP_ADD,
     OP_SUB,
     OP_MUL,
@@ -138,3 +138,5 @@ enum BinOpType
     OP_CONCAT,
 };
 
+BinOpType BinOp_TokenToOp(unsigned tok);
+UnOpType UnOp_TokenToOp(unsigned tok);

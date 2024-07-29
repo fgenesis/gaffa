@@ -194,27 +194,15 @@ unsigned MLIRContainer::_pre(HLNode* n)
 
 void MLIRContainer::_post(HLNode* n)
 {
-    /*switch(n->type)
+    switch(n->type)
     {
-        case HLNODE_VARDECLASSIGN: // var x, y, z = ...
+        case HLNODE_BINARY: 
         {
-            // Exprs on the right have been processed in _pre().
-            // The decls come after make sure that the exprs can't reference the variables declared on the left.
-            const HLNode *decls = n->u.vardecllist.decllist;
-            assert(decls->type == HLNODE_LIST);
-
-            HLNode **ch = decls->u.list.list;
-            const size_t N = decls->u.list.used;
-
-            for(size_t i = 0; i < N; ++i)
-            {
-                HLNode *c = ch[i];
-                assert(c->type == HLNODE_VARDEF);
-
-            }
         }
         break;
-    }*/
+        case HLNODE_IDENT:
+        break;
+    }
 }
 
 void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref, unsigned typeidx)

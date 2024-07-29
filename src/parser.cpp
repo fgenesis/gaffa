@@ -130,6 +130,7 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_EXCL  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_MUL   },
     { Lexer::TOK_SLASH , NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
     { Lexer::TOK_SLASH2X,NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
+    { Lexer::TOK_PERC,   NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
 
     // bitwise
     { Lexer::TOK_SHL   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_SHIFT },
