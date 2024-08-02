@@ -1,16 +1,18 @@
 #pragma once
 
 #include "defs.h"
+#include "gainternal.h"
+
 class Table;
 
 // Structs have no defined field order.
 // But for the sake of making types comparable, the order of member types is sorted by ID.
 
 
-enum TypeBits
+enum TDescBits
 {
     TDESC_BITS_IS_UNION  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 1u), // is a union type, instead of a struct
-    TDESC_LENMASK = ~(TB_OPTION | TB_ARRAY)
+    TDESC_LENMASK = ~(TDESC_BITS_IS_UNION)
 };
 
 // Type descriptor
@@ -31,4 +33,19 @@ struct TDesc
     }
 };
 
-TDesc *TDesc_New(GaAlloc *ga, size_t sizeAndBits);
+TDesc *TDesc_New(const GaAlloc& ga, size_t numFieldsAndBits);
+
+
+
+class TypeRegistry
+{
+    TypeRegistry(const GaAlloc& ga);
+    ~TypeRegistry();
+
+    TDesc *construct(const Table& t); // makes a struct from t
+
+    // TODO: function to make union
+
+private:
+    const GaAlloc& _ga;
+};

@@ -106,11 +106,11 @@ unsigned MLIRContainer::_pre(HLNode* n)
             if(n->tok == Lexer::TOK_PLUS || n->tok == Lexer::TOK_MINUS)
             {
                 HLNode *rhs = n->u.unary.rhs;
-                if(rhs->type == HLNODE_CONSTANT_VALUE && rhs->u.constant.val.type == PRIMTYPE_UINT)
+                if(rhs->type == HLNODE_CONSTANT_VALUE && rhs->u.constant.val.type.id == PRIMTYPE_UINT)
                 {
                     *n = *rhs;
                     invalidate(rhs);
-                    n->u.constant.val.type = PRIMTYPE_SINT;
+                    n->u.constant.val.type.id = PRIMTYPE_SINT;
                     return SKIP_CHILDREN;
                 }
             }
@@ -196,7 +196,7 @@ void MLIRContainer::_post(HLNode* n)
 {
     switch(n->type)
     {
-        case HLNODE_BINARY: 
+        case HLNODE_BINARY:
         {
         }
         break;

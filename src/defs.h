@@ -83,21 +83,24 @@ struct ValU
 
     // This must not be PRIMTYPE_ANY.
     Type type; // Runtime type of this value (PrimType | TypeBits)
+
+    void _init(unsigned tyid);
+    bool operator==(const ValU& o) const;
 };
 
 struct Val : public ValU
 {
     inline Val(const ValU& v)           { *this = v; }
-    inline Val()                        { type.id = PRIMTYPE_NIL;    u.ui = 0; }
-    inline Val(bool b)                  { type.id = PRIMTYPE_BOOL;   u.ui = b; }
-    inline Val(unsigned int i)          { type.id = PRIMTYPE_UINT;   u.ui = i; }
-    inline Val(int i)                   { type.id = PRIMTYPE_SINT;   u.si = i; }
-    inline Val(uint i, _Nil _ = _Nil()) { type.id = PRIMTYPE_UINT;   u.ui = i; }
-    inline Val(sint i, _Nil _ = _Nil()) { type.id = PRIMTYPE_SINT;   u.si = i; }
-    inline Val(real f)                  { type.id = PRIMTYPE_FLOAT;  u.f = f; }
-    inline Val(_Nil)                    { type.id = PRIMTYPE_NIL;    u.ui = 0; }
-    inline Val(Str s)                   { type.id = PRIMTYPE_STRING; u.str = s; }
-    inline Val(Type t)                  { type.id = PRIMTYPE_TYPE;   u.t = t; }
+    inline Val()                        { _init(PRIMTYPE_NIL);    u.ui = 0; }
+    inline Val(bool b)                  { _init(PRIMTYPE_BOOL);   u.ui = b; }
+    inline Val(unsigned int i)          { _init(PRIMTYPE_UINT);   u.ui = i; }
+    inline Val(int i)                   { _init(PRIMTYPE_SINT);   u.si = i; }
+    inline Val(uint i, _Nil _ = _Nil()) { _init(PRIMTYPE_UINT);   u.ui = i; }
+    inline Val(sint i, _Nil _ = _Nil()) { _init(PRIMTYPE_SINT);   u.si = i; }
+    inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
+    inline Val(_Nil)                    { _init(PRIMTYPE_NIL);    u.ui = 0; }
+    inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s; }
+    inline Val(Type t)                  { _init(PRIMTYPE_TYPE);   u.t = t; }
 };
 
 enum UnOpType

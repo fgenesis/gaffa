@@ -3,6 +3,8 @@
 #include "lex.h"
 #include "util.h"
 
+#include <string.h>
+
 struct UintPair
 {
     unsigned from, to;
@@ -60,4 +62,15 @@ BinOpType BinOp_TokenToOp(unsigned tok)
 UnOpType UnOp_TokenToOp(unsigned tok)
 {
     return (UnOpType)lookup(&lut_tok2unop[0], Countof(lut_tok2unop), tok, UOP_INVALID);
+}
+
+void ValU::_init(unsigned tyid)
+{
+    memset(this, sizeof(*this), 0);
+    type.id = tyid;
+}
+
+bool ValU::operator==(const ValU& o) const
+{
+    return !memcmp(this, &o, sizeof(*this));
 }
