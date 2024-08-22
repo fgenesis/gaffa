@@ -41,6 +41,7 @@ enum PrimType
     PRIMTYPE_STRING,
     PRIMTYPE_TYPE,          // types have this type
     PRIMTYPE_TABLE,
+    PRIMTYPE_ARRAY,
     PRIMTYPE_ANY,           // can hold any value
     // Ranges can only be made from the 3 primitive numeric types,
     // so there' no reason to allocate extra TypeBits for a range type
@@ -143,3 +144,6 @@ enum BinOpType
 
 BinOpType BinOp_TokenToOp(unsigned tok);
 UnOpType UnOp_TokenToOp(unsigned tok);
+
+// Size of an element of type t, when multiple elements of this type are stored in an array
+size_t GetPrimTypeStorageSize(unsigned t);

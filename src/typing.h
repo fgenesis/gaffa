@@ -1,9 +1,10 @@
 #pragma once
-
+ 
 #include "defs.h"
 #include "gainternal.h"
 
 class Table;
+class Array;
 
 // Structs have no defined field order.
 // But for the sake of making types comparable, the order of member types is sorted by ID.
@@ -19,7 +20,8 @@ enum TDescBits
 struct TDesc
 {
     size_t bits; // n = bits & TDESC_LENMASK. If n > 0, it's a struct
-    Table *fields; // methods, constants, dynamic bindings
+    //Table *initializers; // member values set at object creation
+
     //Type members[n] follows behind the struct
     //unsigned nameStrIds[] follows behind that. Doesn't exist if it's a union.
 
@@ -31,11 +33,24 @@ struct TDesc
     {
         return reinterpret_cast<const unsigned*>(types() + (bits & TDESC_LENMASK));
     }
+
+    inline Type *types()
+    {
+        return reinterpret_cast<Type*>(this + 1);
+    }
+    inline unsigned *names()
+    {
+        return reinterpret_cast<unsigned*>(types() + (bits & TDESC_LENMASK));
+    }
 };
 
 TDesc *TDesc_New(const GaAlloc& ga, size_t numFieldsAndBits);
 
-
+struct TypeAndName
+{
+	Type t;
+	unsigned name;
+};
 
 class TypeRegistry
 {
@@ -43,8 +58,11 @@ class TypeRegistry
     ~TypeRegistry();
 
     TDesc *construct(const Table& t); // makes a struct from t
+    TDesc *construct(const Array& t);
 
     // TODO: function to make union
+
+    unsigned lookup(const TypeAndName *tn, size_t n); // 0 when not found, Type::id otherwise
 
 private:
     const GaAlloc& _ga;

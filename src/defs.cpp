@@ -64,6 +64,29 @@ UnOpType UnOp_TokenToOp(unsigned tok)
     return (UnOpType)lookup(&lut_tok2unop[0], Countof(lut_tok2unop), tok, UOP_INVALID);
 }
 
+static const unsigned char TypeElementSizes[] =
+{
+    /* PRIMTYPE_NIL    */ sizeof(unsigned char),
+    /* PRIMTYPE_BOOL   */ sizeof(bool),
+    /* PRIMTYPE_UINT   */ sizeof(uint),
+    /* PRIMTYPE_SINT   */ sizeof(sint),
+    /* PRIMTYPE_FLOAT  */ sizeof(real),
+    /* PRIMTYPE_STRING */ sizeof(unsigned),
+    /* PRIMTYPE_TYPE   */ sizeof(Type),
+    /* PRIMTYPE_TABLE  */ sizeof(void*), // table and array are always dynamically allocated
+    /* PRIMTYPE_ARRAY  */ sizeof(void*),
+    /* PRIMTYPE_ANY    */ sizeof(ValU),
+    /* PRIMTYPE_URANGE */ sizeof(Range<uint>),
+    /* PRIMTYPE_SRANGE */ sizeof(Range<sint>),
+    /* PRIMTYPE_FRANGE */ sizeof(Range<real>),
+};
+static_assert(sizeof(TypeElementSizes) == PRIMTYPE_MAX, "size mismatch");
+
+size_t GetPrimTypeStorageSize(unsigned t)
+{
+    return t < Countof(TypeElementSizes) ? TypeElementSizes[t] : sizeof(ValU);
+}
+
 void ValU::_init(unsigned tyid)
 {
     memset(this, sizeof(*this), 0);
