@@ -6,8 +6,8 @@
     z = 0
 }
 int y = obj:[s+"_thing"]()
-y = 1
-var i = i
+--y = 1
+--var i = i
 
 
 --var z = m:mth(f())
@@ -66,3 +66,21 @@ var i = i
 --
 --type intpair = { a = int, b = int }
 
+
+--type Point = { x = float , y = float, z = 0.0 }
+
+-- methods and namespaced functions go into the current symbol table,
+-- NOT the type:
+-- normal functions go in: syms[funcname]
+-- methods go in:          syms[type][funcname]
+-- this way they can be exported from a module, or stay local, without polluting
+-- the global namespace like it would be in Lua.
+-- rule: The symbol left of : or :: must be a type.
+-- plus: when we see obj.xx = func() ... then we know it's a "function pointer"
+
+-- declare method on type. goes into current namespace.
+--func Point:len()
+--    return math.sqrt(self.x*self.x + self.y*self.y + self.z*self.z)
+
+-- declare function on type (not method). also goes into current namespace
+--func Point::Zero() { return Point{x=0, y=0, z=0} }

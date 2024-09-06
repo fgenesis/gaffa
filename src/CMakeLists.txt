@@ -31,6 +31,8 @@ set(src
     mlir.h
     gaimpdbg.cpp
     gaimpdbg.h
+    hashfunc.cpp
+    hashfunc.h
 )
 
 add_library(gaffa ${src})

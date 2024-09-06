@@ -1,12 +1,16 @@
 #include "strings.h"
 #include <string.h>
+#include "hashfunc.h"
+
 
 static const Str None = {0, 0};
 
 
 StringPool::StringPool()
 {
-    _pool.push_back("");
+    Entry e { "", HASH_SEED };
+
+    _pool.push_back(e);
 }
 
 Str StringPool::put(const char* s)
@@ -25,8 +29,10 @@ Str StringPool::put(const char* s, size_t n)
     Str ret = get(s, n);
     if(!ret.id)
     {
+        uhash h = memhash(HASH_SEED, s, n);
         ret.id = _pool.size();
-        _pool.push_back(std::string(s, s+n));
+        Entry e { std::string(s, s+n), h };
+        _pool.push_back(e);
         ret.len = n;
     }
     return ret;
@@ -51,8 +57,8 @@ Str StringPool::get(const char* s, size_t n) const
     const size_t N = _pool.size();
     for(size_t i = 1; i < N; ++i)
     {
-        const std::string& x = _pool[i];
-        if(x.size() == n && !memcmp(s, x.c_str(), n))
+        const Entry& x = _pool[i];
+        if(x.s.size() == n && !memcmp(s, x.s.c_str(), n))
         {
             Str ret;
             ret.id = i;
@@ -71,7 +77,7 @@ Str StringPool::get(const std::string& s) const
 
 const std::string& StringPool::lookup(size_t id) const
 {
-    return _pool[id];
+    return _pool[id].s;
 }
 
 Str StringPool::importFrom(const StringPool& other, size_t idInOther)

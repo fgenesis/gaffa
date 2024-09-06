@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+
 class StringPool
 {
 public:
@@ -19,5 +20,11 @@ public:
     Str importFrom(const StringPool& other, size_t idInOther);
 
 private:
-    std::vector<std::string> _pool;
+    struct Entry
+    {
+        std::string s;
+        uhash h;
+    };
+    std::vector<Entry> _pool;
 };
+

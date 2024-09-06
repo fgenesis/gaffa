@@ -1,87 +1,84 @@
 #include "array.h"
 #include "gainternal.h"
+#include "gc.h"
+#include <string.h>
 
 
 Array::Array(Type t)
-    : t(t), n(0), ncap(0)
+    : t(t), sz(0), cap(0), elementSize(GetPrimTypeStorageSize(t.id))
 {
     storage.p = NULL;
 }
 
-Array* Array::New(const GaAlloc& ga, size_t n, size_t type)
+Array* Array::GCNew(GC& gc, size_t prealloc, Type t)
 {
-    void *p = ga.alloc(ga.ud, NULL, 0, sizeof(Array));
-    Type ty;
-    ty.id = type;
-    Array *a = p ? GA_PLACEMENT_NEW(p) Array(ty) : NULL;
-    if(n)
+    void *storage = NULL;
+    if(prealloc)
     {
-        if(!a->resize(ga, n))
-        {
-            a->destroy(ga);
-            a = NULL;
-        }
+        storage = _AllocStorage(gc, NULL, t.id, 0, prealloc);
+        if(!storage)
+            return NULL;
     }
+
+    void *pa = gc_new(gc, sizeof(Array));
+    if(!pa)
+    {
+        if(storage)
+            _AllocStorage(gc, storage, t.id, prealloc, 0);
+        return NULL;
+    }
+
+    Array *a = GA_PLACEMENT_NEW(pa) Array(t);
+    a->storage.p = storage;
+    a->cap = prealloc;
     return a;
 }
 
 Val Array::dynamicLookup(size_t idx) const
 {
-    if(idx >= n)
+    if(idx >= sz)
         return _Nil();
 
-    switch(t.id)
+    if(t.id >= PRIMTYPE_ANY)
+        return storage.vals[idx];
+
+    ValU v;
+    v.type = t;
+
+    const void *p = storage.b + (idx * elementSize);
+    memcpy(&v.u, p, elementSize);
+    return v;
+}
+
+void Array::dealloc(GC& gc)
+{
+    if(cap)
     {
-        case PRIMTYPE_SINT:
-            return storage.si[idx];
-        case PRIMTYPE_UINT:
-            return storage.ui[idx];
-        case PRIMTYPE_BOOL:
-            return storage.b[idx];
-        case PRIMTYPE_FLOAT:
-            return storage.f[idx];
-        case PRIMTYPE_STRING:
-            return storage.s[idx];
-        case PRIMTYPE_TYPE:
-            return storage.ts[idx];
-        case PRIMTYPE_URANGE:
-            return storage.ru[idx];
-        default: ;
+        _resize(gc, 0);
+        sz = 0;
     }
-    return storage.vals[idx];
 }
 
-void Array::destroy(const GaAlloc& ga)
+void* Array::ensure(GC& gc, size_t n)
 {
-    if(ncap)
-    {
-        size_t elemSize = GetPrimTypeStorageSize(t.id);
-        ga.alloc(ga.ud, storage.p, ncap * elemSize, 0);
-    }
-    this->~Array();
-    ga.alloc(ga.ud, this, sizeof(Array), 0);
+    return n <= cap ? storage.p : _resize(gc, n);
 }
 
-void* Array::ensure(const GaAlloc& ga, size_t n)
+void* Array::_resize(GC& gc, size_t n)
 {
-    return n <= ncap ?  storage.p : resize(ga, n);
-}
-
-void* Array::resize(const GaAlloc& ga, size_t n)
-{
-    return _alloc(ga, GetPrimTypeStorageSize(t.id), n);
-}
-
-void * Array::_alloc(const GaAlloc& ga, size_t elemSize, size_t n)
-{
-    const size_t oldbytes = ncap * elemSize;
-    const size_t newbytes = n * elemSize;
-    void *p = ga.alloc(ga.ud, storage.p, oldbytes, newbytes);
+    void *p = _AllocStorage(gc, storage.p, t.id, cap, n);
     if(p || !n)
     {
         storage.p = p;
-        ncap = n;
+        cap = n;
     }
-    return p;
+}
+
+void* Array::_AllocStorage(GC& gc, void* p, size_t type, size_t oldelems, size_t newelems)
+{
+    const size_t elemSize = GetPrimTypeStorageSize(type);
+    const size_t oldbytes = oldelems * elemSize;
+    const size_t newbytes = newelems * elemSize;
+    return gc_alloc_unmanaged(gc, p, oldbytes, newbytes);
 }
 

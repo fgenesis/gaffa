@@ -89,7 +89,8 @@ size_t GetPrimTypeStorageSize(unsigned t)
 
 void ValU::_init(unsigned tyid)
 {
-    memset(this, sizeof(*this), 0);
+    //memset(&u, sizeof(u), 0);
+    u.opaque = 0;
     type.id = tyid;
 }
 

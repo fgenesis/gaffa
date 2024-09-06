@@ -1,29 +1,31 @@
 #pragma once
 
 #include "typing.h"
+#include "array.h"
 
-#include <vector>
+struct TKey
+{
+
+};
 
 class Table
 {
 public:
-	Table *New(GaAlloc& ga);
-	void destroy(GaAlloc& ga);
+	Table *GCNew(GC& gc, Type kt, Type vt);
+	void dealloc(GC& gc);
+	void clear();
 	ValU get(const ValU& k) const;
 	void set(const ValU& k, const ValU& v);
 
-
-	// FIXME: This is the shittiest and most stupid implementation just to get this thing off the ground quickly.
-	// Make this a proper data structure that doesn't suck!
-	struct KV
-	{
-		ValU k, v;
-	};
-	std::vector<KV> _pairs;
-
 private:
-	Table();
-	~Table();
+	Table(Type valtype);
+	ValU *_resizekeys(GC& gc, size_t n);
+	size_t _getidx(ValU v) const;
+
+	ValU *keys;
+	size_t *backrefs;
+	size_t idxmask; // capacity = idxmask + 1
+	Array vals;
 };
 
 /*

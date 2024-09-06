@@ -12,6 +12,8 @@ typedef int64_t sint;
 typedef uint64_t uint;
 typedef float real;
 
+typedef size_t uhash;
+
 // operator new() without #include <new>
 // Unfortunately the standard mandates the use of size_t, so we need stddef.h the very least.
 // Trick via https://github.com/ocornut/imgui
@@ -21,7 +23,6 @@ struct GA_NewDummy {};
 inline void* operator new(size_t, GA_NewDummy, void* ptr) { return ptr; }
 inline void  operator delete(void*, GA_NewDummy, void*)       {}
 #define GA_PLACEMENT_NEW(p) new(GA_NewDummy(), p)
-
 
 
 enum Constants
@@ -53,12 +54,15 @@ enum PrimType
     PRIMTYPE_TYPE,          // types have this type
     PRIMTYPE_TABLE,
     PRIMTYPE_ARRAY,
-    PRIMTYPE_ANY,           // can hold any value
+
     // Ranges can only be made from the 3 primitive numeric types,
     // so there' no reason to allocate extra TypeBits for a range type
+    // TODO KILL THESE
     PRIMTYPE_URANGE,
     PRIMTYPE_SRANGE,
     PRIMTYPE_FRANGE,
+
+    PRIMTYPE_ANY,           // can hold any value. must be last in the enum.
     // These are the engine-level types. Runtime-created types are any IDs after this.
     PRIMTYPE_MAX
 };
@@ -69,6 +73,7 @@ struct Str
 {
     size_t id;
     size_t len;
+    uhash hash;
 };
 
 template<typename T>
@@ -76,6 +81,16 @@ struct Range
 {
     T begin, end, step;
 };
+
+// HMM: consider making ValU::u register sized.
+// Move Range into a new IterSlot class that is bigger, for iteration.
+// VM gets a stack of IterSlot; and each iteration can fill multiple slots, one per iterator
+/*
+- array (idx, array ptr) <- max idx via array ptr
+- table (idx, table ptr) <- ditto
+- ranges (begin, end, step)
+- user (a, b, function)
+*/
 
 // dumb type, no ctors
 struct ValU
@@ -86,11 +101,12 @@ struct ValU
         uint ui;
         real f;
         void *p;
-        Str str;
-        Range<uint> urange;
+        size_t str;
+        /*Range<uint> urange;
         Range<sint> srange;
-        Range<real> frange;
+        Range<real> frange;*/
         Type t;
+        uintptr_t opaque;
     } u;
 
     // This must not be PRIMTYPE_ANY.
@@ -102,7 +118,7 @@ struct ValU
 
 struct Val : public ValU
 {
-    inline Val(const ValU& v)           { *this = v; }
+    inline Val(const ValU& v)           { this->u = v.u; this->type = v.type; }
     inline Val()                        { _init(PRIMTYPE_NIL);    u.ui = 0; }
     inline Val(bool b)                  { _init(PRIMTYPE_BOOL);   u.ui = b; }
     inline Val(unsigned int i)          { _init(PRIMTYPE_UINT);   u.ui = i; }
@@ -111,11 +127,11 @@ struct Val : public ValU
     inline Val(sint i, _Nil _ = _Nil()) { _init(PRIMTYPE_SINT);   u.si = i; }
     inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
     inline Val(_Nil)                    { _init(PRIMTYPE_NIL);    u.ui = 0; }
-    inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s; }
+    inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
     inline Val(Type t)                  { _init(PRIMTYPE_TYPE);   u.t = t; }
-    inline Val(const Range<uint>& r)    { _init(PRIMTYPE_URANGE); u.urange = r; }
+    /*inline Val(const Range<uint>& r)    { _init(PRIMTYPE_URANGE); u.urange = r; }
     inline Val(const Range<sint>& r)    { _init(PRIMTYPE_SRANGE); u.srange = r; }
-    inline Val(const Range<real>& r)    { _init(PRIMTYPE_FRANGE); u.frange = r; }
+    inline Val(const Range<real>& r)    { _init(PRIMTYPE_FRANGE); u.frange = r; }*/
 };
 
 enum UnOpType

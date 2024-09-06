@@ -19,7 +19,7 @@ static void markobj(GCobj *o, unsigned n)
 
 }
 
-static unsigned marksome(GCroot* root, unsigned n)
+static unsigned marksome(GC* root, unsigned n)
 {
     //GCobj *o = root->curcolor;
     while(n--)
@@ -28,21 +28,27 @@ static unsigned marksome(GCroot* root, unsigned n)
     return 0;
 }
 
-void gc_step(GCroot *root, size_t n)
+static void _gc_free(GC& gc, GCobj *o)
 {
-    const unsigned col = root->curcolor;
-    GCobj * const loopbegin = root->curobj;
+    gc.alloc(gc.gcud, o, o->gcsize, 0);
+}
+
+
+void gc_step(GC& gc, size_t n)
+{
+    const unsigned col = gc.curcolor;
+    GCobj * const loopbegin = gc.curobj;
     if(!loopbegin)
         return;
     GCobj *it = loopbegin;
     GCobj *last = loopbegin;
-    switch(root->gcstep)
+    switch(gc.gcstep)
     {
         case STEP_MARK:
         {
         }
         // fall through
-        root->gcstep = STEP_SWEEP;
+        gc.gcstep = STEP_SWEEP;
         case STEP_SWEEP:
         {
             while(n--)
@@ -50,7 +56,7 @@ void gc_step(GCroot *root, size_t n)
                 GCobj *o = it;
                 it = it->gcnext;
                 if(o->gccolor != col)
-                    root->alloc(root->gcud, o, o->gcsize + sizeof(GCobj), 0);
+                    _gc_free(gc, o);
                 else
                 {
                     last->gcnext = o;
@@ -59,23 +65,28 @@ void gc_step(GCroot *root, size_t n)
             }
 
         }
-        root->gcstep = STEP_MARK;
+        gc.gcstep = STEP_MARK;
     }
 
-    root->curobj = last;
+    gc.curobj = last;
 }
 
-void *gc_new(GCroot* root, size_t bytes)
+void *gc_new(GC& gc, size_t bytes)
 {
-    GCobj *p = (GCobj*)root->alloc(root->gcud, NULL, 0, bytes + sizeof(GCobj));
+    bytes += sizeof(GCobj);
+    GCobj *p = (GCobj*)gc.alloc(gc.gcud, NULL, 0, bytes);
     if(p)
     {
         p->gccolor = 0;
         p->gcsize = bytes;
-        GCobj *cur = root->curobj;
-        p->gcnext = cur->gcnext;
-        cur->gcnext = p;
+        p->gcnext = gc.curobj;
+        gc.curobj = p;
         ++p;
     }
     return p;
+}
+
+void* gc_alloc_unmanaged(GC& gc, void* p, size_t oldsize, size_t newsize)
+{
+    return gc.alloc(gc.gcud, p, oldsize, newsize);
 }
