@@ -65,5 +65,6 @@ class TypeRegistry
     unsigned lookup(const TypeAndName *tn, size_t n); // 0 when not found, Type::id otherwise
 
 private:
+    TDesc *_store(TDesc *);
     const GaAlloc& _ga;
 };

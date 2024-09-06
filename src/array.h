@@ -9,7 +9,7 @@ class Array
 public:
     union
     {
-        ValU *vals;
+        ValU *vals; // Any
         uint *ui;
         sint *si;
         bool *b;
@@ -29,6 +29,9 @@ public:
     void *resize(const GaAlloc& ga, size_t n);
 
     static Array *New(const GaAlloc& ga, size_t n, size_t type);
+
+    Val dynamicLookup(size_t idx) const;
+    void destroy(const GaAlloc& ga);
 
 private:
     Array(Type t);

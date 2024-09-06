@@ -16,6 +16,8 @@ static const char *symscopename(Symstore::Lookup info)
         case SCOPEREF_UPVAL:    return "upvalue";
         case SCOPEREF_EXTERNAL: return "extern";
     }
+    assert(false);
+    return NULL;
 }
 
 

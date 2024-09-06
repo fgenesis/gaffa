@@ -12,6 +12,17 @@ typedef int64_t sint;
 typedef uint64_t uint;
 typedef float real;
 
+// operator new() without #include <new>
+// Unfortunately the standard mandates the use of size_t, so we need stddef.h the very least.
+// Trick via https://github.com/ocornut/imgui
+// "Defining a custom placement new() with a dummy parameter allows us to bypass including <new>
+// which on some platforms complains when user has disabled exceptions."
+struct GA_NewDummy {};
+inline void* operator new(size_t, GA_NewDummy, void* ptr) { return ptr; }
+inline void  operator delete(void*, GA_NewDummy, void*)       {}
+#define GA_PLACEMENT_NEW(p) new(GA_NewDummy(), p)
+
+
 
 enum Constants
 {
@@ -102,6 +113,9 @@ struct Val : public ValU
     inline Val(_Nil)                    { _init(PRIMTYPE_NIL);    u.ui = 0; }
     inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s; }
     inline Val(Type t)                  { _init(PRIMTYPE_TYPE);   u.t = t; }
+    inline Val(const Range<uint>& r)    { _init(PRIMTYPE_URANGE); u.urange = r; }
+    inline Val(const Range<sint>& r)    { _init(PRIMTYPE_SRANGE); u.srange = r; }
+    inline Val(const Range<real>& r)    { _init(PRIMTYPE_FRANGE); u.frange = r; }
 };
 
 enum UnOpType
