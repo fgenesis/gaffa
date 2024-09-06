@@ -12,7 +12,11 @@ typedef int64_t sint;
 typedef uint64_t uint;
 typedef float real;
 
-typedef size_t uhash;
+// "big enough" size type for containers. For when 64-bit size_t is too big and a smaller type is more practical.
+typedef unsigned tsize;
+
+// Type used for short hashes. There's no use to make this bigger than tsize
+typedef unsigned uhash;
 
 // operator new() without #include <new>
 // Unfortunately the standard mandates the use of size_t, so we need stddef.h the very least.
@@ -32,7 +36,7 @@ enum Constants
 
 struct Type
 {
-    size_t id;
+    tsize id;
 };
 
 // The highest 2 bits of the type id are used as tags
@@ -92,22 +96,24 @@ struct Range
 - user (a, b, function)
 */
 
+union _AnyValU
+{
+    sint si;
+    uint ui;
+    real f;
+    void *p;
+    size_t str;
+    /*Range<uint> urange;
+    Range<sint> srange;
+    Range<real> frange;*/
+    Type t;
+    uintptr_t opaque; // this must be large enough to contain all bits of the union
+};
+
 // dumb type, no ctors
 struct ValU
 {
-    union
-    {
-        sint si;
-        uint ui;
-        real f;
-        void *p;
-        size_t str;
-        /*Range<uint> urange;
-        Range<sint> srange;
-        Range<real> frange;*/
-        Type t;
-        uintptr_t opaque;
-    } u;
+    _AnyValU u;
 
     // This must not be PRIMTYPE_ANY.
     Type type; // Runtime type of this value (PrimType | TypeBits)

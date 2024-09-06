@@ -89,12 +89,12 @@ size_t GetPrimTypeStorageSize(unsigned t)
 
 void ValU::_init(unsigned tyid)
 {
-    //memset(&u, sizeof(u), 0);
+    static_assert(sizeof(_AnyValU) == sizeof(((_AnyValU*)NULL)->opaque), "oops");
     u.opaque = 0;
     type.id = tyid;
 }
 
 bool ValU::operator==(const ValU& o) const
 {
-    return !memcmp(this, &o, sizeof(*this));
+    return u.t.id == o.u.t.id && u.opaque == o.u.opaque;
 }

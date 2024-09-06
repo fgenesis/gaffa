@@ -41,6 +41,23 @@
 #endif
 
 
+#ifndef PACKED_STRUCT
+  #ifdef _MSC_VER
+  #  define PACKED_STRUCT(name) __pragma(pack(push, 1)) struct name __pragma(pack(pop))
+  #elif defined(__GNUC__)
+  #  define PACKED_STRUCT(name) struct __attribute__((packed)) name
+  #endif
+#endif
+
+#ifndef ALIGN
+  #ifdef _MSC_VER
+  #  define ALIGN(x) __declspec(align(x))
+  #elif defined(__GNUC__)
+  #  define ALIGN(x) __attribute__((aligned(x)))
+  #endif
+#endif
+
+
 namespace detail
 {
     template <typename T, size_t N>

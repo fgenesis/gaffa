@@ -3,10 +3,7 @@
 #include "typing.h"
 #include "array.h"
 
-struct TKey
-{
-
-};
+struct TKey;
 
 class Table
 {
@@ -14,17 +11,17 @@ public:
 	Table *GCNew(GC& gc, Type kt, Type vt);
 	void dealloc(GC& gc);
 	void clear();
-	ValU get(const ValU& k) const;
-	void set(const ValU& k, const ValU& v);
+	ValU get(ValU k) const;
+	void set(ValU k, ValU v);
 
 private:
 	Table(Type valtype);
-	ValU *_resizekeys(GC& gc, size_t n);
-	size_t _getidx(ValU v) const;
+	TKey *_resizekeys(GC& gc, size_t n);
+    TKey *_getkey(ValU findkey) const;
 
-	ValU *keys;
-	size_t *backrefs;
-	size_t idxmask; // capacity = idxmask + 1
+	TKey *keys;
+	tsize *backrefs;
+	tsize idxmask; // capacity = idxmask + 1
 	Array vals;
 };
 

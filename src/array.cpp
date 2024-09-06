@@ -10,12 +10,12 @@ Array::Array(Type t)
     storage.p = NULL;
 }
 
-Array* Array::GCNew(GC& gc, size_t prealloc, Type t)
+Array* Array::GCNew(GC& gc, tsize prealloc, Type t)
 {
     void *storage = NULL;
     if(prealloc)
     {
-        storage = _AllocStorage(gc, NULL, t.id, 0, prealloc);
+        storage = AllocStorage(gc, NULL, t, 0, prealloc);
         if(!storage)
             return NULL;
     }
@@ -24,7 +24,7 @@ Array* Array::GCNew(GC& gc, size_t prealloc, Type t)
     if(!pa)
     {
         if(storage)
-            _AllocStorage(gc, storage, t.id, prealloc, 0);
+            AllocStorage(gc, storage, t, prealloc, 0);
         return NULL;
     }
 
@@ -59,14 +59,14 @@ void Array::dealloc(GC& gc)
     }
 }
 
-void* Array::ensure(GC& gc, size_t n)
+void* Array::ensure(GC& gc, tsize n)
 {
     return n <= cap ? storage.p : _resize(gc, n);
 }
 
-void* Array::_resize(GC& gc, size_t n)
+void* Array::_resize(GC& gc, tsize n)
 {
-    void *p = _AllocStorage(gc, storage.p, t.id, cap, n);
+    void *p = AllocStorage(gc, storage.p, t, cap, n);
     if(p || !n)
     {
         storage.p = p;
@@ -74,9 +74,9 @@ void* Array::_resize(GC& gc, size_t n)
     }
 }
 
-void* Array::_AllocStorage(GC& gc, void* p, size_t type, size_t oldelems, size_t newelems)
+void* Array::AllocStorage(GC& gc, void* p, Type t, tsize oldelems, tsize newelems)
 {
-    const size_t elemSize = GetPrimTypeStorageSize(type);
+    const size_t elemSize = GetPrimTypeStorageSize(t.id);
     const size_t oldbytes = oldelems * elemSize;
     const size_t newbytes = newelems * elemSize;
     return gc_alloc_unmanaged(gc, p, oldbytes, newbytes);

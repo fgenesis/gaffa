@@ -25,21 +25,22 @@ public:
         Range<sint> *ri;
         Range<real> *rf;*/
     } storage;
-    size_t sz; // usable size in elements
-    size_t cap; // capacity in elements
+    tsize sz; // usable size in elements
+    tsize cap; // capacity in elements
     const Type t;
-    const unsigned elementSize;
+    const tsize elementSize;
 
-    void *ensure(GC& gc, size_t n);
-    void *_resize(GC& gc, size_t n);
+    void *ensure(GC& gc, tsize n);
+    void *_resize(GC& gc, tsize n);
 
-    static Array *GCNew(GC& gc, size_t prealloc, Type t);
+    static Array *GCNew(GC& gc, tsize prealloc, Type t);
 
     Val dynamicLookup(size_t idx) const;
     void dealloc(GC& gc);
     inline void clear() { sz = 0; }
+    void dynamicAppend(GC& gc, ValU v);
 
     Array(Type t);
 
-    static void *_AllocStorage(GC& gc, void *p, size_t type, size_t oldelems, size_t newelems); // size in elements
+    static void *AllocStorage(GC& gc, void *p, Type type, tsize oldelems, tsize newelems); // size in elements
 };
