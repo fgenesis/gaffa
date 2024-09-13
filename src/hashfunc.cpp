@@ -1,14 +1,8 @@
 #include "hashfunc.h"
 
-static inline uhash rotl(uhash h, unsigned n)
-{
-    enum { Bits = CHAR_BIT * sizeof(uhash) };
-    n &= Bits - 1;
-    return (h << n) | (h >> (Bits - n));
-}
 
 // hash and strlen() in one
-HStr lenhash(size_t h, const char * const s)
+HStr lenhash(uhash h, const char * const s)
 {
     const char *p = s;
     for(;;)
@@ -26,7 +20,7 @@ HStr lenhash(size_t h, const char * const s)
 }
 
 // same hash but known length
-uhash memhash(size_t h, const void *buf, size_t size)
+uhash memhash(uhash h, const void *buf, size_t size)
 {
     const unsigned char *p = (const unsigned char*)buf;
     do
@@ -35,9 +29,11 @@ uhash memhash(size_t h, const void *buf, size_t size)
     return h;
 }
 
-uhash hashvalue(size_t h, ValU v)
+uhash hashvalue(uhash h, ValU v)
 {
     h ^= rotl(0x811c9dc5, v.type.id);
 	h += v.u.opaque;
-	return h;
+    if(sizeof(v.u.opaque) > sizeof(uhash))
+        h += h >> 29u;
+	return (uhash)h;
 }

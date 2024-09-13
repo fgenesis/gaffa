@@ -57,6 +57,17 @@
   #endif
 #endif
 
+#ifndef ASSUME
+  #ifdef _MSC_VER
+  #  define ASSUME(x) __assume(x)
+  #elif __has_builtin(__builtin__assume)
+  #  define ALIGN(x) __builtin__assume(x)
+  #endif
+  #ifndef ASSUME
+  #  define ASSUME(x)
+  #endif
+#endif
+
 
 namespace detail
 {
@@ -115,3 +126,4 @@ MaybeNum strtouint(const char* s, size_t maxlen = -1);
 
 MaybeNum strtouint_dec(const char* s, size_t maxlen = -1);
 // TODO: hex, oct, bin
+

@@ -5,6 +5,8 @@
 #include "strings.h"
 #include "gaimpdbg.h"
 #include "mlir.h"
+#include "table.h"
+#include "gc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,8 +39,40 @@ static void *myalloc(void *ud, void *ptr, size_t osz, size_t nsz)
     return realloc(ptr, nsz);
 }
 
+void testref()
+{
+    GC gc = {0};
+    gc.alloc = myalloc;
+
+    RefTable<size_t> t;
+    size_t a = t.addref(gc, 100);
+    size_t b = t.addref(gc, 200);
+    size_t c = t.addref(gc, 300);
+    assert(*t.getref(a) == 100);
+    assert(*t.getref(b) == 200);
+    assert(*t.getref(c) == 300);
+}
+
+void testtable()
+{
+    GC gc = {0};
+    gc.alloc = myalloc;
+
+    Type tt = {PRIMTYPE_ANY};
+    Table *t = Table::GCNew(gc, tt, tt);
+
+    for(uint i = 1; i < 6; ++i)
+        t->set(gc, i, i*10);
+
+    int a = 0;
+}
+
 int main(int argc, char **argv)
 {
+    testref();
+    testtable();
+    return 0;
+
     const char *fn = "test.txt";
     const GaAlloc ga = { myalloc, NULL };
 

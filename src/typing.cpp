@@ -1,30 +1,33 @@
 #include "typing.h"
 #include "table.h"
 #include "array.h"
+#include "gc.h"
 #include <algorithm>
+
+static const Type NilType = {PRIMTYPE_NIL};
 
 size_t TDesc_AllocSize(size_t numFieldsAndBits)
 {
-	return sizeof(TDesc) + numFieldsAndBits * sizeof(Type) + numFieldsAndBits * sizeof(unsigned);
+	return sizeof(TDesc) + numFieldsAndBits * sizeof(Type) + numFieldsAndBits * sizeof(sref);
 }
 
-TDesc *TDesc_New(const GaAlloc& ga, size_t numFieldsAndBits)
+TDesc *TDesc_New(GC& gc, tsize numFieldsAndBits)
 {
 	size_t sz = TDesc_AllocSize(numFieldsAndBits);
-	TDesc *td = (TDesc*)ga.alloc(ga.ud, NULL, 0, sz);
+	TDesc *td = (TDesc*)gc_alloc_unmanaged(gc, NULL, 0, sz);
 	if(td)
 		td->bits = numFieldsAndBits;
 	return td;
 }
 
-void TDesc_Delete(const GaAlloc& ga, TDesc *td)
+void TDesc_Delete(GC& gc, TDesc *td)
 {
 	size_t sz = TDesc_AllocSize(td->bits);
-	ga.alloc(ga.ud, td, sz, 0);
+	gc_alloc_unmanaged(gc, td, sz, 0);
 }
 
-TypeRegistry::TypeRegistry(const GaAlloc& ga)
-	: _ga(ga)
+TypeRegistry::TypeRegistry(GC& gc)
+	: _gc(gc)
 {
 }
 
@@ -47,29 +50,28 @@ static uint hashfields(const TypeAndName *fields, size_t N)
 	return ret;
 }
 
-TDesc* TypeRegistry::construct(const Table& t)
+Type TypeRegistry::construct(const Table& t)
 {
-	std::vector<TypeAndName> tn;
-	tn.reserve(t._pairs.size());
+	PodArray<TypeAndName> tn;
+	const tsize N = t.size();
+	if(!tn.resize(_gc, N))
+		return NilType;
 
-	for(size_t i = 0; i < t._pairs.size(); ++i)
+	for(tsize i = 0; i < N; ++i)
 	{
-		const ValU& k = t._pairs[i].k;
-		const ValU& v = t._pairs[i].v;
-		if(k.type.id != PRIMTYPE_STRING)
-			return NULL;
-		if(v.type.id != PRIMTYPE_TYPE) // TODO: support initializers
-			return NULL;
-		TypeAndName t;
-		t.name = k.type.id;
-		t.t = v.u.t;
-		tn.push_back(t);
+		const KV e = t.index(i);
+		if(e.k.type.id != PRIMTYPE_STRING)
+			return NilType;
+		if(e.v.type.id != PRIMTYPE_TYPE) // TODO: support initializers
+			return NilType;
+		tn[i].name = e.k.type.id;
+		tn[i].t = e.v.u.t;
 	}
 
-	std::sort(tn.begin(), tn.end(), _sortfields);
-	size_t bits = t._pairs.size();
+	std::sort(tn.data(), tn.data() + N, _sortfields);
+	tsize bits = N;
 
-	TDesc *td = TDesc_New(_ga, bits);
+	TDesc *td = TDesc_New(_gc, bits);
 	for(size_t i = 0; i < tn.size(); ++i)
 	{
 		td->names()[i] = tn[i].name;
@@ -79,24 +81,24 @@ TDesc* TypeRegistry::construct(const Table& t)
 	return _store(td);
 }
 
-TDesc* TypeRegistry::construct(const Array& t)
+Type TypeRegistry::construct(const DArray& t)
 {
-	const size_t n = t.n;
-	TDesc *td = TDesc_New(_ga, n);
+	const tsize N = t.size();
+	TDesc *td = TDesc_New(_gc, N);
 	if(t.t.id == PRIMTYPE_TYPE)
-		for(size_t i = 0; i < n; ++i)
+		for(size_t i = 0; i < N; ++i)
 		{
 			td->names()[i] = 0;
 			td->types()[i] = t.storage.ts[i];
 		}
 	else
-		for(size_t i = 0; i < n; ++i)
+		for(size_t i = 0; i < N; ++i)
 		{
 			Val e = t.dynamicLookup(i);
 			if(e.type.id != PRIMTYPE_TYPE)
 			{
-				TDesc_Delete(_ga, td);
-				return NULL;
+				TDesc_Delete(_gc, td);
+				return NilType;
 			}
 			td->names()[i] = 0;
 			td->types()[i] = e.u.t;
@@ -112,7 +114,7 @@ unsigned TypeRegistry::lookup(const TypeAndName* tn, size_t n)
 	return 0;
 }
 
-TDesc *TypeRegistry::_store(TDesc *td)
+Type TypeRegistry::_store(TDesc *td)
 {
-	return td;
+	return NilType; // FIXME
 }

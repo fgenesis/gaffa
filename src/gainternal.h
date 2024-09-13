@@ -6,6 +6,7 @@
 
 #include "gaffa.h"
 #include "defs.h"
+#include "gc.h"
 
 #include <assert.h>
 
@@ -13,4 +14,9 @@ struct GaAlloc
 {
 	GaffaAllocFunc alloc;
 	void *ud;
+};
+
+struct GaState
+{
+	GC gc;
 };

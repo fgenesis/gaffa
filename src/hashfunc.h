@@ -1,6 +1,8 @@
 #pragma once
 
 #include "defs.h"
+#include "util.h"
+#include <limits.h> // CHAR_BIT
 
 struct HStr
 {
@@ -12,10 +14,25 @@ struct HStr
 #define HASH_SEED 0  // FIXME
 
 
+FORCEINLINE static uhash rotl(uhash h, unsigned n)
+{
+    enum { Bits = CHAR_BIT * sizeof(uhash), Mask = Bits - 1 };
+    n &= Mask;
+    return (h << n) | (h >> (Bits - n));
+}
+
+FORCEINLINE static uhash rotr(uhash h, unsigned n)
+{
+    enum { Bits = CHAR_BIT * sizeof(uhash), Mask = Bits - 1 };
+    n &= Mask;
+    return (h >> n) | (h << (Bits - n));
+}
+
+
 // hash and strlen() in one
-HStr lenhash(size_t h, const char * const s);
+HStr lenhash(uhash h, const char * const s);
 
 // same hash but known length
-uhash memhash(size_t h, const void *buf, size_t size);
+uhash memhash(uhash h, const void *buf, size_t size);
 
-uhash hashvalue(size_t h, ValU v);
+uhash hashvalue(uhash h, ValU v);

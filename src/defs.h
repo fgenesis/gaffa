@@ -12,11 +12,16 @@ typedef int64_t sint;
 typedef uint64_t uint;
 typedef float real;
 
+typedef uint32_t u32;
+
 // "big enough" size type for containers. For when 64-bit size_t is too big and a smaller type is more practical.
 typedef unsigned tsize;
 
 // Type used for short hashes. There's no use to make this bigger than tsize
 typedef unsigned uhash;
+
+// Type used for string refs.
+typedef unsigned sref;
 
 // operator new() without #include <new>
 // Unfortunately the standard mandates the use of size_t, so we need stddef.h the very least.
@@ -43,14 +48,18 @@ struct Type
 enum TypeBits
 {
     TB_OPTION  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 1u), // is option type
-    TB_ARRAY   = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 2u), // is array of type
-    TB_TYPEMASK = ~(TB_OPTION | TB_ARRAY)
+    TB_ERROR   = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 2u), // is error of type
+    TB_TYPEMASK = ~(TB_OPTION | TB_ERROR)
 };
 
 enum PrimType
 {
+    // Types that are always false
     PRIMTYPE_NIL, // must be 0
+    PRIMTYPE_ERROR,
+    // Bool is
     PRIMTYPE_BOOL,
+    // Types that are always true
     PRIMTYPE_UINT,
     PRIMTYPE_SINT,
     PRIMTYPE_FLOAT,
@@ -62,9 +71,9 @@ enum PrimType
     // Ranges can only be made from the 3 primitive numeric types,
     // so there' no reason to allocate extra TypeBits for a range type
     // TODO KILL THESE
-    PRIMTYPE_URANGE,
+    /*PRIMTYPE_URANGE,
     PRIMTYPE_SRANGE,
-    PRIMTYPE_FRANGE,
+    PRIMTYPE_FRANGE,*/
 
     PRIMTYPE_ANY,           // can hold any value. must be last in the enum.
     // These are the engine-level types. Runtime-created types are any IDs after this.
@@ -75,8 +84,8 @@ struct _Nil {};
 
 struct Str
 {
-    size_t id;
     size_t len;
+    sref id;
     uhash hash;
 };
 
@@ -102,7 +111,7 @@ union _AnyValU
     uint ui;
     real f;
     void *p;
-    size_t str;
+    sref str;
     /*Range<uint> urange;
     Range<sint> srange;
     Range<real> frange;*/
@@ -118,21 +127,22 @@ struct ValU
     // This must not be PRIMTYPE_ANY.
     Type type; // Runtime type of this value (PrimType | TypeBits)
 
-    void _init(unsigned tyid);
+    void _init(tsize tyid);
     bool operator==(const ValU& o) const;
 };
 
 struct Val : public ValU
 {
+    inline Val(const _AnyValU u, tsize tid) { _init(tid); this->u = u; }
     inline Val(const ValU& v)           { this->u = v.u; this->type = v.type; }
-    inline Val()                        { _init(PRIMTYPE_NIL);    u.ui = 0; }
+    inline Val()                        { _init(PRIMTYPE_NIL); }
+    inline Val(_Nil)                    { _init(PRIMTYPE_NIL); }
     inline Val(bool b)                  { _init(PRIMTYPE_BOOL);   u.ui = b; }
     inline Val(unsigned int i)          { _init(PRIMTYPE_UINT);   u.ui = i; }
     inline Val(int i)                   { _init(PRIMTYPE_SINT);   u.si = i; }
     inline Val(uint i, _Nil _ = _Nil()) { _init(PRIMTYPE_UINT);   u.ui = i; }
     inline Val(sint i, _Nil _ = _Nil()) { _init(PRIMTYPE_SINT);   u.si = i; }
     inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
-    inline Val(_Nil)                    { _init(PRIMTYPE_NIL);    u.ui = 0; }
     inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
     inline Val(Type t)                  { _init(PRIMTYPE_TYPE);   u.t = t; }
     /*inline Val(const Range<uint>& r)    { _init(PRIMTYPE_URANGE); u.urange = r; }
@@ -183,3 +193,14 @@ UnOpType UnOp_TokenToOp(unsigned tok);
 
 // Size of an element of type t, when multiple elements of this type are stored in an array
 size_t GetPrimTypeStorageSize(unsigned t);
+
+
+inline static bool isTrueish(const ValU v)
+{
+    static_assert(PRIMTYPE_BOOL == 2, "ey");
+    return v.type.id > PRIMTYPE_BOOL && v.u.opaque;
+}
+
+// Small-size memcpy() that's wired specifially to copy any values a ValU may contain.
+// Assumes both pointers are aligned to 4 bytes.
+void *valcpy(void *dst, const void *src, tsize bytes);

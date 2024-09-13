@@ -1,4 +1,5 @@
 #include "gc.h"
+#include <string.h>
 
 enum
 {
@@ -89,4 +90,14 @@ void *gc_new(GC& gc, size_t bytes)
 void* gc_alloc_unmanaged(GC& gc, void* p, size_t oldsize, size_t newsize)
 {
     return gc.alloc(gc.gcud, p, oldsize, newsize);
+}
+
+void* gc_alloc_unmanaged_zero(GC& gc, size_t size)
+{
+    if(!size)
+        return NULL;
+    void *p = gc.alloc(gc.gcud, NULL, 0, size);
+    if(p)
+        memset(p, 0, size);
+    return p;
 }

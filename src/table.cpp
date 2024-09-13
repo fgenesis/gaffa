@@ -1,29 +1,40 @@
 #include "table.h"
 #include "hashfunc.h"
 #include "util.h"
+#include "gc.h"
+#include <string.h>
+
+/*
+Implementation notes:
+- Internally, keys are stored via open addressing, using linear probing and tombstones.
+- Tombstones are cleaned up when erasing keys, if no probe sequences are broken.
+- Keys and values are stored separately to maximize cache line occupancy.
+- Hashes are not stored. Computing a hash from any key is trivially O(1) and not worth storing.
+- Reading material / inspired by: https://craftinginterpreters.com/hash-tables.html
+*/
 
 enum { KEY_ALIGNMENT = sizeof(((ValU*)NULL)->u) };
 
 // There's no ValU in here due to possible alignment and padding issues with that type.
-// Can't seem to convince the compiler to place validx in the otherwise unused padding section...
-struct TKey : public ValU
+// Can't seem to convince the compiler to place validx in the otherwise unused padding section of ValU...
+struct TKey
 {
     _AnyValU u; // corresponds to ValU::u
     Type type;  // corresponds to ValU::type
-    tsize validx1; // index of value + 1. invalid if 0.
+    tsize validx; // index of value
 };
 
 static inline bool isdead(const TKey& k)
 {
-	return k.type.id == PRIMTYPE_NIL && k.u.ui;
+    return k.type.id == PRIMTYPE_NIL && k.u.ui;
 }
 static inline bool reallyempty(const TKey& k)
 {
-	return k.type.id == PRIMTYPE_NIL && !k.u.ui;
+    return k.type.id == PRIMTYPE_NIL && !k.u.ui;
 }
 static inline bool isfree(ValU k)
 {
-	return k.type.id == PRIMTYPE_NIL;
+    return k.type.id == PRIMTYPE_NIL;
 }
 
 static inline bool issame(const TKey& k, ValU v)
@@ -34,54 +45,63 @@ static inline bool issame(const TKey& k, ValU v)
 static inline void maketombstone(TKey& k)
 {
     k.type.id = PRIMTYPE_NIL;
-    k.u.opaque = 1;
-    k.validx1 = 0;
+    k.u.ui = 1;
 }
 
 static inline void makempty(TKey& k)
 {
     k.type.id = PRIMTYPE_NIL;
-    k.u.opaque = 0;
-    k.validx1 = 0;
+    k.u.ui = 0;
+}
+
+#define KCHECK(idx) assert(backrefs[keys[idx].validx] == idx);
+
+static bool isValidCap(tsize x)
+{
+    // Aka. must be 0, or power of 2. Falsely rejects 1 but this is not a problem because 1 never appears as capacity.
+    return !((x - 1) & x);
 }
 
 
 
 
-
-Table::Table(Type valtype)
-	: vals(valtype), keys(NULL), backrefs(NULL), idxmask(0)
+Table::Table(tsize keytype, tsize valtype)
+    : keys(NULL), keytype({keytype}), idxmask(-1), vals({valtype}), backrefs(NULL)
 {
 }
 
-TKey* Table::_resizekeys(GC& gc, size_t n)
+tsize Table::_addRef(GC& gc, uint v)
 {
-	// TODO: check that n is power of 2
-	const size_t kcap = idxmask + 1;
-	TKey *newk = (ValU*)gc_alloc_unmanaged(gc, keys, kcap * sizeof(TKey), n * sizeof(TKey));
-	tsize *newbk = (tsize*)gc_alloc_unmanaged(gc, backrefs, kcap * sizeof(tsize), n * sizeof(tsize));
+    uint firstfree = get(uint(0)).u.ui;
+    if(firstfree)
+    {
+        Val next = pop(firstfree);
+        set(gc, uint(0), next);
+    }
+    else
+    {
+        firstfree = vals.sz + 1;
+    }
+    set(gc, firstfree, v);
+    return firstfree;
+}
 
-	if(!(newk && newbk))
-	{
-        if(newk)
-		    gc_alloc_unmanaged(gc, newk,  kcap * sizeof(ValU), 0);
-        if(newbk)
-		    gc_alloc_unmanaged(gc, newbk, kcap * sizeof(tsize), 0);
-		return NULL;
-	}
-
-	idxmask = n - 1; // ok if this underflows
-	keys = newk;
-	backrefs = newbk;
-	return newk;
+uint Table::_unRef(GC& gc, tsize ref)
+{
+    assert(ref);
+    Val last = set(gc, uint(0), ref); // last = t.root; t.root = ref
+    return set(gc, ref, last).u.ui;   // prev = t[ref]; t[ref] = last; return prev
 }
 
 // never returns NULL
-TKey *Table::_getkey(ValU findkey) const
+TKey *Table::_getkey(ValU findkey, tsize mask) const
 {
+    assert(keys);
+
     TKey *tombstone = NULL;
-    const tsize mask = idxmask;
-	tsize hk = (tsize)hashvalue(HASH_SEED, findkey);
+    tsize hk = (tsize)hashvalue(HASH_SEED, findkey);
+    // This can't be an infinite loop since keys[] is resized when it gets too full,
+    // ensuring there are always some empty slots.
     for(;;)
     {
         const tsize kidx = hk++ & mask;
@@ -105,31 +125,223 @@ Table* Table::GCNew(GC& gc, Type kt, Type vt)
     if(!pa)
         return NULL;
 
-    return GA_PLACEMENT_NEW(pa) Table(vt);
+    return GA_PLACEMENT_NEW(pa) Table(kt.id, vt.id);
 }
 
 void Table::dealloc(GC& gc)
 {
-	vals.dealloc(gc);
+    const tsize cap = idxmask + 1; // Possible overflowing back to zero is intended here
+    if(cap)
+    {
+        vals.dealloc(gc);
+        _resize(gc, 0);
+    }
 
 }
 
 void Table::clear()
 {
-	vals.clear();
-	// TODO: fast way to clear keys
+    const size_t N = vals.sz;
+    if(N)
+    {
+        vals.clear();
+        for(size_t i = 0; i < N; ++i)
+        {
+            const tsize idx = backrefs[i];
+            KCHECK(idx);
+            maketombstone(keys[idx]);
+            _cleanupforward(idx);
+        }
+    }
 }
 
-ValU Table::get(ValU k) const
+// Starting from idx, go forward. If we only find tombstones along the way and then hit empty,
+// clear backwards.
+// Use case: We just made keys[idx] a tombstone -> clear trailing tombstones
+// Ie.: (V = valid value, T = tombstone, E = empty)
+// V E T V T T T E E V
+//           ^ We just set this to a tombstone
+// Then we check if we can hit empty and only pass tombstones, and if so, clear backwards:
+//           ~~>|
+// V E T V E E E E E V
+//        |<~~~~|
+void Table::_cleanupforward(tsize idx)
 {
-	const TKey *tk = _getkey(k);
-    const size_t idx = tk->validx1 - 1;
+    const tsize mask = idxmask;
+    for(;;)
+    {
+        ++idx;
+        idx &= mask;
+
+        TKey& k = keys[idx];
+        if(k.type.id != PRIMTYPE_NIL)
+            return; // definitely not a tombstone, get out
+
+        if(!k.u.opaque) // empty?
+            break; // time to go backwards
+    }
+
+    for(;;)
+    {
+        --idx;
+        idx &= mask;
+
+        TKey& k = keys[idx];
+        if(!(k.type.id == PRIMTYPE_NIL && k.u.opaque))
+            break; // not a tombstone, get out
+
+        k.u.opaque = 0; // was a tombstone, clear it
+    }
+}
+
+tsize Table::_resize(GC& gc, tsize newsize)
+{
+    assert(isValidCap(newsize));
+    const tsize oldcap = idxmask + 1;
+    TKey *newk = gc_alloc_unmanaged_T<TKey>(gc, keys, oldcap, newsize);
+    tsize *newbk = gc_alloc_unmanaged_T<tsize>(gc, backrefs, oldcap, newsize);
+
+    if(newsize && !(newk && newbk))
+    {
+        if(newk)
+            gc_alloc_unmanaged_T<TKey>(gc, newk,  oldcap, 0);
+        if(newbk)
+            gc_alloc_unmanaged_T<tsize>(gc, newbk, oldcap, 0);
+        return 0;
+    }
+
+    if(newsize > oldcap)
+    {
+        // Clear new keys to empty
+        memset(newk + oldcap, 0, sizeof(*newk) * (newsize - oldcap));
+    }
+
+    keys = newk;
+    backrefs = newbk;
+    idxmask = newsize - 1; // ok if this underflows
+
+    if(oldcap && newsize)
+        _rehash(oldcap, newsize - 1);
+
+    return newsize;
+}
+
+
+void Table::_rehash(tsize oldsize, tsize newmask)
+{
+    for(tsize i = 0; i < oldsize; ++i)
+    {
+        const TKey kcopy = keys[i];
+        makempty(keys[i]); // always clear; including tombstones
+        if(kcopy.type.id == PRIMTYPE_NIL)
+            continue;
+
+        TKey *tk = _getkey(*(const ValU*)&kcopy, newmask); // HACK: dirty cast: is fine because the memory layout is the same
+        const tsize keyoffs = tk - keys;
+        *tk = kcopy;
+
+        backrefs[kcopy.validx] = keyoffs;
+    }
+}
+
+Val Table::get(Val k) const
+{
+    if(!keys)
+        return _Nil();
+    const TKey *tk = _getkey(k, idxmask);
+    const size_t idx = tk->validx;
     return vals.dynamicLookup(idx);
 }
 
-void Table::set(ValU k, ValU v)
+// set new value, return old
+Val Table::set(GC& gc, Val k, Val v)
 {
-    TKey *tk = _getkey(k);
-    const size_t idx = vals.sz;
-    v
+    tsize newsize;
+    TKey *tk;
+    if(!keys) // When the table is fresh, keys are not allocated yet
+    {
+        newsize = 4; // Must be at least 4 to pass the load factor check below correctly
+        goto doresize;
+    }
+    tk = _getkey(k, idxmask);
+    if(tk->type.id != PRIMTYPE_NIL)
+    {
+        // The same key is already present -> just replace value
+        return vals.dynamicSet(tk->validx, v); // returns old value
+    }
+
+    if(!tk->u.ui)
+    {
+        // Key is NOT a tombstone -> fresh key in use -> might have to enlarge keys
+        const tsize mask = idxmask;
+        if(vals.sz >= mask - (mask >> 2u)) // 75% load factor reached? enlarge
+        {
+            // Formula explanation:
+            // Mask is known to be a power of 2 minus 1; or -1 (all FF) if the table is empty.
+            // Before shift: xxxx11
+            // After shift:  xxx110
+            // Plus 1 makes it all-FF:
+            //               xxx111
+            // Another plus 1 and it's the next power of 2:
+            //               xx1000
+            newsize = (mask << 1u) + 2;
+            assert(newsize); // TODO: newsize==0 here means the table can't hold more values
+        doresize:
+            newsize = _resize(gc, newsize); // keys got reallocated; must get new location
+            assert(newsize); // TODO: handle OOM
+            tk = _getkey(k, newsize - 1);
+            // Key didn't exist, tombstones get cleared on resize, so the new key must be empty
+            assert(tk->type.id == PRIMTYPE_NIL);
+            assert(tk->u.ui == 0);
+        }
+    }
+
+    tk->u = v.u;
+    tk->type = v.type;
+    tk->validx = vals.sz;
+
+    backrefs[vals.sz] = tk - keys; // this is needed to quickly find a key that belongs to a value
+
+    vals.dynamicAppend(gc, v); // TODO: handle OOM
+
+    // Key didn't exist -> there's no prev. value
+    return _Nil();
+}
+
+Val Table::pop(Val k)
+{
+    if(!vals.sz)
+        return _Nil(); // table is empty
+
+    TKey *tk = _getkey(k, idxmask);
+    if(tk->type.id == PRIMTYPE_NIL) // tombstone or empty
+        return _Nil(); // key is not in table
+
+    // key exists, clear it
+    maketombstone(*tk);
+    const tsize keyoffs = tk - keys;
+    _cleanupforward(keyoffs);
+
+    // get wanted value out & move the last value in its place
+    const tsize vidx = tk->validx;
+    const ValU v = vals.removeAtAndMoveLast_Unsafe(vidx);
+
+    // patch its key to point to the new location
+    const tsize kidx = backrefs[vidx];
+    keys[kidx].validx = vidx;
+    backrefs[vidx] = keyoffs;
+
+    KCHECK(kidx);
+
+    // TODO: shrink if < 25% full
+
+    return v;
+}
+
+KV Table::index(tsize idx) const
+{
+    KCHECK(idx);
+    const TKey& tk = keys[backrefs[idx]];
+    KV e = { Val(tk.u, tk.type.id), vals.dynamicLookup(idx) };
+    return e;
 }

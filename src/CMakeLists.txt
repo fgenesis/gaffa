@@ -33,6 +33,8 @@ set(src
     gaimpdbg.h
     hashfunc.cpp
     hashfunc.h
+    dedupset.cpp
+    dedupset.h
 )
 
 add_library(gaffa ${src})

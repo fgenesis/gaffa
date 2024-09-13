@@ -67,29 +67,47 @@ UnOpType UnOp_TokenToOp(unsigned tok)
 static const unsigned char TypeElementSizes[] =
 {
     /* PRIMTYPE_NIL    */ sizeof(unsigned char),
-    /* PRIMTYPE_BOOL   */ sizeof(bool),
+    /* PRIMTYPE_ERROR  */ sizeof(ValU),
+    /* PRIMTYPE_BOOL   */ sizeof(uint), // FIXME: do we need an extra bool type for compact array storage?
     /* PRIMTYPE_UINT   */ sizeof(uint),
     /* PRIMTYPE_SINT   */ sizeof(sint),
     /* PRIMTYPE_FLOAT  */ sizeof(real),
-    /* PRIMTYPE_STRING */ sizeof(unsigned),
+    /* PRIMTYPE_STRING */ sizeof(sref),
     /* PRIMTYPE_TYPE   */ sizeof(Type),
     /* PRIMTYPE_TABLE  */ sizeof(void*), // table and array are always dynamically allocated
     /* PRIMTYPE_ARRAY  */ sizeof(void*),
     /* PRIMTYPE_ANY    */ sizeof(ValU),
-    /* PRIMTYPE_URANGE */ sizeof(Range<uint>),
-    /* PRIMTYPE_SRANGE */ sizeof(Range<sint>),
-    /* PRIMTYPE_FRANGE */ sizeof(Range<real>),
+    /* PRIMTYPE_URANGE */ //sizeof(Range<uint>),
+    /* PRIMTYPE_SRANGE */ //sizeof(Range<sint>),
+    /* PRIMTYPE_FRANGE */ //sizeof(Range<real>),
 };
-static_assert(sizeof(TypeElementSizes) == PRIMTYPE_MAX, "size mismatch");
 
 size_t GetPrimTypeStorageSize(unsigned t)
 {
+    static_assert(sizeof(TypeElementSizes) == PRIMTYPE_MAX, "size mismatch");
     return t < Countof(TypeElementSizes) ? TypeElementSizes[t] : sizeof(ValU);
 }
 
-void ValU::_init(unsigned tyid)
+void* valcpy(void* dst, const void* src, tsize bytes)
 {
-    static_assert(sizeof(_AnyValU) == sizeof(((_AnyValU*)NULL)->opaque), "oops");
+    assert((uintptr_t(src) & 3) == 0);
+    assert((uintptr_t(dst) & 3) == 0);
+    const u32 *r = (u32*)src;
+    u32 *w = (u32*)dst;
+    switch(bytes)
+    {
+        default: assert(false);
+        case 16: *w++ = *r++;
+        case 12: *w++ = *r++;
+        case 8: *w++ = *r++;
+        case 4: *w++ = *r++;
+    }
+    return w;
+}
+
+void ValU::_init(tsize tyid)
+{
+    static_assert(sizeof(_AnyValU) == sizeof(((_AnyValU*)NULL)->opaque), "opaque member must fill the entire struct");
     u.opaque = 0;
     type.id = tyid;
 }

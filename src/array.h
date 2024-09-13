@@ -1,14 +1,70 @@
 #pragma once
 
-#include "typing.h"
+#include "util.h"
 
-class GC;
+struct GC;
 
-// Array with external allocator
+// For PodArray. Externalized for type erasure to avoid code bloat.
+class PodArrayBase
+{
+public:
+    FORCEINLINE tsize size() const { return sz; }
+    FORCEINLINE void clear() { sz = 0; }
+    void *ptr;
+    tsize sz;
+    tsize cap;
+protected:
+    FORCEINLINE PodArrayBase() : ptr(NULL), sz(0), cap(0) {}
+    NOINLINE void *_enlarge(GC& gc, tsize elementSize);
+    NOINLINE void *_chsize(GC& gc, tsize n, tsize elementSize);
+    NOINLINE void *_resize(GC& gc, tsize n, tsize elementSize);
+private:
+    PodArrayBase(const PodArrayBase&); // forbidden
+};
 
-#include "gc.h"
 
-class Array
+// Intentionally extremely simple resizable array. Intended for POD types only since no ctor/dtor is called.
+// All the fast paths are inlined.
+template<typename T>
+class PodArray : public PodArrayBase
+{
+public:
+    FORCEINLINE PodArray() : PodArrayBase() {}
+
+    FORCEINLINE ~PodArray() { assert(cap == 0); } // if this fires, call dealloc() first
+    FORCEINLINE void dealloc(GC& gc) { (void)resize(gc, 0); }
+
+    FORCEINLINE       T& operator[](tsize i)       { assert(i < sz); return data()[i]; }
+    FORCEINLINE const T& operator[](tsize i) const { assert(i < sz); return data()[i]; }
+
+    FORCEINLINE const T *data() const { return (const T*)this->ptr; }
+    FORCEINLINE       T *data()       { return (T*)this->ptr; }
+
+    FORCEINLINE T *reserve(GC& gc, tsize n) { return n <= cap ? data() : resize(gc, n); }
+    FORCEINLINE T *resize(GC& gc, tsize n) { return (T*)_resize(gc, n, sizeof(T)); }
+
+    FORCEINLINE T pop_back() { assert(sz); return arr[--sz]; }
+    FORCEINLINE T *push_back(GC& gc, T x)
+    {
+        T *a = data();
+        if(sz == cap)
+        {
+            a = _enlarge(gc);
+            if(!a)
+                return NULL;
+        }
+        a += (sz++);
+        *a = x;
+        return a;
+    }
+
+private:
+    FORCEINLINE T *_enlarge(GC& gc) { return (T*)PodArrayBase::_enlarge(gc, sizeof(T)); }
+};
+
+
+// Dynamically typed array with external allocator
+class DArray
 {
 public:
     union
@@ -27,20 +83,27 @@ public:
     } storage;
     tsize sz; // usable size in elements
     tsize cap; // capacity in elements
-    const Type t;
+    const Type t; // decorated type, as returned back
+    //const Type lowt; // low-level type, ie. what is actually stored. must be <= PRIMTYPE_ANY.
     const tsize elementSize;
 
     void *ensure(GC& gc, tsize n);
     void *_resize(GC& gc, tsize n);
 
-    static Array *GCNew(GC& gc, tsize prealloc, Type t);
+    static DArray *GCNew(GC& gc, tsize prealloc, Type t);
 
-    Val dynamicLookup(size_t idx) const;
+    FORCEINLINE usize size() const { return sz; }
+    Val dynamicLookup(tsize idx) const;
     void dealloc(GC& gc);
     inline void clear() { sz = 0; }
     void dynamicAppend(GC& gc, ValU v);
+    Val dynamicSet(tsize idx, ValU v);
+    Val removeAtAndMoveLast_Unsafe(tsize idx);
+    //void pop(tsize n);
+    Val popValue();
 
-    Array(Type t);
+    DArray(Type t);
+    ~DArray();
 
     static void *AllocStorage(GC& gc, void *p, Type type, tsize oldelems, tsize newelems); // size in elements
 };
