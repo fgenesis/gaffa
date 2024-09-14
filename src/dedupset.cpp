@@ -13,26 +13,21 @@
 
 
 // The hashes in these are unused dummy values
-static const Dedup::HBlock NullBlock = { {NULL, 0}, 0 };
-static const Dedup::HBlock EmptyBlock = { {(const char*)&NullBlock, 0}, 0 };
+static const Dedup::HBlock NullBlock = { {NULL, 0}, 0, {0}, Dedup::LONG_BIT };
+static const Dedup::HBlock EmptyBlock = { {(const char*)&NullBlock, 0}, 0, {0}, Dedup::LONG_BIT };
 
 enum { INITIAL_ELEMS = 32 };
 
 
-// The idea behind this hash function is to use the upper 12 bits solely as size,
-// and the remaining lower bits as hashmap index
 static uhash keyhash(uhash h, const void *buf, size_t size)
 {
-    h = memhash(h, buf, size);
-    h = (h >> 12u) ^ (h & ((1 << 12) - 1));
-    h ^= rotr(uhash(size), 12); // The low part of the size goes in the upper bits
-    return h;
+    return memhash(h, buf, size) ^ rotr(uhash(size), 12); // Size gets mixed in as well
 }
 
 
 
 Dedup::Dedup(GC & gc, bool extrabyte)
-    : keys(NULL), mask(-1), _gc(gc), _extrabyte(extrabyte), _hashseed(0)
+    : keys(NULL), mask(-1), _gc(gc), _extrabyte(extrabyte), _hashseed(0), _sweeppos(2)
 {
 }
 
@@ -57,11 +52,8 @@ bool Dedup::init()
 
 void Dedup::dealloc()
 {
-    if(keys)
-    {
-        _kresize(0);
-        arr.dealloc(_gc);
-    }
+    _kresize(0);
+    arr.dealloc(_gc);
 }
 
 sref Dedup::putCopy(const void* mem, size_t bytes)
@@ -76,14 +68,13 @@ sref Dedup::putCopy(const void* mem, size_t bytes)
     if(k->ref >= 2)
         return k->ref;
 
-    MemBlock cp = _acopy(mem, bytes);
-    if(!cp.p)
+    HBlock *hb = arr.push_back(_gc, HBlock());
+    if(!hb)
         return -1;
 
-    HBlock hb = { cp, k->h };
-    if(!arr.push_back(_gc, hb))
+    if(!_acopy(*hb, mem, bytes))
     {
-        _afree((void*)cp.p, cp.n);
+        --arr.sz;
         return -1;
     }
 
@@ -119,26 +110,51 @@ sref Dedup::putTakeOver(void* mem, size_t bytes)
     return ref;
 }
 
+MemBlock Dedup::get(sref ref) const
+{
+    unsigned char x = arr[ref].x;
+    if(x & LONG_BIT)
+        return arr[ref].mb;
+    
+    MemBlock b = { (const char*)&arr[ref], x & SHRT_SIZE_MASK };
+    return b;
+}
+
 Dedup::HKey *Dedup::_prepkey(const void* mem, size_t bytes)
 {
-    HKey * const k = _kchecksize();
+    HKey *k = keys;
+    if(!k)
+        k = _kresize(INITIAL_ELEMS);
+    else if(arr.size() + (arr.size() / 4u) >= mask)
+        k = _kresize((mask + 1) * 2);
     if(!k)
         return NULL;
     const uhash h = keyhash(_hashseed, mem, bytes);
 
     usize i = h;
-    for(;;) // There are no tombstones here. Once we hit an empty key, use that.
+    for(;;)
     {
         i &= mask;
-        if(k[i].ref < 2)
+        if(k[i].ref < 2) // There are no tombstones here. Once we hit an empty key, use that.
             break;
         if(k[i].h == h)
         {
             const HBlock& b = arr[k[i].ref];
-            assert(b.h == h);
-            if(b.mb.n == bytes && !memcmp(mem, b.mb.p, bytes))
-                return &k[i];
+            unsigned char x = b.x;
+            if(x & LONG_BIT)
+            {
+                assert(b.h == h);
+                if(b.mb.n == bytes && !memcmp(mem, b.mb.p, bytes))
+                    return &k[i];
+            }
+            else
+            {
+                tsize n = x & SHRT_SIZE_MASK;
+                if(n == bytes && !memcmp(mem, &b, n))
+                    return &k[i];
+            }
         }
+        ++i;
     }
 
     // Found empty slot.
@@ -146,13 +162,52 @@ Dedup::HKey *Dedup::_prepkey(const void* mem, size_t bytes)
     return &k[i];
 }
 
-Dedup::HKey* Dedup::_kchecksize()
+void Dedup::_regenkeys(HKey *ks, tsize newmask)
 {
-    if(!keys)
-        return _kresize(INITIAL_ELEMS);
-    if(arr.size() + (arr.size() / 4u) >= mask)
-        return _kresize((mask + 1) * 2);
-    return keys;
+    // Regenerate keys from hashed blocks
+    // Precond: ks is all zeros
+    const tsize N = arr.size();
+    for(tsize j = 2; j < N; ++j) // skip sentinel values
+    {
+        unsigned char x = arr[j].x;
+        const uhash h = x & LONG_BIT
+            ? arr[j].h // Long blocks store the hash because recopmuting it may take a while
+            : keyhash(_hashseed, &arr[j], x & SHRT_SIZE_MASK); // Hashes of short blocks must be recomputed
+        usize i = h;
+        for(;;)
+        {
+            i &= newmask;
+            if(ks[i].ref < 2)
+            {
+                ks[i].h = h;
+                ks[i].ref = j;
+                break;
+            }
+            ++i;
+        }
+    }
+}
+
+void Dedup::_compact()
+{
+    HBlock *w = arr.data() + 2; // skip sentinel values
+    const HBlock *rd = w;
+    const HBlock * const end = rd + arr.size();
+
+    for( ; rd < end; ++rd)
+    {
+        if(!rd->x)
+            continue;
+
+        *w = *rd;
+        ++w;
+    }
+    const tsize inuse = end - w;
+    const tsize halfcap = arr.cap / 2u;
+    if(inuse < halfcap && inuse >= INITIAL_ELEMS) // shrink when more than half is unused
+        (void)arr.resize(_gc, halfcap); // this can fail but without consequences
+
+    arr.sz = inuse;
 }
 
 // Shrinking is only called during GC run
@@ -170,60 +225,35 @@ Dedup::HKey* Dedup::_kresize(tsize newsize)
     keys = newks;
     mask = newmask;
 
-    if(oldsize && newsize)
+    if(newsize < oldsize && oldsize) // When shrinking, compact valid entries
     {
-        if(newsize < oldsize) // When shrinking, compact valid entries
-        {
-            HBlock *w = arr.data() + 2;
-            const HBlock *rd = w;
-            const HBlock * const end = rd + arr.size();
-
-            for( ; rd < end; ++rd)
-            {
-                if(!rd->mb.p)
-                    continue;
-
-                *w = *rd;
-                ++w;
-            }
-            const tsize inuse = end - w;
-            const tsize halfcap = arr.cap / 2u;
-            if(inuse < halfcap && inuse >= INITIAL_ELEMS) // shrink when more than half is unused
-                (void)arr.resize(_gc, halfcap); // this can fail but without consequences
-
-            arr.sz = inuse;
-        }
-
-        // Regenerate keys from hashed blocks
-        const tsize N = arr.size();
-        for(tsize j = 2; j < N; ++j)
-        {
-            const uhash h = arr[j].h;
-            usize i = h;
-            for(;;)
-            {
-                i &= newmask;
-                if(newks[i].ref < 2)
-                {
-                    newks[i].h = h;
-                    newks[i].ref = j;
-                }
-                ++i;
-            }
-        }
+        _compact();
+        _regenkeys(newks, newmask);
     }
 
     return newks;
 }
 
-MemBlock Dedup::_acopy(const void* mem, size_t bytes)
+bool Dedup::_acopy(HBlock& hb, const void* mem, size_t bytes)
 {
     size_t total = bytes + _extrabyte;
-    char *p = (char*)gc_alloc_unmanaged(_gc, NULL, 0, total);
-    p[total - 1] = 0; // may get overwritten by the next line
+    char *p;
+    if(total <= MAX_SHORT_LEN)
+    {
+        p = (char*)&hb;
+        hb.x = (unsigned char)bytes;
+    }
+    else
+    {
+        p = (char*)gc_alloc_unmanaged(_gc, NULL, 0, total);
+        if(!p)
+            return false;
+        p[total - 1] = 0; // may get overwritten by the memcpy()
+        hb.x = LONG_BIT | MARK_BIT; // new strings start as marked as to not get GC'd immediately
+    }
+
     memcpy(p, mem, bytes);
-    MemBlock mb { (char*)p, bytes };
-    return mb;
+    return true;
 }
 
 void Dedup::_afree(void* mem, size_t bytes)
@@ -233,10 +263,47 @@ void Dedup::_afree(void* mem, size_t bytes)
 
 void Dedup::mark(sref ref)
 {
-    assert(false); // TODO
+    assert(arr[ref].x); // block was already sweeped
+    arr[ref].x |= MARK_BIT;
 }
 
-void Dedup::sweep()
+bool Dedup::sweepstep(tsize step)
 {
-    assert(false); // TODO
+    assert(_sweeppos >= 2);
+    const tsize N = arr.size();
+    HBlock * const bs = arr.data();
+    tsize i = _sweeppos;
+    tsize c = 0;
+    for( ; i < N; ++i) // skip sentinel values
+    {
+        const unsigned x = bs[i].x;
+        if(x & MARK_BIT)
+        {
+            bs[i].x = x & ~MARK_BIT;
+            ++c;
+        }
+        else
+        {
+            bs[i].x = 0; // mark as deletable
+            if(x & LONG_BIT)
+            {
+                MemBlock b = bs[i].mb;
+                _afree((void*)b.p, b.n); // one free costs one step
+                if(!--step) // steps=0 underflows and causes a full sweep
+                    break;
+            }
+        }
+    }
+    _sweeppos = i;
+    _inuse += c;
+    return !!step; // steps left? full cycle finished
+}
+
+void Dedup::sweepfinish()
+{
+    const tsize sz = mask + 1;
+    if(_inuse * 4 < sz)
+        _kresize(sz / 2u);
+    _sweeppos = 2;
+    _inuse = 0;
 }

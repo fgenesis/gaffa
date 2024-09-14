@@ -40,7 +40,7 @@ public:
     FORCEINLINE const T *data() const { return (const T*)this->ptr; }
     FORCEINLINE       T *data()       { return (T*)this->ptr; }
 
-    FORCEINLINE T *reserve(GC& gc, tsize n) { return n <= cap ? data() : resize(gc, n); }
+    FORCEINLINE T *reserve(GC& gc, tsize n) { return n <= cap ? data() : (T*)_chsize(gc, n, sizeof(T)); }
     FORCEINLINE T *resize(GC& gc, tsize n) { return (T*)_resize(gc, n, sizeof(T)); }
 
     FORCEINLINE T pop_back() { assert(sz); return arr[--sz]; }

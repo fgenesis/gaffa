@@ -16,7 +16,7 @@ void* PodArrayBase::_chsize(GC& gc, tsize n, tsize elementSize)
     const size_t newbytes = size_t(n) * size_t(elementSize);
 
     void *p = gc_alloc_unmanaged(gc, ptr, oldbytes, newbytes);
-    if(p)
+    if(p || !n)
     {
         ptr = p;
         cap = n;
@@ -172,7 +172,7 @@ Val DArray::removeAtAndMoveLast_Unsafe(tsize idx)
     {
         v.type = t;
         const void *last = storage.b + (lastidx * elementSize);
-        void *p = storage.b + (idx * elementSize);
+        void *p = storage.b + (size_t(idx) * elementSize);
         valcpy(&v.u, p, elementSize);
         valcpy(p, last, elementSize);
     }
@@ -189,4 +189,3 @@ Val DArray::popValue()
     sz = idx;
     return v;
 }
-

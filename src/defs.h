@@ -198,7 +198,7 @@ size_t GetPrimTypeStorageSize(unsigned t);
 inline static bool isTrueish(const ValU v)
 {
     static_assert(PRIMTYPE_BOOL == 2, "ey");
-    return v.type.id > PRIMTYPE_BOOL && v.u.opaque;
+    return v.type.id > PRIMTYPE_BOOL && v.u.ui;
 }
 
 // Small-size memcpy() that's wired specifially to copy any values a ValU may contain.

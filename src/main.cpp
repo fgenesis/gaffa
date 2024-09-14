@@ -7,6 +7,7 @@
 #include "mlir.h"
 #include "table.h"
 #include "gc.h"
+#include "dedupset.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,10 +68,41 @@ void testtable()
     int a = 0;
 }
 
+void testdedup()
+{
+    GC gc = {0};
+    gc.alloc = myalloc;
+
+    Dedup dd(gc, 0);
+    dd.init();
+
+    sref a = dd.putCopy("1234", 5);
+    sref b = dd.putCopy("abc", 4);
+    sref a2 = dd.putCopy("1234", 5);
+
+    assert(a == a2);
+
+    puts(dd.get(a).p);
+    puts(dd.get(b).p);
+
+    PodArray<sref> aa;
+    for(unsigned i = 0; i < 99999; ++i)
+        aa.push_back(gc, dd.putCopy(&i, sizeof(i)));
+    for(unsigned i = 0; i < 99999; ++i)
+    {
+        sref r = aa[i];
+        MemBlock b = dd.get(r);
+        assert(b.n == sizeof(i));
+        assert(!memcmp(b.p, &i, sizeof(i)));
+    };
+    aa.dealloc(gc);
+}
+
 int main(int argc, char **argv)
 {
-    testref();
-    testtable();
+    testdedup();
+    //testref();
+    //testtable();
     return 0;
 
     const char *fn = "test.txt";
