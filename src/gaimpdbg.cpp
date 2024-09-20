@@ -65,8 +65,8 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
         unsigned strid =  n->u.ident.nameStrId;
         if(strid)
         {
-            const std::string& s = p.lookup(strid);
-            printf(" \"%s\"", s.c_str());
+            const char *s = p.lookup(strid);
+            printf(" \"%s\"", s);
         }
     }
     else if(n->type == HLNODE_VARDEF && n->u.vardef.ident->type == HLNODE_IDENT)

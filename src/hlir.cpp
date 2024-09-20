@@ -4,8 +4,8 @@
 #include "symstore.h"
 
 
-HLIRBuilder::HLIRBuilder(const GaAlloc& ga)
-    : galloc(ga), b(NULL)
+HLIRBuilder::HLIRBuilder(GC& gc)
+    : gc(gc), b(NULL)
 {
 
 }
@@ -46,7 +46,7 @@ void HLIRBuilder::clear()
     while(b)
     {
         Block * const prev = b->prev;
-        galloc.alloc(galloc.ud, b, b->cap, 0);
+        gc_alloc_unmanaged(gc, b, b->cap, 0);
         b = prev;
     }
     this->b = NULL;
@@ -55,7 +55,7 @@ void HLIRBuilder::clear()
 HLIRBuilder::Block* HLIRBuilder::allocBlock(size_t sz)
 {
     sz += sizeof(Block);
-    Block *newb = (Block*)galloc.alloc(galloc.ud, NULL, 0, sz);
+    Block *newb = gc_alloc_unmanaged_T<Block>(gc, NULL, 0, sz);
     if(newb)
     {
         newb->prev = NULL;
@@ -75,12 +75,13 @@ HLNode* HLIRBuilder::Block::alloc()
     return (HLNode*)p;
 }
 
-HLNode *HLList::add(HLNode* node, const GaAlloc& ga)
+HLNode *HLList::add(HLNode* node, GC& gc)
 {
     if(used == cap)
     {
         const size_t newcap = 4 + (2 * cap);
-        HLNode **newlist = (HLNode**)ga.alloc(ga.ud, list, cap * sizeof(HLNode*), newcap * sizeof(HLNode*));
+
+        HLNode **newlist = gc_alloc_unmanaged_T<HLNode*>(gc, list, cap, newcap);
         if(!newlist)
             return NULL;
         list = newlist;

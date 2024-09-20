@@ -2,7 +2,6 @@
 
 #include "array.h"
 
-struct TKey;
 
 /*
 Table aka hashmap, dict, key-value-store.
@@ -27,7 +26,16 @@ struct KV
     Val k, v;
 };
 
-class Table
+// There's no ValU in here due to possible alignment and padding issues with that type.
+// Can't seem to convince the compiler to place validx in the otherwise unused padding section of ValU...
+struct TKey
+{
+    _AnyValU u; // corresponds to ValU::u
+    Type type;  // corresponds to ValU::type
+    tsize validx; // index of value
+};
+
+class Table : public GCobj
 {
 public:
     static Table *GCNew(GC& gc, Type kt, Type vt);
@@ -37,13 +45,14 @@ public:
     Val set(GC& gc, Val k, Val v);
     Val pop(Val k);
     KV index(tsize idx) const;
+    Val keyat(tsize idx) const;
 
     const DArray& values() { return vals; }
     tsize size() const { return vals.sz; }
 
 
 protected:
-    Table(tsize keytype, tsize valtype);
+    Table(Type keytype, Type valtype);
     tsize _addRef(GC& gc, uint v);
     uint _unRef(GC& gc, tsize ref);
 
@@ -63,6 +72,7 @@ private:
     Table(const Table&); // forbidden
 };
 
+/*
 template<typename T>
 class RefTable : private Table
 {
@@ -90,3 +100,4 @@ public:
 private:
     PodArray<T> arr;
 };
+*/

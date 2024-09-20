@@ -56,7 +56,7 @@ DArray* DArray::GCNew(GC& gc, tsize prealloc, Type t)
             return NULL;
     }
 
-    void *pa = gc_new(gc, sizeof(DArray));
+    void *pa = gc_new(gc, sizeof(DArray), PRIMTYPE_ARRAY);
     if(!pa)
     {
         if(storage)

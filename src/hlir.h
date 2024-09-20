@@ -7,6 +7,8 @@
 #include "gainternal.h"
 #include "lex.h"
 
+struct GC;
+
 enum Comparison
 {
     JUMP_ALWAYS,
@@ -136,7 +138,7 @@ struct HLList
     size_t cap;
     HLNode **list;
 
-    HLNode *add(HLNode *node, const GaAlloc& ga); // returns node, unless memory allocation fails
+    HLNode *add(HLNode *node, GC& gc); // returns node, unless memory allocation fails
 };
 
 struct HLVarDef
@@ -278,7 +280,7 @@ struct HLNode
 class HLIRBuilder
 {
 public:
-    HLIRBuilder(const GaAlloc& a);
+    HLIRBuilder(GC& gc);
     ~HLIRBuilder();
 
     inline HLNode *constantValue() { return allocT<HLConstantValue>(); }
@@ -327,7 +329,7 @@ private:
     HLNode *alloc();
     void clear();
     Block *allocBlock(size_t sz);
-    GaAlloc galloc;
+    GC& gc;
     Block *b;
 };
 

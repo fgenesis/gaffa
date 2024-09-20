@@ -184,9 +184,8 @@ const Parser::ParseRule * Parser::GetRule(Lexer::TokenType tok)
     return NULL;
 }
 
-Parser::Parser(Lexer* lex, const char *fn, const GaAlloc& ga, StringPool& strpool)
-    : GaAlloc(ga)
-    , hlir(NULL), strpool(strpool), _lex(lex), _fn(fn), hadError(false), panic(false)
+Parser::Parser(Lexer* lex, const char *fn, GC& gc, StringPool& strpool)
+    : hlir(NULL), strpool(strpool), _lex(lex), _fn(fn), hadError(false), panic(false), gc(gc)
 {
     curtok.tt = Lexer::TOK_E_ERROR;
     prevtok.tt = Lexer::TOK_E_ERROR;
@@ -464,7 +463,7 @@ HLNode* Parser::_funcreturns(unsigned *pfuncflags)
     {
         if(match(Lexer::TOK_IDENT))
         {
-            list->u.list.add(typeident(), *this);
+            list->u.list.add(typeident(), gc);
             if(!tryeat(Lexer::TOK_COMMA))
                 break;
         }
@@ -507,10 +506,10 @@ HLNode* Parser::_restassign(HLNode* firstLhs)
     if(!lhs)
         return NULL;
 
-    lhs->u.list.add(firstLhs, *this);
+    lhs->u.list.add(firstLhs, gc);
     while(tryeat(Lexer::TOK_COMMA))
     {
-        lhs->u.list.add(suffixedexpr(), *this);
+        lhs->u.list.add(suffixedexpr(), gc);
     }
 
     return _assignmentWithPrefix(lhs);
@@ -604,7 +603,7 @@ begin:
             }
         }
 
-        node->u.list.add(def, *this);
+        node->u.list.add(def, gc);
     }
 
     return node;
@@ -658,7 +657,7 @@ HLNode* Parser::_exprlist()
 {
     HLNode *node = ensure(hlir->list());
     if(node) do
-        node->u.list.add(expr(), *this);
+        node->u.list.add(expr(), gc);
     while(tryeat(Lexer::TOK_COMMA));
     return node;
 }
@@ -1060,8 +1059,8 @@ HLNode* Parser::tablecons(Context ctx)
             // else it's a single var lookup; handle as expr
         }
 
-        node->u.list.add(key, *this);
-        node->u.list.add(expr(), *this);
+        node->u.list.add(key, gc);
+        node->u.list.add(expr(), gc);
     }
     while(tryeat(Lexer::TOK_COMMA) || tryeat(Lexer::TOK_SEMICOLON));
 
@@ -1085,7 +1084,7 @@ HLNode* Parser::arraycons(Context ctx)
             if(match(Lexer::TOK_RSQ))
                 break;
 
-            node->u.list.add(expr(), *this);
+            node->u.list.add(expr(), gc);
         }
         while(tryeat(Lexer::TOK_COMMA) || tryeat(Lexer::TOK_SEMICOLON));
     }
@@ -1167,7 +1166,7 @@ HLNode* Parser::iterdecls()
     if(node)
     {
         do
-            node->u.list.add(decl(), *this);
+            node->u.list.add(decl(), gc);
         while(tryeat(Lexer::TOK_SEMICOLON));
 
         node->type = HLNODE_ITER_DECLLIST;
@@ -1181,7 +1180,7 @@ HLNode* Parser::iterexprs()
     if(node)
     {
         do
-            node->u.list.add(expr(), *this);
+            node->u.list.add(expr(), gc);
         while(tryeat(Lexer::TOK_SEMICOLON));
 
         node->type = HLNODE_ITER_EXPRLIST;
@@ -1199,7 +1198,7 @@ HLNode* Parser::stmtlist(Lexer::TokenType endtok)
         {
             HLNode *p = declOrStmt();
             if(p)
-                sl->u.list.add(p, *this);
+                sl->u.list.add(p, gc);
             else
                 break;
         }

@@ -15,15 +15,6 @@ Implementation notes:
 
 enum { KEY_ALIGNMENT = sizeof(((ValU*)NULL)->u) };
 
-// There's no ValU in here due to possible alignment and padding issues with that type.
-// Can't seem to convince the compiler to place validx in the otherwise unused padding section of ValU...
-struct TKey
-{
-    _AnyValU u; // corresponds to ValU::u
-    Type type;  // corresponds to ValU::type
-    tsize validx; // index of value
-};
-
 static inline bool isdead(const TKey& k)
 {
     return k.type.id == PRIMTYPE_NIL && k.u.ui;
@@ -62,11 +53,8 @@ static bool isValidCap(tsize x)
     return !((x - 1) & x);
 }
 
-
-
-
-Table::Table(tsize keytype, tsize valtype)
-    : keys(NULL), keytype({keytype}), idxmask(-1), vals({valtype}), backrefs(NULL)
+Table::Table(Type keytype, Type valtype)
+    : vals(valtype), keys(NULL), keytype(keytype), idxmask(-1), backrefs(NULL)
 {
 }
 
@@ -121,11 +109,11 @@ TKey *Table::_getkey(ValU findkey, tsize mask) const
 
 Table* Table::GCNew(GC& gc, Type kt, Type vt)
 {
-    void *pa = gc_new(gc, sizeof(Table));
+    void *pa = gc_new(gc, sizeof(Table), PRIMTYPE_TABLE);
     if(!pa)
         return NULL;
 
-    return GA_PLACEMENT_NEW(pa) Table(kt.id, vt.id);
+    return GA_PLACEMENT_NEW(pa) Table(kt, vt);
 }
 
 void Table::dealloc(GC& gc)
@@ -204,7 +192,7 @@ tsize Table::_resize(GC& gc, tsize newsize)
     if(newsize && !(newk && newbk))
     {
         if(newk)
-            gc_alloc_unmanaged_T<TKey>(gc, newk,  oldcap, 0);
+            gc_alloc_unmanaged_T<TKey>(gc, newk, oldcap, 0);
         if(newbk)
             gc_alloc_unmanaged_T<tsize>(gc, newbk, oldcap, 0);
         return 0;
@@ -256,6 +244,9 @@ Val Table::get(Val k) const
 // set new value, return old
 Val Table::set(GC& gc, Val k, Val v)
 {
+    assert(keytype.id == PRIMTYPE_ANY || k.type.id == keytype.id);
+    assert(vals.t.id == PRIMTYPE_ANY || v.type.id == vals.t.id);
+
     tsize newsize;
     TKey *tk;
     if(!keys) // When the table is fresh, keys are not allocated yet
@@ -273,8 +264,7 @@ Val Table::set(GC& gc, Val k, Val v)
     if(!tk->u.ui)
     {
         // Key is NOT a tombstone -> fresh key in use -> might have to enlarge keys
-        const tsize mask = idxmask;
-        if(vals.sz >= mask - (mask >> 2u)) // 75% load factor reached? enlarge
+        if(vals.sz >= idxmask - (idxmask >> 2u)) // 75% load factor reached? enlarge
         {
             // Formula explanation:
             // Mask is known to be a power of 2 minus 1; or -1 (all FF) if the table is empty.
@@ -284,7 +274,7 @@ Val Table::set(GC& gc, Val k, Val v)
             //               xxx111
             // Another plus 1 and it's the next power of 2:
             //               xx1000
-            newsize = (mask << 1u) + 2;
+            newsize = (idxmask << 1u) + 2;
             assert(newsize); // TODO: newsize==0 here means the table can't hold more values
         doresize:
             newsize = _resize(gc, newsize); // keys got reallocated; must get new location
@@ -296,8 +286,8 @@ Val Table::set(GC& gc, Val k, Val v)
         }
     }
 
-    tk->u = v.u;
-    tk->type = v.type;
+    tk->u = k.u;
+    tk->type = k.type;
     tk->validx = vals.sz;
 
     backrefs[vals.sz] = tk - keys; // this is needed to quickly find a key that belongs to a value
@@ -338,10 +328,15 @@ Val Table::pop(Val k)
     return v;
 }
 
-KV Table::index(tsize idx) const
+Val Table::keyat(tsize idx) const
 {
     KCHECK(idx);
     const TKey& tk = keys[backrefs[idx]];
-    KV e = { Val(tk.u, tk.type.id), vals.dynamicLookup(idx) };
+    return Val(tk.u, tk.type);
+}
+
+KV Table::index(tsize idx) const
+{
+    KV e = { keyat(idx), vals.dynamicLookup(idx) };
     return e;
 }

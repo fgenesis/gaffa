@@ -66,16 +66,18 @@ UnOpType UnOp_TokenToOp(unsigned tok)
 
 static const unsigned char TypeElementSizes[] =
 {
-    /* PRIMTYPE_NIL    */ sizeof(unsigned char),
-    /* PRIMTYPE_ERROR  */ sizeof(ValU),
-    /* PRIMTYPE_BOOL   */ sizeof(uint), // FIXME: do we need an extra bool type for compact array storage?
+    /* PRIMTYPE_NIL    */ sizeof(u32),
+    /* PRIMTYPE_ERROR  */ sizeof(sref),
+    /* PRIMTYPE_BOOL   */ sizeof(u32), // FIXME: do we need an extra bool type for compact array storage?
     /* PRIMTYPE_UINT   */ sizeof(uint),
     /* PRIMTYPE_SINT   */ sizeof(sint),
     /* PRIMTYPE_FLOAT  */ sizeof(real),
     /* PRIMTYPE_STRING */ sizeof(sref),
     /* PRIMTYPE_TYPE   */ sizeof(Type),
-    /* PRIMTYPE_TABLE  */ sizeof(void*), // table and array are always dynamically allocated
-    /* PRIMTYPE_ARRAY  */ sizeof(void*),
+    /* PRIMTYPE_FUNC   */ sizeof(void*), // TODO
+    /* PRIMTYPE_TABLE  */ sizeof(GCobj*), // table/array/object are always dynamically allocated
+    /* PRIMTYPE_ARRAY  */ sizeof(GCobj*),
+    /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
     /* PRIMTYPE_ANY    */ sizeof(ValU),
     /* PRIMTYPE_URANGE */ //sizeof(Range<uint>),
     /* PRIMTYPE_SRANGE */ //sizeof(Range<sint>),
@@ -92,7 +94,7 @@ void* valcpy(void* dst, const void* src, tsize bytes)
 {
     assert((uintptr_t(src) & 3) == 0);
     assert((uintptr_t(dst) & 3) == 0);
-    const u32 *r = (u32*)src;
+    const u32 *r = (const u32*)src;
     u32 *w = (u32*)dst;
     switch(bytes)
     {

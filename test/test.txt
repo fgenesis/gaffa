@@ -1,14 +1,15 @@
 -- hello world
 
-{
-    int z := g(2)(3)
-    var a:float, b:int, c = obj:method(g(z))
-    z = 0
-}
-int y = obj:[s+"_thing"]()
+var x = f()
+
+--{
+--    int z := g(2)(3)
+--    var a:float, b:int, c = obj:method(g(z))
+--    z = 0
+--}
+--int y = obj:[s+"_thing"]()
 --y = 1
 --var i = i
-
 
 --var z = m:mth(f())
 --var z = m:mth(f(0)) -- dafuq

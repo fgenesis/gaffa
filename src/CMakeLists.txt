@@ -2,6 +2,7 @@ set(src
     ../include/gaffa.h
     compiler-fixup.h
     gainternal.h
+    gainternal.cpp
     lex.cpp
     lex.h
     parser.cpp
@@ -35,6 +36,8 @@ set(src
     hashfunc.h
     dedupset.cpp
     dedupset.h
+    gaobj.cpp
+    gaobj.h
 )
 
 add_library(gaffa ${src})

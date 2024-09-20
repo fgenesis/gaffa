@@ -8,6 +8,7 @@
 #include "table.h"
 #include "gc.h"
 #include "dedupset.h"
+#include "typing.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +41,7 @@ static void *myalloc(void *ud, void *ptr, size_t osz, size_t nsz)
     return realloc(ptr, nsz);
 }
 
+/*
 void testref()
 {
     GC gc = {0};
@@ -52,7 +54,7 @@ void testref()
     assert(*t.getref(a) == 100);
     assert(*t.getref(b) == 200);
     assert(*t.getref(c) == 300);
-}
+}*/
 
 void testtable()
 {
@@ -79,43 +81,91 @@ void testdedup()
     sref a = dd.putCopy("1234", 5);
     sref b = dd.putCopy("abc", 4);
     sref a2 = dd.putCopy("1234", 5);
-
     assert(a == a2);
 
     puts(dd.get(a).p);
     puts(dd.get(b).p);
 
     PodArray<sref> aa;
-    for(unsigned i = 0; i < 99999; ++i)
-        aa.push_back(gc, dd.putCopy(&i, sizeof(i)));
-    for(unsigned i = 0; i < 99999; ++i)
+    /*for(unsigned i = 0; i < 99999; ++i)
+        aa.push_back(gc, dd.putCopy(&i, sizeof(i)));*/
+    dd.sweepstep(0);
+    dd.sweepfinish(true);
+
+    /*for(unsigned i = 0; i < 99999; ++i)
     {
         sref r = aa[i];
         MemBlock b = dd.get(r);
         assert(b.n == sizeof(i));
         assert(!memcmp(b.p, &i, sizeof(i)));
-    };
+    }*/
+    //dd.mark(b);
+    dd.sweepstep(0);
+    dd.sweepfinish(true);
+
     aa.dealloc(gc);
+}
+
+void testtype()
+{
+    GC gc = {0};
+    gc.alloc = myalloc;
+
+    Dedup st(gc, 1);
+    st.init();
+
+    TypeRegistry tr(gc);
+    tr.init();
+
+    sref x = st.putCopy("x", 1);
+    sref y = st.putCopy("y", 1);
+
+    Table *tvec = Table::GCNew(gc, Type{PRIMTYPE_STRING}, Type{PRIMTYPE_TYPE});
+    tvec->set(gc, _Str(x), Type{PRIMTYPE_FLOAT});
+    tvec->set(gc, _Str(y), Type{PRIMTYPE_FLOAT});
+    {
+        KV xe = tvec->index(0);
+        assert(xe.k.type.id == PRIMTYPE_STRING);
+        assert(xe.v.type.id == PRIMTYPE_TYPE);
+        KV ye = tvec->index(1);
+        assert(ye.k.type.id == PRIMTYPE_STRING);
+        assert(ye.v.type.id == PRIMTYPE_TYPE);
+    }
+
+    Type fvec2 = tr.construct(*tvec, true);
+    const TDesc *td = tr.getstruct(fvec2);
+    printf("Struct of %u:\n", (unsigned)td->size());
+    for(tsize i = 0; i < td->size(); ++i)
+    {
+        const char *name = (const char*)st.get(td->names()[i]).p;
+        printf("%s %u\n", name, td->types()[i].id);
+    }
+    tr.dealloc();
+    st.dealloc();
 }
 
 int main(int argc, char **argv)
 {
-    testdedup();
+    //testdedup();
     //testref();
     //testtable();
-    return 0;
+    //testtype();
+    //return 0;
 
     const char *fn = "test.txt";
-    const GaAlloc ga = { myalloc, NULL };
+
+    GC gc = {0};
+    gc.alloc = myalloc;
 
     const char *code = slurp(fn);
     if(!code)
         return 1;
 
-    StringPool strtab;
+    StringPool strtab(gc);
+    strtab.init();
     Lexer lex(code);
-    Parser pp(&lex, fn, ga, strtab);
-    HLIRBuilder hb(ga);
+    Parser pp(&lex, fn, gc, strtab);
+    HLIRBuilder hb(gc);
     pp.hlir = &hb;
     HLNode *node = pp.parse();
     if(!node)
@@ -123,7 +173,7 @@ int main(int argc, char **argv)
 
     //hlirDebugDump(strtab, node);
 
-    MLIRContainer mc;
+    MLIRContainer mc(gc);
     mc.import(node, strtab, fn);
 
 

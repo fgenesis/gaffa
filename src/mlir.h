@@ -123,7 +123,8 @@ struct MLOp
 class MLIRContainer
 {
 public:
-    MLIRContainer();
+    MLIRContainer(GC& gc);
+
 
     GaffaError import(HLNode *root, const StringPool& pool, const char *fn);
 

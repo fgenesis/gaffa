@@ -162,18 +162,18 @@ unsigned MLIRContainer::_pre(HLNode* n)
                     Symstore::Lookup info = syms.lookup(c->u.ident.nameStrId, c->line, SYMREF_STANDARD);
                     if(info.where == SCOPEREF_EXTERNAL)
                     {
-                        const std::string& name = curpool->lookup(c->u.ident.nameStrId);
+                        const char *name = curpool->lookup(c->u.ident.nameStrId);
                         // TODO: annotation in code with line preview and squiggles -- how to get this info here?
                         printf("(%s:%u) error: attempt to assign to undeclared identifier '%s'\n",
-                            _fn, c->line, name.c_str());
+                            _fn, c->line, name);
                     }
                     else if(!(info.sym->usagemask & SYMREF_MUTABLE))
                     {
-                        const std::string& name = curpool->lookup(c->u.ident.nameStrId);
+                        const char *name = curpool->lookup(c->u.ident.nameStrId);
                         const char *how = symscopename(info);
                         // TODO: annotation in code with line preview and squiggles -- how to get this info here?
                         printf("(%s:%u) error: assignment to fixed %s '%s' -- previously defined in line %u\n",
-                            _fn, c->line, how, name.c_str(), info.sym->linedefined);
+                            _fn, c->line, how, name, info.sym->linedefined);
                     }
                 }
             }
@@ -215,10 +215,10 @@ void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref, unsigned typeidx)
     assert(n->type == HLNODE_IDENT);
     const Symstore::Sym *clash = syms.decl(n->u.ident.nameStrId, n->line, ref);
 
-    const std::string& name = curpool->lookup(n->u.ident.nameStrId);
+    const char *name = curpool->lookup(n->u.ident.nameStrId);
     if(clash)
     {
-        printf("(%s:%u) error: redefinition of '%s' -- first defined in line %u\n", _fn, n->line, name.c_str(), clash->linedefined);
+        printf("(%s:%u) error: redefinition of '%s' -- first defined in line %u\n", _fn, n->line, name, clash->linedefined);
         // TODO: report error + abort
     }
 
@@ -246,8 +246,8 @@ unsigned MLIRContainer::_refer(HLNode* n, MLSymbolRefContext ref)
     return info.symindex;
 }
 
-MLIRContainer::MLIRContainer()
-    : curpool(NULL), _fn(NULL)
+MLIRContainer::MLIRContainer(GC& gc)
+    : curpool(NULL), _fn(NULL), symbolnames(gc)
 {
 }
 
@@ -279,6 +279,9 @@ static std::string whatisit(unsigned ref)
 
 GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool, const char *fn)
 {
+    if(!symbolnames.init())
+        return GAFFA_E_OUT_OF_MEMORY;
+
     this->_fn = fn;
     this->curpool = &pool;
     syms.push(SCOPE_FUNCTION);
@@ -293,8 +296,8 @@ GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool, const cha
         {
             const Symstore::Sym& s = syms.missing[i];
             std::string wh = whatisit(s.usagemask);
-            const std::string& name = pool.lookup(s.nameStrId);
-            printf("(%u)  %s (%s)\n", s.lineused, name.c_str(), wh.c_str()); // TODO: first use in line xxx
+            const char *name = pool.lookup(s.nameStrId);
+            printf("(%u)  %s (%s)\n", s.lineused, name, wh.c_str()); // TODO: first use in line xxx
         }
     }
 

@@ -68,6 +68,8 @@
   #endif
 #endif
 
+#define STATIC_ASSERT(cond) switch((int)!!(cond)){case 0:;case(!!(cond)):;}
+
 
 namespace detail
 {
@@ -126,4 +128,21 @@ MaybeNum strtouint(const char* s, size_t maxlen = -1);
 
 MaybeNum strtouint_dec(const char* s, size_t maxlen = -1);
 // TODO: hex, oct, bin
+
+
+template<typename T>
+static inline T roundUpToPowerOfTwo(T v)
+{
+    STATIC_ASSERT(sizeof(v) <= 8); // This supports up to 64bit size_t
+    v--;
+    v |= v >> 1u;
+    v |= v >> 2u;
+    v |= v >> 4u;
+    v |= v >> 8u;
+    v |= v >> 16u;
+    if(sizeof(v) > 4) // Need a check here. ARM produces garbage with too large shifts.
+        v |= v >> 32u;
+    v++;
+    return v;
+}
 

@@ -13,6 +13,7 @@ typedef uint64_t uint;
 typedef float real;
 
 typedef uint32_t u32;
+typedef unsigned char byte;
 
 // "big enough" size type for containers. For when 64-bit size_t is too big and a smaller type is more practical.
 typedef unsigned tsize;
@@ -48,25 +49,29 @@ struct Type
 enum TypeBits
 {
     TB_OPTION  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 1u), // is option type
-    TB_ERROR   = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 2u), // is error of type
-    TB_TYPEMASK = ~(TB_OPTION | TB_ERROR)
+    TB_TYPEMASK = ~(TB_OPTION)
 };
 
 enum PrimType
 {
-    // Types that are always false
+    // -v- Types that are always false
     PRIMTYPE_NIL, // must be 0
-    PRIMTYPE_ERROR,
-    // Bool is
+    PRIMTYPE_ERROR, // handled the same as string
+    // -v- Bool is undecided
     PRIMTYPE_BOOL,
-    // Types that are always true
+    // -v- Types that are always true
     PRIMTYPE_UINT,
     PRIMTYPE_SINT,
     PRIMTYPE_FLOAT,
+    // values are just ref-IDs -> managed separately
     PRIMTYPE_STRING,
-    PRIMTYPE_TYPE,          // types have this type
+    PRIMTYPE_TYPE,
+    // special
+    PRIMTYPE_FUNC,
+    // GCobj
     PRIMTYPE_TABLE,
     PRIMTYPE_ARRAY,
+    PRIMTYPE_OBJECT,
 
     // Ranges can only be made from the 3 primitive numeric types,
     // so there' no reason to allocate extra TypeBits for a range type
@@ -82,11 +87,55 @@ enum PrimType
 
 struct _Nil {};
 
+struct MemBlock
+{
+    const char *p;
+    size_t n;
+};
+
 struct Str
 {
     size_t len;
     sref id;
-    uhash hash;
+};
+
+struct Strp
+{
+    const char *s; // 0-terminated
+    size_t len;
+
+    // convenience conversions
+    inline operator const char *() const { return s; }
+    inline operator MemBlock() const { MemBlock b = { s, len }; return b; }
+};
+
+struct _Str
+{
+    _Str(sref x) : ref(x) {}
+    sref ref;
+};
+
+enum GCflags
+{
+    GCF_NOT_INTERESTING = 0,
+
+    GCF_RECURSIVE = 0x0100, // object has children that must be traversed
+    GCF_WEAK = 0x0200,
+    CFG_MOD_MARK = 0x0400, // set whenever a container object is modified
+};
+
+// This is the base of every GC collectible object.
+// Most likely (but not necessarily!) preceded in memory by a GCprefix, see gc.h
+struct GCobj
+{
+    inline GCobj() : gcTypeAndFlags(0), gcsize(0) {}
+    // Beware: These are overlaid with GCprefix members!
+
+    // HMM: This could be merged. lower u8 is primtype, next 8 bits regular gc flags,
+    // upper 16 bits reserved for internal gc things.
+    // BUT: This needs to be pointer-size aligned, so we'd waste something on 64bit arch
+    u32 gcTypeAndFlags;
+    u32 gcsize;
 };
 
 template<typename T>
@@ -107,11 +156,13 @@ struct Range
 
 union _AnyValU
 {
+    u32 word;
     sint si;
     uint ui;
     real f;
     void *p;
     sref str;
+    GCobj *obj;
     /*Range<uint> urange;
     Range<sint> srange;
     Range<real> frange;*/
@@ -133,7 +184,7 @@ struct ValU
 
 struct Val : public ValU
 {
-    inline Val(const _AnyValU u, tsize tid) { _init(tid); this->u = u; }
+    inline Val(const _AnyValU u, Type t) { this->type = t; this->u = u; }
     inline Val(const ValU& v)           { this->u = v.u; this->type = v.type; }
     inline Val()                        { _init(PRIMTYPE_NIL); }
     inline Val(_Nil)                    { _init(PRIMTYPE_NIL); }
@@ -144,6 +195,7 @@ struct Val : public ValU
     inline Val(sint i, _Nil _ = _Nil()) { _init(PRIMTYPE_SINT);   u.si = i; }
     inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
     inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
+    inline Val(_Str s)                  { _init(PRIMTYPE_STRING); u.str = s.ref; }
     inline Val(Type t)                  { _init(PRIMTYPE_TYPE);   u.t = t; }
     /*inline Val(const Range<uint>& r)    { _init(PRIMTYPE_URANGE); u.urange = r; }
     inline Val(const Range<sint>& r)    { _init(PRIMTYPE_SRANGE); u.srange = r; }

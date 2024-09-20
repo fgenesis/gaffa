@@ -7,16 +7,24 @@
 #include "gaffa.h"
 #include "defs.h"
 #include "gc.h"
+#include "typing.h"
+#include "strings.h"
 
 #include <assert.h>
 
 struct GaAlloc
 {
-	GaffaAllocFunc alloc;
-	void *ud;
+    GaffaAllocFunc alloc;
+    void *ud;
 };
 
-struct GaState
+struct ga_RT
 {
-	GC gc;
+    ga_RT();
+    ~ga_RT();
+
+    GC gc;
+    StringPool sp;
+    TypeRegistry tr;
 };
+

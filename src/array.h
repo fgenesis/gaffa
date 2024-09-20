@@ -44,17 +44,27 @@ public:
     FORCEINLINE T *resize(GC& gc, tsize n) { return (T*)_resize(gc, n, sizeof(T)); }
 
     FORCEINLINE T pop_back() { assert(sz); return arr[--sz]; }
-    FORCEINLINE T *push_back(GC& gc, T x)
+
+    // Returns pointer to n free slots
+    FORCEINLINE T *alloc_n(GC& gc, tsize n)
     {
         T *a = data();
-        if(sz == cap)
+        const tsize N = sz;
+        if(N == cap)
         {
             a = _enlarge(gc);
             if(!a)
                 return NULL;
         }
-        a += (sz++);
-        *a = x;
+        sz = N + n;
+        return a + N;
+    }
+
+    FORCEINLINE T *push_back(GC& gc, T x)
+    {
+        T *a = alloc_n(gc, 1);
+        if(a)
+            *a = x;
         return a;
     }
 
@@ -64,7 +74,7 @@ private:
 
 
 // Dynamically typed array with external allocator
-class DArray
+class DArray : public GCobj
 {
 public:
     union
@@ -74,9 +84,10 @@ public:
         sint *si;
         unsigned char *b;
         real *f;
-        Str *s;
+        sref *s;
         void *p;
         Type *ts;
+        GCobj *objs;
         /*Range<uint> *ru;
         Range<sint> *ri;
         Range<real> *rf;*/

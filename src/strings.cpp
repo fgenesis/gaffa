@@ -1,42 +1,35 @@
 #include "strings.h"
 #include <string.h>
-#include "hashfunc.h"
 
 
 static const Str None = {0, 0};
 
 
-StringPool::StringPool()
+StringPool::StringPool(GC& gc)
+    : Dedup(gc, true)
 {
-    Entry e { "", HASH_SEED };
-
-    _pool.push_back(e);
 }
+
+FORCEINLINE static Str mkstr(sref ref, size_t len)
+{
+    Str s;
+    s.len = len;
+    s.id = ref;
+    return s;
+}
+
 
 Str StringPool::put(const char* s)
 {
     if(!s)
         return None;
-
-    return put(s, strlen(s));
+    size_t len = strlen(s);
+    return mkstr(Dedup::putCopy(s, len), len);
 }
 
 Str StringPool::put(const char* s, size_t n)
 {
-    if(!s)
-        return None;
-
-    Str ret = get(s, n);
-    if(!ret.id)
-    {
-        uhash h = memhash(HASH_SEED, s, n);
-        ret.id = _pool.size();
-        Entry e { std::string(s, s+n), h };
-        _pool.push_back(e);
-        ret.len = n;
-    }
-    return ret;
-
+    return mkstr(Dedup::putCopy(s, n), n);
 }
 
 Str StringPool::put(const std::string& s)
@@ -51,23 +44,8 @@ Str StringPool::get(const char* s) const
 
 Str StringPool::get(const char* s, size_t n) const
 {
-    if(!s)
-        return None;
-
-    const size_t N = _pool.size();
-    for(size_t i = 1; i < N; ++i)
-    {
-        const Entry& x = _pool[i];
-        if(x.s.size() == n && !memcmp(s, x.s.c_str(), n))
-        {
-            Str ret;
-            ret.id = i;
-            ret.len = n;
-            return ret;
-        }
-    }
-
-    return None;
+    sref ref = Dedup::find(s, n);
+    return ref ? mkstr(ref, n) : None;
 }
 
 Str StringPool::get(const std::string& s) const
@@ -75,13 +53,16 @@ Str StringPool::get(const std::string& s) const
     return get(s.c_str(), s.size());
 }
 
-const std::string& StringPool::lookup(size_t id) const
+Strp StringPool::lookup(size_t id) const
 {
-    return _pool[id].s;
+    const MemBlock mb = Dedup::get(id);
+    const Strp sp = { mb.p, mb.n };
+    return sp;
 }
 
 Str StringPool::importFrom(const StringPool& other, size_t idInOther)
 {
-    const std::string& s = other.lookup(idInOther);
-    return put(s);
+    // FIXME: make a function in Dedup to do this quickly
+    const Strp s = other.lookup(idInOther);
+    return put(s.s, s.len);
 }

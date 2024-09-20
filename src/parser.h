@@ -6,8 +6,9 @@
 class HLIRBuilder;
 struct HLNode;
 class StringPool;
+struct GC;
 
-class Parser : public GaAlloc
+class Parser
 {
 public:
     enum Prec
@@ -41,7 +42,7 @@ public:
         // TODO: inside of value block
     };
 
-    Parser(Lexer *lex, const char *fn, const GaAlloc& ga, StringPool& strpool);
+    Parser(Lexer *lex, const char *fn, GC& gc, StringPool& strpool);
     HLNode *parse();
     //std::vector<Val> constants;
 
@@ -153,6 +154,7 @@ private:
     const char *_fn;
     bool hadError;
     bool panic;
+    GC& gc;
 
     typedef HLNode* (Parser::*UnaryMth)(Context ctx);
     typedef HLNode* (Parser::*InfixMth)(Context ctx, const ParseRule *rule, HLNode *prefix);
