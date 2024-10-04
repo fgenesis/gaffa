@@ -94,13 +94,13 @@ public:
     // If normalize is true, reorder fields so that {x=int, y=int} is the same as {y=int, x=int}.
     // normalize=true is usually what you want for dynamically created types.
     // normalize=false
-    Type construct(const Table& t, bool normalize); // makes a struct from t
-    Type construct(const DArray& t);
+    Type mkstruct(const Table& t, bool normalize); // makes a struct from t
+    Type mkstruct(const DArray& t);
 
     // Create an alias of an existing type that is not deduplicated and thus becomes an entirely different type
     Type mkalias(Type t);
 
-
+    // Create a subtype of an existing internal type (eg. Table<string, Any>)
     Type mksub(PrimType prim, const Type *sub, size_t n);
 
     // TODO: function to make union

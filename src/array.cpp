@@ -36,7 +36,7 @@ NOINLINE void* PodArrayBase::_resize(GC& gc, tsize n, tsize elementSize)
 // ------------------------
 
 DArray::DArray(Type t)
-    : t(t), sz(0), cap(0), elementSize(GetPrimTypeStorageSize(t.id))
+    : sz(0), cap(0), t(t), elementSize(GetPrimTypeStorageSize(t.id))
 {
     storage.p = NULL;
 }

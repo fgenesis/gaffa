@@ -1,6 +1,6 @@
 -- hello world
 
-var x = f()
+var x = strlen("abc") + 1
 
 --{
 --    int z := g(2)(3)

@@ -19,8 +19,16 @@ enum MLCmd
 {
     ML_DECL,
     ML_CLOSE,
-    ML_VAL,
     ML_OP,
+    ML_IFELSE,
+    ML_WHILE,
+    ML_FOR,
+    ML_FNCALL,
+    ML_MTHCALL,
+    ML_FUNCDEF,
+    ML_NEW_1,
+    ML_NEW_2,
+    ML_LOADVAL,
 };
 
 enum MLSymbolRefContext
@@ -47,74 +55,89 @@ enum MLSymbolRefContext
 struct MLDeclSym // create a symbol
 {
     enum { Cmd = ML_DECL };
-    unsigned typeidx; // symbol idx of type
-    unsigned nameid;
+    u32 typeidx; // symbol idx of type
+    u32 nameid;
 };
 
 // Close up to 32 symbols at once (ie. end of their scope was reached)
 struct MLCloseSyms
 {
     enum { Cmd = ML_CLOSE };
-    unsigned n; // > 0, < 32
-    unsigned close; // bitmask; if set, identifier was captured as upvalue and must be moved to the heap
+    u32 n; // > 0, < 32
+    u32 close; // bitmask; if set, identifier was captured as upvalue and must be moved to the heap
 };
 
 struct MLConditional
 {
-    unsigned numOpsCond;
-    unsigned numOpsIfBranch;
-    unsigned numOpsElseBranch;
+    enum { Cmd = ML_IFELSE };
+    u32 numOpsCond;
+    u32 numOpsIfBranch;
+    u32 numOpsElseBranch;
 };
 
 struct MLWhile
 {
-    unsigned numOpsCond;
-    unsigned numOpsBody;
+    enum { Cmd = ML_WHILE };
+    u32 numOpsCond;
+    u32 numOpsBody;
+};
+
+struct MLFor
+{
+    enum { Cmd = ML_FOR };
+    u32 numIters;
+    u32 numOpsBody;
 };
 
 struct MLFnCall
 {
-    unsigned symidx; // symbol idx of function to call
-    unsigned nargs;
-    unsigned nret;
+    enum { Cmd = ML_FNCALL };
+    u32 symidx; // symbol idx of function to call
+    u32 nargs;
+    u32 nret;
 };
 
 struct MLMthCall
 {
-    unsigned symidx; // symbol idx of function to call
-    unsigned nargs;
-    unsigned nret;
+    enum { Cmd = ML_MTHCALL };
+    u32 symidx; // symbol idx of function to call
+    u32 nargs;
+    u32 nret;
 };
 
 struct MLFuncDef
 {
-    unsigned nargs; // consumes this many from the symbol stack
-    unsigned nret;  // -"-
-    unsigned flags; // TODO: vararg params, vararg return
-    unsigned numOps;
+    enum { Cmd = ML_FUNCDEF };
+    u32 nargs; // consumes this many from the symbol stack
+    u32 nret;  // -"-
+    u32 flags; // TODO: vararg params, vararg return
+    u32 numOps;
     // args[], rets[] follows
 };
 
-struct MLConstruct
+struct MLNew1
 {
-    enum What
-    {
-        ARRAY,
-        TABLE,
-    };
-    unsigned what;
-    unsigned arraySize;
-    unsigned hashSizeOrTypeidx; // if table: size of hash part; if array: symbol idx of type
+    enum { Cmd = ML_NEW_1 };
+    u32 type;
+};
+
+struct MLNew2
+{
+    enum { Cmd = ML_NEW_2 };
+    u32 prealloc;
+    u32 type;
 };
 
 struct MLLoadVal
 {
-    unsigned validx; // index in constant table
+    enum { Cmd = ML_LOADVAL };
+    u32 validx; // index in constant table
 };
 
 struct MLOp
 {
-    unsigned char op;
+    enum { Cmd = ML_OP };
+    u32 op;
     // any math op
     // [], tab.idx
     //

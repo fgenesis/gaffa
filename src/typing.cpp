@@ -48,14 +48,13 @@ bool TypeRegistry::init()
         return false;
 
     const Type any = {PRIMTYPE_ANY};
-    const Type table = {PRIMTYPE_TABLE};
-    const Type array = {PRIMTYPE_ARRAY};
     const Type str = {PRIMTYPE_STRING};
     const Type anysub[] = { any, any };
 
-    _builtins[PRIMTYPE_ARRAY] = mksub(PRIMTYPE_ARRAY, anysub, 1); // array = Array(any)
-    _builtins[PRIMTYPE_TABLE] = mksub(PRIMTYPE_TABLE, anysub, 2); // table = Table(any, any)
-    _builtins[PRIMTYPE_ERROR] = mksub(PRIMTYPE_ERROR, &str, 1);
+    _builtins[PRIMTYPE_ARRAY]  = mksub(PRIMTYPE_ARRAY, anysub, 1); // array = Array(any)
+    _builtins[PRIMTYPE_TABLE]  = mksub(PRIMTYPE_TABLE, anysub, 2); // table = Table(any, any)
+    _builtins[PRIMTYPE_VARARG] = mksub(PRIMTYPE_VARARG, anysub, 1); // ... = VarArg(any)
+    _builtins[PRIMTYPE_ERROR]  = mksub(PRIMTYPE_ERROR, &str, 1);
 
     return true;
 }
@@ -70,7 +69,7 @@ static bool _sortfields(const TypeAndName& a, const TypeAndName& b)
     return a.t.id < b.t.id;
 }
 
-Type TypeRegistry::construct(const Table& t, bool normalize)
+Type TypeRegistry::mkstruct(const Table& t, bool normalize)
 {
     PodArray<TypeAndName> tn;
     const tsize N = t.size();
@@ -102,7 +101,7 @@ Type TypeRegistry::construct(const Table& t, bool normalize)
     return _store(td);
 }
 
-Type TypeRegistry::construct(const DArray& t)
+Type TypeRegistry::mkstruct(const DArray& t)
 {
     const tsize N = t.size();
     TDesc *td = TDesc_New(_tt.gc, N, 0);

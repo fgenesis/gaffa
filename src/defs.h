@@ -54,33 +54,28 @@ enum TypeBits
 
 enum PrimType
 {
-    // -v- Types that are always false
-    PRIMTYPE_NIL, // must be 0
-    PRIMTYPE_ERROR, // handled the same as string
-    // -v- Bool is undecided
-    PRIMTYPE_BOOL,
-    // -v- Types that are always true
-    PRIMTYPE_UINT,
-    PRIMTYPE_SINT,
-    PRIMTYPE_FLOAT,
-    // values are just ref-IDs -> managed separately
-    PRIMTYPE_STRING,
-    PRIMTYPE_TYPE,
-    // special
-    PRIMTYPE_FUNC,
-    // GCobj
-    PRIMTYPE_TABLE,
-    PRIMTYPE_ARRAY,
-    PRIMTYPE_OBJECT,
+    // T/F/? - truthyness of value (always true, always false, depends)
+    // R     - value is a ref ID
+    // o     - value is based on GCobj
+    // i     - value is stored completely inline in ValU
+    // S     - type can be sub-typed
+    // G     - value is garbage-collected directly
+    // g     - value is garbage-collected indirectly only
+    PRIMTYPE_NIL,    // F  i         // enum value must be 0
+    PRIMTYPE_ERROR,  // F     S  g   //
+    PRIMTYPE_BOOL,   // ?  i         //
+    PRIMTYPE_UINT,   // T  i         //
+    PRIMTYPE_SINT,   // T  i         //
+    PRIMTYPE_FLOAT,  // T  i         //
+    PRIMTYPE_STRING, // T  R     g   //
+    PRIMTYPE_TYPE,   // T  R     g   //
+    PRIMTYPE_FUNC,   // T     S  G   //
+    PRIMTYPE_VARARG, // T     S      // only for the type system, can't make an object out of this
+    PRIMTYPE_TABLE,  // T  o  S  G   //
+    PRIMTYPE_ARRAY,  // T  o  S  G   //
+    PRIMTYPE_OBJECT, // T  o     G   //
 
-    // Ranges can only be made from the 3 primitive numeric types,
-    // so there' no reason to allocate extra TypeBits for a range type
-    // TODO KILL THESE
-    /*PRIMTYPE_URANGE,
-    PRIMTYPE_SRANGE,
-    PRIMTYPE_FRANGE,*/
-
-    PRIMTYPE_ANY,           // can hold any value. must be last in the enum.
+    PRIMTYPE_ANY,    // can hold any value. must be last in the enum.
     // These are the engine-level types. Runtime-created types are any IDs after this.
     PRIMTYPE_MAX
 };

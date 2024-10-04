@@ -132,7 +132,7 @@ void testtype()
         assert(ye.v.type.id == PRIMTYPE_TYPE);
     }
 
-    Type fvec2 = tr.construct(*tvec, true);
+    Type fvec2 = tr.mkstruct(*tvec, true);
     const TDesc *td = tr.getstruct(fvec2);
     printf("Struct of %u:\n", (unsigned)td->size());
     for(tsize i = 0; i < td->size(); ++i)

@@ -1,5 +1,6 @@
 #include "gaimpdbg.h"
 #include "hlir.h"
+#include "mlir.h"
 
 
 static const char *getLabel(HLNodeType t)
@@ -128,4 +129,42 @@ static void dumprec(const StringPool& p, const HLNode *n, unsigned level)
 void hlirDebugDump(const StringPool& p, const HLNode *root)
 {
     dumprec(p, root, 0);
+}
+
+// -----------------------------
+
+struct MLOpInfo
+{
+    const char *name;
+    tsize n;
+};
+
+const MLOpInfo mlirOpInfo(MLCmd cmd)
+{
+    switch(cmd)
+    {
+#define E(cls) case (cls::Cmd): { MLOpInfo ret = { #cls, sizeof(cls) / sizeof(u32) }; return ret; }
+        E(MLDeclSym)
+        E(MLCloseSyms)
+        E(MLConditional)
+        E(MLWhile)
+        E(MLFnCall)
+        E(MLMthCall)
+        E(MLFuncDef)
+        E(MLNew1)
+        E(MLNew2)
+        E(MLLoadVal)
+        E(MLOp)
+        E(MLFor)
+#undef E
+    }
+
+    assert(false);
+    MLOpInfo oops { NULL, 0 };
+    return oops;
+}
+
+void mlirDebugDump(const MLIRContainer& mc, const StringPool& pool)
+{
+
 }

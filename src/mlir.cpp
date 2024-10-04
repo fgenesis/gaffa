@@ -22,6 +22,7 @@ static const char *symscopename(Symstore::Lookup info)
 }
 
 
+
 static inline void invalidate(HLNode *n)
 {
     n->type = HLNODE_NONE;

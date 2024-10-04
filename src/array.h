@@ -94,7 +94,7 @@ public:
     } storage;
     tsize sz; // usable size in elements
     tsize cap; // capacity in elements
-    const Type t; // decorated type, as returned back
+    const Type t; // element type
     //const Type lowt; // low-level type, ie. what is actually stored. must be <= PRIMTYPE_ANY.
     const tsize elementSize;
 

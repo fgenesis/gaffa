@@ -30,8 +30,8 @@ static uhash keyhash(uhash h, const void *buf, size_t size)
 
 
 Dedup::Dedup(GC & gc, bool extrabyte)
-    : keys(NULL), mask(-1), gc(gc), _extrabyte(extrabyte), _hashseed(0), _nextfree(0)
-    , _sweeppos(2), _inuse(0)
+    : keys(NULL), mask(-1), _extrabyte(extrabyte), _hashseed(0), _nextfree(0)
+    , _sweeppos(2), _inuse(0), gc(gc)
 {
 }
 
