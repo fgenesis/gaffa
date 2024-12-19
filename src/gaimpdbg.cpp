@@ -21,6 +21,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_VARDECLASSIGN:  return "decl=";
         case HLNODE_VARDEF:         return "vardef";
         case HLNODE_AUTODECL:       return "autodecl";
+        case HLNODE_FUNCDECL:       return "funcdecl";
         case HLNODE_DECLLIST:       return "decllist";
         case HLNODE_RETURN:         return "return";
         case HLNODE_CALL:           return "call";

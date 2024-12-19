@@ -132,6 +132,13 @@ unsigned MLIRContainer::_pre(HLNode* n)
             return SKIP_CHILDREN;
         }
 
+        case HLNODE_FUNCDECL:
+        {
+            _declInNamespace(n->u.funcdecl.ident, SYMREF_STANDARD, PRIMTYPE_FUNC, n->u.funcdecl.namespac);
+            _processRec(n->u.funcdecl.value);
+            return SKIP_CHILDREN;
+        }
+
         case HLNODE_VARDECLASSIGN: // var x, y, z = ...
         {
             // Process exprs on the right first, to make sure that it can't refer the symbols on the left
@@ -223,12 +230,23 @@ void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref, unsigned typeidx)
         // TODO: report error + abort
     }
 
-    //printf("Declare %s in line %u\n", name.c_str(), n->line);
+    printf("Declare %s in line %u\n", name, n->line);
 
     MLDeclSym d;
     d.nameid = symbolnames.importFrom(*curpool, n->u.ident.nameStrId).id; // compress string IDs
     d.typeidx = typeidx;
     add(d);
+}
+
+void MLIRContainer::_declInNamespace(HLNode* n, MLSymbolRefContext ref, unsigned typeidx, HLNode *namespac)
+{
+    assert(n->type == HLNODE_IDENT);
+    assert(namespac->type == HLNODE_IDENT);
+    const char *name = curpool->lookup(n->u.ident.nameStrId);
+    const char *ns = curpool->lookup(namespac->u.ident.nameStrId);
+    printf("Declare %s :: %s in line %u\n", ns, name, n->line);
+
+    // TODO
 }
 
 unsigned MLIRContainer::_refer(HLNode* n, MLSymbolRefContext ref)
@@ -248,7 +266,7 @@ unsigned MLIRContainer::_refer(HLNode* n, MLSymbolRefContext ref)
 }
 
 MLIRContainer::MLIRContainer(GC& gc)
-    : curpool(NULL), _fn(NULL), symbolnames(gc)
+    : curpool(NULL), symbolnames(gc), _fn(NULL)
 {
 }
 

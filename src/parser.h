@@ -68,7 +68,7 @@ protected:
 
 
     // functions
-    HLNode *_functiondef(HLNode **pname);
+    HLNode *_functiondef(HLNode **pname, HLNode **pnamespac);
     HLNode *_funcparams();
     HLNode *namedfunction();
     HLNode *closurecons(Context ctx);

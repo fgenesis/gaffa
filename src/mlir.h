@@ -174,6 +174,7 @@ private:
     unsigned  _pre(HLNode *n); // -> PrepassResult
     void _post(HLNode *n);
     void _decl(HLNode *n, MLSymbolRefContext ref, unsigned typeidx);
+    void _declInNamespace(HLNode *n, MLSymbolRefContext ref, unsigned typeidx, HLNode *namespac);
     unsigned _refer(HLNode *n, MLSymbolRefContext ref); // returns symbol index of type, 0 for auto-deduct
     void _codegen(HLNode *n);
 

@@ -1,6 +1,6 @@
 -- hello world
 
-var x = strlen("abc") + 1
+--var x = strlen("abc") + 1
 
 --{
 --    int z := g(2)(3)
@@ -68,7 +68,7 @@ var x = strlen("abc") + 1
 --type intpair = { a = int, b = int }
 
 
---type Point = { x = float , y = float, z = 0.0 }
+type Point = { x = float , y = float, z = 0.0 }
 
 -- methods and namespaced functions go into the current symbol table,
 -- NOT the type:
@@ -83,5 +83,5 @@ var x = strlen("abc") + 1
 --func Point:len()
 --    return math.sqrt(self.x*self.x + self.y*self.y + self.z*self.z)
 
--- declare function on type (not method). also goes into current namespace
---func Point::Zero() { return Point{x=0, y=0, z=0} }
+-- declare "method". also goes into current namespace
+func Point::isZero() { return self.x == 0.0 }

@@ -54,6 +54,7 @@ enum HLNodeType
     HLNODE_ASSIGNMENT,
     HLNODE_VARDECLASSIGN,
     HLNODE_AUTODECL,
+    HLNODE_FUNCDECL,
     HLNODE_VARDEF,
     HLNODE_DECLLIST,
     HLNODE_RETURN,
@@ -156,6 +157,14 @@ struct HLAutoDecl
     HLNode *type;
 };
 
+struct HLFuncDecl
+{
+    enum { EnumType = HLNODE_FUNCDECL, Children = 3 };
+    HLNode *ident;
+    HLNode *value;
+    HLNode *namespac;
+};
+
 struct HLVarDeclList
 {
     enum { EnumType = HLNODE_VARDECLASSIGN, Children = 2 };
@@ -255,6 +264,7 @@ struct HLNode
         HLAssignment assignment;
         HLVarDeclList vardecllist;
         HLAutoDecl autodecl;
+        HLFuncDecl funcdecl;
         HLVarDef vardef;
         HLForLoop forloop;
         HLWhileLoop whileloop;
@@ -294,6 +304,7 @@ public:
     inline HLNode *assignment()    { return allocT<HLAssignment>();    }
     inline HLNode *vardecllist()   { return allocT<HLVarDeclList>();   }
     inline HLNode *autodecl()      { return allocT<HLAutoDecl>();      }
+    inline HLNode *funcdecl()      { return allocT<HLFuncDecl>();      }
     inline HLNode *vardef()        { return allocT<HLVarDef>();        }
     inline HLNode *retn()          { return allocT<HLReturn>();        }
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }

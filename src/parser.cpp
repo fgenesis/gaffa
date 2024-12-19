@@ -353,10 +353,10 @@ HLNode* Parser::whileloop()
 }
 
 // named:
-//   func [optional, attribs] hello(funcparams)
+//   func [optional, attribs] hello(funcparams) -> returns
 // closure:
-// ... = func [optional, attribs] (funcparams)
-HLNode* Parser::_functiondef(HLNode **pname)
+// ... = func [optional, attribs] (funcparams) -> returns
+HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 {
     // 'func' was just eaten
     HLNode *f = ensure(hlir->func());
@@ -370,7 +370,20 @@ HLNode* Parser::_functiondef(HLNode **pname)
         _funcattribs(&flags);
 
     if(pname)
-        *pname = ident("function");
+    {
+        HLNode *first = ident("function"); // namespace or function name
+
+        if(pnamespac && tryeat(Lexer::TOK_DBLCOLON)) // :: follows -> it's a namespaced function
+        {
+            *pnamespac = first;
+            *pname = ident("functionName");
+        }
+        else
+        {
+            *pnamespac = NULL;
+            *pname = first;
+        }
+    }
 
     h->u.fhdr.paramlist = _funcparams();
 
@@ -407,15 +420,15 @@ HLNode* Parser::namedfunction()
     //   var hello = func() {...}
     // with the extra property that the function knows its own identifier, to enable recursion
 
-    HLNode *decl = ensure(hlir->autodecl());
+    HLNode *decl = ensure(hlir->funcdecl());
     if(decl)
-        decl->u.autodecl.value = _functiondef(&decl->u.autodecl.ident);
+        decl->u.funcdecl.value = _functiondef(&decl->u.funcdecl.ident, &decl->u.funcdecl.namespac);
     return decl;
 }
 
 HLNode* Parser::closurecons(Context ctx)
 {
-    return _functiondef(NULL);
+    return _functiondef(NULL, NULL);
 }
 
 HLNode* Parser::functionbody()

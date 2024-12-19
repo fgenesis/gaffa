@@ -171,7 +171,7 @@ int main(int argc, char **argv)
     if(!node)
         return 1;
 
-    //hlirDebugDump(strtab, node);
+    hlirDebugDump(strtab, node);
 
     MLIRContainer mc(gc);
     mc.import(node, strtab, fn);

@@ -18,6 +18,34 @@ enum
     STEP_END
 };
 
+struct GCprefix;
+
+// This is the hidden, GC-only part in front of a GCobj.
+struct GCheader
+{
+    GCprefix *gcnext;
+};
+
+// This struct overlays GCheader with the beginning of a GCobj
+struct GCprefix
+{
+    GCheader hdr;
+    // --------
+    // This is overlaid in memory. The following fields are the same as in GCobj.
+    u32 gcTypeAndFlags;
+    u32 gcsize;
+
+    enum { HDR_SIZE = sizeof(GCheader) };
+
+    inline GCobj *obj() { return reinterpret_cast<GCobj*>(((char*)this) + HDR_SIZE); }
+};
+
+static GCprefix *prefixof(GCobj *obj)
+{
+    assert(obj->gcTypeAndFlags & _GCF_GC_ALLOCATED);
+    return reinterpret_cast<GCprefix*>(((char*)obj) - GCprefix::HDR_SIZE);
+}
+
 static size_t gcMarkObj(ga_RT& rt, GCobj *pre, size_t steps);
 
 static size_t gcMarkVal(ga_RT& rt, ValU v, size_t steps)
@@ -119,6 +147,16 @@ static size_t gcMarkCh_Table(ga_RT& rt, GCobj *obj, size_t steps)
     return steps;
 }
 
+static size_t gcMarkCh_Obj(ga_RT& rt, GCobj *obj, size_t steps)
+{
+    // TODO: mark members & type
+}
+
+static size_t gcMarkCh_Func(ga_RT& rt, GCobj *obj, size_t steps)
+{
+    // TODO
+}
+
 // Mark object; delay marking of children
 static size_t gcMarkObj(ga_RT& rt, GCobj *obj, size_t steps)
 {
@@ -134,8 +172,10 @@ static size_t gcMarkObj(ga_RT& rt, GCobj *obj, size_t steps)
     {
         switch(prim)
         {
-            case PRIMTYPE_ARRAY: return gcMarkCh_Array(rt, obj, steps);
-            case PRIMTYPE_TABLE: return gcMarkCh_Table(rt, obj, steps);
+            case PRIMTYPE_ARRAY:  return gcMarkCh_Array(rt, obj, steps);
+            case PRIMTYPE_TABLE:  return gcMarkCh_Table(rt, obj, steps);
+            case PRIMTYPE_OBJECT: return gcMarkCh_Obj(rt, obj, steps);
+            case PRIMTYPE_FUNC:   return gcMarkCh_Func(rt, obj, steps);
                 // TODO
         }
     }
