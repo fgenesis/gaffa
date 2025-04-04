@@ -99,6 +99,13 @@ void MLIRContainer::_codegen(HLNode* n)
         _codegen(ch[i]);
 }
 
+void MLIRContainer::_addLiteralConstant(ValU v)
+{
+    MLLoadK mk;
+    mk.validx = literalConstants.put(v);
+    add(mk);
+}
+
 
 unsigned MLIRContainer::_pre(HLNode* n)
 {
@@ -127,7 +134,7 @@ unsigned MLIRContainer::_pre(HLNode* n)
         case HLNODE_AUTODECL:
         {
             unsigned typeidx = _refer(n->u.autodecl.type, SYMREF_TYPE);
-            _decl(n->u.autodecl.ident, SYMREF_STANDARD, typeidx);
+            _declWithType(n->u.autodecl.ident, SYMREF_STANDARD, typeidx);
             _processRec(n->u.autodecl.value);
             return SKIP_CHILDREN;
         }
@@ -149,11 +156,19 @@ unsigned MLIRContainer::_pre(HLNode* n)
 
         case HLNODE_VARDEF:
         {
-            unsigned typeidx = _refer(n->u.vardef.type, SYMREF_TYPE);
+            HLNode *thetype = n->u.vardef.type;
             unsigned flags = SYMREF_STANDARD;
             if(n->flags & DECLFLAG_MUTABLE)
                 flags |= SYMREF_MUTABLE;
-            _decl(n->u.vardef.ident, (MLSymbolRefContext)flags, typeidx);
+            if(thetype->type == HLNODE_IDENT)
+            {
+                unsigned typeidx = _refer(thetype, SYMREF_TYPE);
+                _declWithType(n->u.vardef.ident, (MLSymbolRefContext)flags, typeidx);
+            }
+            else
+            {
+                assert(false); // TODO: var x: f() = ... ie. when type is not an ident but an expr
+            }
         }
         break;
 
@@ -185,8 +200,8 @@ unsigned MLIRContainer::_pre(HLNode* n)
                     }
                 }
             }
-
         }
+        break;
 
         case HLNODE_CALL:
             if(n->u.fncall.callee->type == HLNODE_IDENT)
@@ -195,7 +210,35 @@ unsigned MLIRContainer::_pre(HLNode* n)
 
         case HLNODE_MTHCALL:
             if(n->u.mthcall.obj->type == HLNODE_IDENT)
-                _refer(n->u.fncall.callee, SYMREF_HASMTH);
+                _refer(n->u.fncall.callee, SYMREF_INDEX);
+            break;
+
+        case HLNODE_FUNCTIONHDR:
+        {
+            MLFuncDefBegin defb;
+            HLFunctionHdr *hdr = n->as<HLFunctionHdr>();
+            HLList *paramlist = hdr->paramlist ? hdr->paramlist->as<HLList>() : NULL;
+            HLList *rettypes = hdr->rettypes ? hdr->rettypes->as<HLList>() : NULL;
+            defb.nargs = paramlist ? paramlist->used : 0;
+            defb.nret = rettypes ? rettypes->used : 0;
+            defb.flags = 0; // TODO
+            // TODO: move variadic args/returns to flags
+            add(defb);
+        }
+        break;
+
+        case HLNODE_FUNCTION:
+        {
+            HLFunction *f = n->as<HLFunction>();
+            _processRec(f->hdr);
+            marker<MLFuncDefBody>();
+            _processRec(f->body);
+            marker<MLFuncDefEnd>();
+            return SKIP_CHILDREN;
+        }
+
+        case HLNODE_CONSTANT_VALUE:
+            _addLiteralConstant(n->u.constant.val);
             break;
 
     }
@@ -216,7 +259,7 @@ void MLIRContainer::_post(HLNode* n)
     }
 }
 
-void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref, unsigned typeidx)
+void MLIRContainer::_declWithType(HLNode* n, MLSymbolRefContext ref, unsigned typeidx)
 {
     if(!n)
         return;
@@ -241,12 +284,22 @@ void MLIRContainer::_decl(HLNode* n, MLSymbolRefContext ref, unsigned typeidx)
 void MLIRContainer::_declInNamespace(HLNode* n, MLSymbolRefContext ref, unsigned typeidx, HLNode *namespac)
 {
     assert(n->type == HLNODE_IDENT);
+    if(!namespac)
+    {
+        _declWithType(n, ref, typeidx);
+        return;
+    }
+
     assert(namespac->type == HLNODE_IDENT);
     const char *name = curpool->lookup(n->u.ident.nameStrId);
     const char *ns = curpool->lookup(namespac->u.ident.nameStrId);
     printf("Declare %s :: %s in line %u\n", ns, name, n->line);
 
-    // TODO
+    MLDeclSymNS d;
+    d.nameid = symbolnames.importFrom(*curpool, n->u.ident.nameStrId).id; // compress string IDs
+    d.typeidx = typeidx;
+    d.nsid = symbolnames.importFrom(*curpool, namespac->u.ident.nameStrId).id;
+    add(d);
 }
 
 unsigned MLIRContainer::_refer(HLNode* n, MLSymbolRefContext ref)
@@ -257,24 +310,34 @@ unsigned MLIRContainer::_refer(HLNode* n, MLSymbolRefContext ref)
     assert(n->type == HLNODE_IDENT);
     Symstore::Lookup info = syms.lookup(n->u.ident.nameStrId, n->line, ref);
 
-    /*const char *how = symscopename(info);
-    const std::string& name = curpool->lookup(info.sym->nameStrId);
-    printf("Using %s in line %u as %s from line %u (symindex %d)\n",
-        name.c_str(), n->line, how, info.sym->linedefined, info.symindex);*/
+    const char *how = symscopename(info);
+    Strp name = curpool->lookup(info.sym->nameStrId);
+    printf("Using [%s] in line %u as %s from line %u (symindex %d)\n",
+        name.s, n->line, how, info.sym->linedefined, info.symindex);
 
     return info.symindex;
 }
 
 MLIRContainer::MLIRContainer(GC& gc)
-    : curpool(NULL), symbolnames(gc), _fn(NULL)
+    : curpool(NULL), symbolnames(gc), literalConstants(gc), _fn(NULL)
 {
 }
 
 void MLIRContainer::_add(const unsigned* p, const size_t n, unsigned cmd)
 {
     mops.push_back(cmd);
+    printf(".%08x\n", cmd);
+    _addRaw(p, n);
+}
+
+void MLIRContainer::_addRaw(const unsigned* p, const size_t n)
+{
     for(size_t i = 0; i < n; ++i)
+    {
         mops.push_back(p[i]);
+        printf(" %08x\n", p[i]);
+    }
+    puts("---");
 }
 
 static std::string whatisit(unsigned ref)
@@ -286,8 +349,6 @@ static std::string whatisit(unsigned ref)
         s += "callable, ";
     if(ref &  SYMREF_INDEX)
         s += "indexable, ";
-    if(ref & SYMREF_HASMTH)
-        s += "has_methods, ";
 
     if(s.length() >= 2)
         s.resize(s.length() - 2);
@@ -307,6 +368,16 @@ GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool, const cha
     _processRec(root);
     Symstore::Frame top;
     syms.pop(top);
+
+    if(size_t N = literalConstants.vals.size())
+    {
+        printf("%s: There are %u literal constants used:\n", fn, unsigned(N));
+        for(size_t i = 0; i < N; ++i)
+        {
+            ValU v = literalConstants.vals[i];
+            printf("(%u)  type(%u)  %016llX\n", (unsigned)i, v.type.id, v.u.ui); // FIXME: pretty-print this
+        }
+    }
 
     if(size_t N = syms.missing.size())
     {

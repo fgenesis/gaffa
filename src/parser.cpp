@@ -369,20 +369,24 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     if(tryeat(Lexer::TOK_LSQ))
         _funcattribs(&flags);
 
-    if(pname)
+    if(pname) // Named functions can be declared in a namespace
     {
-        HLNode *first = ident("function"); // namespace or function name
+        HLNode *nname = ident("function or namespace"); // namespace or function name
+        HLNode *ns = NULL;
 
-        if(pnamespac && tryeat(Lexer::TOK_DBLCOLON)) // :: follows -> it's a namespaced function
+        if(tryeat(Lexer::TOK_DOT)) // . follows -> it's a namespaced function (namespace can be a type or table)
         {
-            *pnamespac = first;
-            *pname = ident("functionName");
+            ns = nname;
+            nname = ident("functionName");
         }
-        else
+        else if(tryeat(Lexer::TOK_COLON)) // : follows -> it's a method (syntax sugar only; Lua style)
         {
-            *pnamespac = NULL;
-            *pname = first;
+            ns = nname;
+            nname = ident("methodName");
+            flags |= FUNCFLAGS_METHOD_SUGAR;
         }
+        *pname = nname;
+        *pnamespac = ns;
     }
 
     h->u.fhdr.paramlist = _funcparams();
@@ -546,19 +550,11 @@ HLNode* Parser::_decllist()
     HLNode *first = NULL;
     HLNode *second = NULL;
 
-    switch(curtok.tt)
-    {
-        case Lexer::TOK_IDENT:
-            first = typeident();
-            lasttype = first;
-            break;
-        case Lexer::TOK_VAR:
-            advance();
-            break;
-        default:
-            errorAtCurrent("expected type identifier or 'var'");
-            return NULL;
-    }
+    if(isvar)
+        advance();
+    else
+        lasttype = first = typeident();
+
     goto begin;
 
     for(;;)
@@ -599,7 +595,14 @@ begin:
             assert(!first);
             def->u.vardef.ident = second; // always var name
             if(tryeat(Lexer::TOK_COLON))
-                def->u.vardef.type = expr();
+            {
+                unsigned flags = 0;
+                if(tryeat(Lexer::TOK_LIKE))
+                    errorAt(prevtok, "FIXME: implement var x: like EXPR"); // FIXME
+                HLNode *texpr = expr();
+                //texpr->u.vardef.type->flags = flags // INCORRECT
+                def->u.vardef.type = texpr;
+            }
         }
         else // C-style decl
         {
@@ -789,8 +792,7 @@ HLNode* Parser::_suffixed(HLNode *prefix)
                 advance();
                 next = hlir->index();
                 next->u.index.lhs = node;
-                next->u.index.idx = name("field");
-                advance();
+                next->u.index.idx = name("field"); // eats the name and advances
                 break;
 
             case Lexer::TOK_LSQ:
@@ -864,9 +866,14 @@ HLNode* Parser::ident(const char *whatfor)
 
 HLNode* Parser::typeident()
 {
+    unsigned flags = 0;
+    if(tryeat(Lexer::TOK_LIKE))
+        flags |= IDENTFLAGS_DUCKYTYPE;
     HLNode *node = ident("type");
     if(tryeat(Lexer::TOK_QM))
-        node->flags = IDENTFLAGS_OPTIONALTYPE;
+        flags |= IDENTFLAGS_OPTIONALTYPE;
+    if(node)
+        node->flags = flags;
     return node;
 }
 

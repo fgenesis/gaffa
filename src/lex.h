@@ -74,6 +74,7 @@ public:
         TOK_FALLTHROUGH,//fallthrough
         TOK_AND,    // and
         TOK_OR,     // or
+        TOK_LIKE,   // like
         // rest
         TOK_LITSTR, // "...", '...'
         TOK_LITNUM, // 123, 123.45

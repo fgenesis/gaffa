@@ -210,7 +210,7 @@ enum UnOpType
 
 enum BinOpType
 {
-    OP_INVALID,
+    OP_INVALID, // 0
     OP_ADD,
     OP_SUB,
     OP_MUL,
@@ -233,6 +233,16 @@ enum BinOpType
     OP_EVAL_AND,
     OP_EVAL_OR,
     OP_CONCAT,
+    OP_INDEX,
+    // 24 wrap-add
+    // 25 wrap-sub
+    // 26 wrap-mul
+    // 27 wrap-shl
+    // 28
+    // 29
+    // 30
+    // 31
+    OP_MAX = 32,
 };
 
 BinOpType BinOp_TokenToOp(unsigned tok);

@@ -67,8 +67,10 @@
 --
 --type intpair = { a = int, b = int }
 
+--bool b = self.x == 0
 
-type Point = { x = float , y = float, z = 0.0 }
+
+--type Point = { x = float , y = float, z = 0.0 }
 
 -- methods and namespaced functions go into the current symbol table,
 -- NOT the type:
@@ -84,4 +86,19 @@ type Point = { x = float , y = float, z = 0.0 }
 --    return math.sqrt(self.x*self.x + self.y*self.y + self.z*self.z)
 
 -- declare "method". also goes into current namespace
-func Point::isZero() { return self.x == 0.0 }
+--func Point:isZero() { return self.x == 0.0 }
+
+--int x = 0
+--var y: f() = 0
+
+int C = 0x1ff
+string S = "hello"
+string T = "world"
+
+func add(int a, int b) -> int
+	return a + b + 15
+
+--func nothing() {}
+
+--func identity(int a)
+--    return a

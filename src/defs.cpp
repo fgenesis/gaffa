@@ -17,7 +17,7 @@ static const UintPair lut_tok2unop[] =
     { Lexer::TOK_MINUS,    UOP_NEG         },
     { Lexer::TOK_TILDE,    UOP_BIN_COMPL   },
     { Lexer::TOK_QQM,      UOP_TRY         },
-    { Lexer::TOK_FATARROW, UOP_UNWRAP      },
+    { Lexer::TOK_STAR,     UOP_UNWRAP      },
 };
 
 static const UintPair lut_tok2binop[] =
@@ -44,6 +44,8 @@ static const UintPair lut_tok2binop[] =
     { Lexer::TOK_AND,    OP_EVAL_AND  },
     { Lexer::TOK_OR,     OP_EVAL_OR   },
     { Lexer::TOK_CONCAT, OP_CONCAT    },
+    { Lexer::TOK_DOT,    OP_INDEX     },
+    { Lexer::TOK_LSQ,    OP_INDEX     },
 };
 
 static unsigned lookup(const UintPair a[], size_t N, unsigned val, unsigned def)

@@ -9,6 +9,7 @@
 #include "gainternal.h"
 #include "symstore.h"
 #include "strings.h"
+#include "valstore.h"
 
 #include <vector>
 
@@ -17,18 +18,21 @@ struct HLNode;
 
 enum MLCmd
 {
-    ML_DECL,
+    // 0 .. OP_MAX: operands
+    ML_DECL = OP_MAX,
+    ML_DECL_NS,
     ML_CLOSE,
-    ML_OP,
     ML_IFELSE,
     ML_WHILE,
     ML_FOR,
     ML_FNCALL,
-    ML_MTHCALL,
-    ML_FUNCDEF,
+    ML_FUNCDEF_BEGIN,
+    ML_FUNCDEF_BODY,
+    ML_FUNCDEF_END,
     ML_NEW_1,
     ML_NEW_2,
-    ML_LOADVAL,
+    ML_LOADK,   // load from constant table
+    ML_INDEX,
 };
 
 enum MLSymbolRefContext
@@ -38,7 +42,6 @@ enum MLSymbolRefContext
     SYMREF_TYPE     = 0x02,  // Symbol is used as a type
     SYMREF_CALL     = 0x04,  // Symbol is called (-> symbol is function-ish)
     SYMREF_INDEX    = 0x08,  // Symbol is indexed (sym.thing or sym[])
-    SYMREF_HASMTH   = 0x10,  // Symbol is used in a method call context (sym:method())
 };
 
 
@@ -47,14 +50,23 @@ enum MLSymbolRefContext
 // Anything that follows is pushed and popped as scopes change
 
 // General rules:
-// - every symbol has a known type
+// - every symbol has a known type (base types: type, function, any, ...)
 // - if we know the symbol idx, we have a type
+// - Complex types are resolved in a later step
 
 
 
 struct MLDeclSym // create a symbol
 {
     enum { Cmd = ML_DECL };
+    u32 typeidx; // symbol idx of type
+    u32 nameid;
+};
+
+struct MLDeclSymNS // create a symbol in a namespace
+{
+    enum { Cmd = ML_DECL_NS };
+    u32 nsid;
     u32 typeidx; // symbol idx of type
     u32 nameid;
 };
@@ -97,22 +109,25 @@ struct MLFnCall
     u32 nret;
 };
 
-struct MLMthCall
+// Protocol: Emit MLDeclSym[nargs] right afterward, then MLDeclSym[nret] for return types
+struct MLFuncDefBegin
 {
-    enum { Cmd = ML_MTHCALL };
-    u32 symidx; // symbol idx of function to call
-    u32 nargs;
-    u32 nret;
+    enum { Cmd = ML_FUNCDEF_BEGIN };
+    u32 nargs; // number of symbols
+    u32 nret;  //
+    u32 flags; // TODO: vararg params, vararg return
+    // args[], rets[] follows (each is a symbol ID)
 };
 
-struct MLFuncDef
+struct MLFuncDefBody
 {
-    enum { Cmd = ML_FUNCDEF };
-    u32 nargs; // consumes this many from the symbol stack
-    u32 nret;  // -"-
-    u32 flags; // TODO: vararg params, vararg return
-    u32 numOps;
-    // args[], rets[] follows
+    enum { Cmd = ML_FUNCDEF_BODY };
+};
+
+
+struct MLFuncDefEnd
+{
+    enum { Cmd = ML_FUNCDEF_END };
 };
 
 struct MLNew1
@@ -128,20 +143,12 @@ struct MLNew2
     u32 type;
 };
 
-struct MLLoadVal
+struct MLLoadK
 {
-    enum { Cmd = ML_LOADVAL };
+    enum { Cmd = ML_LOADK };
     u32 validx; // index in constant table
 };
 
-struct MLOp
-{
-    enum { Cmd = ML_OP };
-    u32 op;
-    // any math op
-    // [], tab.idx
-    //
-};
 
 class MLIRContainer
 {
@@ -155,12 +162,25 @@ public:
     Symstore syms;
 
 private:
+    template<typename T> void marker()
+    {
+        const size_t N = sizeof(T) / sizeof(unsigned);
+        static_assert(N == 0, "oops");
+        _add(NULL, 0, T::Cmd);
+    }
     template<typename T> void add(const T& t)
     {
         const size_t N = sizeof(T) / sizeof(unsigned);
         static_assert(N, "oops");
         const unsigned *p = reinterpret_cast<const unsigned*>(&t);
         _add(p, N, T::Cmd);
+    }
+    template<typename T> void addNoHdr(const T& t)
+    {
+        const size_t N = sizeof(T) / sizeof(unsigned);
+        static_assert(N, "oops");
+        const unsigned *p = reinterpret_cast<const unsigned*>(&t);
+        _addRaw(p, N);
     }
 
     enum PrepassResult
@@ -169,18 +189,22 @@ private:
     };
 
     void _add(const unsigned *p, const size_t n, unsigned cmd);
+    void _addRaw(const unsigned *p, const size_t n);
     void _processRec(HLNode *n);
     ScopeType _precheckScope(HLNode *n);
     unsigned  _pre(HLNode *n); // -> PrepassResult
     void _post(HLNode *n);
-    void _decl(HLNode *n, MLSymbolRefContext ref, unsigned typeidx);
+    void _declWithType(HLNode *n, MLSymbolRefContext ref, unsigned typeidx);
     void _declInNamespace(HLNode *n, MLSymbolRefContext ref, unsigned typeidx, HLNode *namespac);
     unsigned _refer(HLNode *n, MLSymbolRefContext ref); // returns symbol index of type, 0 for auto-deduct
     void _codegen(HLNode *n);
 
+    void _addLiteralConstant(ValU v);
+
     std::vector<unsigned> mops;
     const StringPool *curpool;
     StringPool symbolnames;
+    ValStore literalConstants;
     const char *_fn;
 };
 

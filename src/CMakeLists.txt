@@ -38,6 +38,8 @@ set(src
     dedupset.h
     gaobj.cpp
     gaobj.h
+    valstore.cpp
+    valstore.h
 )
 
 add_library(gaffa ${src})

@@ -22,15 +22,17 @@ enum Comparison
 enum IdentFlags
 {
     IDENTFLAGS_NONE         = 0x00,
-    IDENTFLAGS_OPTIONALTYPE = 0x01
+    IDENTFLAGS_OPTIONALTYPE = 0x01,
+    IDENTFLAGS_DUCKYTYPE    = 0x02,
 };
 
 enum FuncFlags
 {
     FUNCFLAGS_VAR_ARG = 0x01,
     FUNCFLAGS_VAR_RET = 0x02,
-    FUNCFLAGS_PURE    = 0x04,
-    FUNCFLAGS_DEDUCE_RET = 0x08,
+    FUNCFLAGS_PURE    = 0x04, // calling function has no side effects
+    FUNCFLAGS_DEDUCE_RET = 0x08, // must deduce return value of function
+    FUNCFLAGS_METHOD_SUGAR    = 0x10, // implicit first parameter is 'this'
 };
 
 enum DeclFlags
@@ -80,29 +82,30 @@ enum HLTypeFlags
 };
 
 struct HLNode;
+struct HLNodeBase {};
 
 // Important: Any must be the FIRST struct members!
 
-struct HLConstantValue
+struct HLConstantValue : HLNodeBase
 {
     enum { EnumType = HLNODE_CONSTANT_VALUE, Children = 0 };
     ValU val;
 };
 
-struct HLUnary
+struct HLUnary : HLNodeBase
 {
     enum { EnumType = HLNODE_UNARY, Children = 1 };
     HLNode *rhs;
 };
 
-struct HLBinary
+struct HLBinary : HLNodeBase
 {
     enum { EnumType = HLNODE_BINARY, Children = 2 };
     HLNode *lhs;
     HLNode *rhs;
 };
 
-struct HLTernary
+struct HLTernary : HLNodeBase
 {
     enum { EnumType = HLNODE_TERNARY, Children = 3 };
     HLNode *a;
@@ -110,7 +113,7 @@ struct HLTernary
     HLNode *c;
 };
 
-struct HLConditional
+struct HLConditional : HLNodeBase
 {
     enum { EnumType = HLNODE_CONDITIONAL, Children = 3 };
     HLNode *condition;
@@ -118,21 +121,21 @@ struct HLConditional
     HLNode *elseblock;
 };
 
-struct HLForLoop
+struct HLForLoop : HLNodeBase
 {
     enum { EnumType = HLNODE_FORLOOP, Children = 2 };
     HLNode *iter;
     HLNode *body;
 };
 
-struct HLWhileLoop
+struct HLWhileLoop : HLNodeBase
 {
     enum { EnumType = HLNODE_WHILELOOP, Children = 2 };
     HLNode *cond;
     HLNode *body;
 };
 
-struct HLList
+struct HLList : HLNodeBase
 {
     enum { EnumType = HLNODE_LIST, Children = 0xff };
     size_t used;
@@ -142,14 +145,14 @@ struct HLList
     HLNode *add(HLNode *node, GC& gc); // returns node, unless memory allocation fails
 };
 
-struct HLVarDef
+struct HLVarDef : HLNodeBase
 {
     enum { EnumType = HLNODE_VARDEF, Children = 2 };
     HLNode *ident;
     HLNode *type;
 };
 
-struct HLAutoDecl
+struct HLAutoDecl : HLNodeBase
 {
     enum { EnumType = HLNODE_AUTODECL, Children = 3 };
     HLNode *ident;
@@ -157,7 +160,7 @@ struct HLAutoDecl
     HLNode *type;
 };
 
-struct HLFuncDecl
+struct HLFuncDecl : HLNodeBase
 {
     enum { EnumType = HLNODE_FUNCDECL, Children = 3 };
     HLNode *ident;
@@ -165,83 +168,83 @@ struct HLFuncDecl
     HLNode *namespac;
 };
 
-struct HLVarDeclList
+struct HLVarDeclList : HLNodeBase
 {
     enum { EnumType = HLNODE_VARDECLASSIGN, Children = 2 };
     HLNode *decllist; // list of HLVarDef
-    HLNode *vallist;
+    HLNode *vallist; // list of HLNode
 };
 
-struct HLAssignment
+struct HLAssignment : HLNodeBase
 {
     enum { EnumType = HLNODE_ASSIGNMENT, Children = 2 };
     HLNode *dstlist;
     HLNode *vallist;
 };
 
-struct HLReturn
+struct HLReturn : HLNodeBase
 {
     enum { EnumType = HLNODE_RETURN, Children = 1 };
     HLNode *what;
 };
 
-struct HLBranchAlways
+struct HLBranchAlways : HLNodeBase
 {
     enum { EnumType = HLNODE_NONE, Children = 1 };
     HLNode *target;
 };
 
-struct HLFnCall
+struct HLFnCall : HLNodeBase
 {
     enum { EnumType = HLNODE_CALL, Children = 2 };
     HLNode *callee;
     HLNode *paramlist;
 };
 
-struct HLMthCall
+struct HLMthCall : HLNodeBase
 {
     enum { EnumType = HLNODE_MTHCALL, Children = 3 };
     HLNode *obj;
     HLNode *mth; // name or expr
-    HLNode *paramlist;
+    HLNode *paramlist; // HLList
 };
 
-struct HLIdent
+struct HLIdent : HLNodeBase
 {
     enum { EnumType = HLNODE_IDENT, Children = 0 };
-    unsigned nameStrId;
+    sref nameStrId;
 };
 
-struct HLName
+struct HLName : HLNodeBase
 {
     enum { EnumType = HLNODE_NAME, Children = 0 };
-    unsigned nameStrId;
+    sref nameStrId;
 };
 
-struct HLSink
+struct HLSink : HLNodeBase
 {
     enum { EnumType = HLNODE_SINK, Children = 0 };
 };
 
-struct HLIndex
+struct HLIndex : HLNodeBase
 {
     enum { EnumType = HLNODE_INDEX, Children = 2 };
     HLNode *lhs;
     HLNode *idx; // name or expr
 };
 
-struct HLFunctionHdr
+struct HLFunctionHdr : HLNodeBase
 {
-     enum { EnumType = HLNODE_FUNCTIONHDR, Children = 2 };
-    HLNode *rettypes;
-    HLNode *paramlist; // list of HLVarDecl
+    enum { EnumType = HLNODE_FUNCTIONHDR, Children = 2 };
+    HLNode *paramlist; // list of HLVarDef // TODO: make this HLVarDeclList in the future when there are function default args?
+    HLNode *rettypes; // OPTIONAL list of HLNode
     //FuncFlags flags;
 };
 
-struct HLFunction
+struct HLFunction : HLNodeBase
 {
     enum { EnumType = HLNODE_FUNCTION, Children = 2 };
-    HLNode *hdr;
+    HLNode *hdr; // HLFunctionHdr
     HLNode *body;
 };
 
@@ -280,10 +283,17 @@ struct HLNode
         HLNode *aslist[3];
     } u;
     unsigned line;
-    unsigned char type; // HLNodeType
-    unsigned char tok;  // Lexer::TokenType
+    HLNodeType type;
+    Lexer::TokenType tok;
     unsigned char flags; // any of the flags above, depends on type
     unsigned char _nch; // number of child nodes
+
+    template<typename T> T *as()
+    {
+        assert(type == T::EnumType);
+        return reinterpret_cast<T*>(&this->u);
+    }
+
 };
 
 
