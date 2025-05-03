@@ -33,6 +33,7 @@ jobs:
         run: cmake --version
 
       - name: Build with ${{ matrix.compiler }} under unix
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           mkdir build
           cd build
