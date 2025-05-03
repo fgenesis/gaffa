@@ -10,6 +10,10 @@ jobs:
         cmake: ['2.6', '3.20']
         os: ['ubuntu-latest', 'windows-latest']
       fail-fast: false
+      # exclude gcc under windows
+      exclude:
+        - os: windows-latest
+          compiler: gcc
     runs-on: ${{ matrix.os }}
     name: Build with ${{ matrix.compiler }} and CMake ${{ matrix.cmake }} on ${{ matrix.os }}
     steps:
@@ -57,30 +61,17 @@ jobs:
 
           make -j $(nproc)
 
-      - name: Build with ${{ matrix.compiler }} under windows
+      - name: Build with clangd under windows
         if: startsWith(matrix.os, 'windows')
         run: |
           mkdir build
           cd build
-          
-          # Set the compiler environment variables based on the matrix.compiler value
-          if ($env:matrix_compiler -eq "gcc") {
-            $env:CC = "gcc"
-            $env:CXX = "g++"
-          } else {
-            $env:CC = "clang"
-            $env:CXX = "clang++"
-          }
 
           # Run CMake with the Release build type. Also set the generator to makefiles
           cmake .. -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles"
             
           # Verify the compiler version
-          if ($env:matrix_compiler -eq "gcc") {
-            gcc --version
-          } else {
-            clang --version
-          }
+          clang --version
   
           # Build the project using all available processors
           make -j $env:NUMBER_OF_PROCESSORS
