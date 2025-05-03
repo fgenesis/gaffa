@@ -21,8 +21,13 @@ jobs:
         with:
           cmake-version: ${{ matrix.cmake }}
 
-      - name: Install dependencies
+      - name: Install dependencies under unix
+        if: startsWith(matrix.os, 'ubuntu')
         run: sudo apt update -y && sudo apt install -y build-essential
+
+      - name: Install dependencies under windows
+        if: startsWith(matrix.os, 'windows')
+        run: choco install make
 
       - name: Verify cmake version
         run: cmake --version
