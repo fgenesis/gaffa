@@ -9,11 +9,11 @@ jobs:
         compiler: [gcc, clang]
         cmake: ['2.6', '3.20']
         os: ['ubuntu-latest', 'windows-latest']
+        # exclude gcc under windows
+        exclude:
+          - os: windows-latest
+            compiler: gcc
       fail-fast: false
-      # exclude gcc under windows
-      exclude:
-        - os: windows-latest
-          compiler: gcc
     runs-on: ${{ matrix.os }}
     name: Build with ${{ matrix.compiler }} and CMake ${{ matrix.cmake }} on ${{ matrix.os }}
     steps:
