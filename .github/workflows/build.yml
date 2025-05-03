@@ -72,8 +72,8 @@ jobs:
             $env:CXX = "clang++"
           }
 
-          # Run CMake with the Release build type
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          # Run CMake with the Release build type. Also set the generator to makefiles
+          cmake .. -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles"
             
           # Verify the compiler version
           if ($env:matrix_compiler -eq "gcc") {
