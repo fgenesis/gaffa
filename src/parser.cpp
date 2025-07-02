@@ -239,8 +239,10 @@ HLNode* Parser::stmt()
             break;
 
         case Lexer::TOK_RETURN:
-            advance();
+        case Lexer::TOK_YIELD:
             ret = ensure(hlir->retn());
+            ret->tok = curtok.tt; // so that we can distinguish yield and return
+            advance();
             ret->u.retn.what = _exprlist();
             break;
 
@@ -249,14 +251,24 @@ HLNode* Parser::stmt()
             ret = block();
             break;
 
+        case Lexer::TOK_EXPORT:
+            advance();
+            ret = _export();
+
+        break;
+
         default: // assignment, function call with ignored returns
         {
+            const Lexer::Token beg = curtok;
             ret = suffixedexpr();
             if(curtok.tt == Lexer::TOK_COMMA || curtok.tt == Lexer::TOK_CASSIGN)
             {
                 ret = _restassign(ret);
             }
             // else it's just a function / method call, already handled
+
+            if(ret && ret->type == HLNODE_IDENT)
+                errorAt(beg, "identifier stands alone, expected statement");
         }
         break;
     }
@@ -265,6 +277,22 @@ HLNode* Parser::stmt()
 
     panic = false;
 
+    return ret;
+}
+
+// export DECL      // export a var decl
+// export func(...) // export a named function
+HLNode* Parser::_export()
+{
+    const Lexer::Token beg = curtok;
+    // 'export' keyword was consumed
+    HLNode *ret = ensure(decl());
+    if(ret)
+    {
+        if(ret->flags & DECLFLAG_MUTABLE)
+            errorAt(beg, "exports can't be mutable"); // FIXME: this should be checked in MLIR validation
+        ret->flags |= DECLFLAG_EXPORT;
+    }
     return ret;
 }
 
@@ -741,6 +769,7 @@ HLNode* Parser::declOrStmt()
 
 HLNode* Parser::block()
 {
+    // '{' was just eaten
     HLNode *node = stmtlist(Lexer::TOK_RCUR);
     eat(Lexer::TOK_RCUR);
     return node;
@@ -892,12 +921,41 @@ HLNode *Parser::grouping(Context ctx)
 
 HLNode *Parser::unary(Context ctx)
 {
-    const ParseRule *rule = GetRule(prevtok.tt);
+    const Lexer::Token mytok = prevtok; // Keep this around; parsePrecedence() advances the parser state
+    const ParseRule *rule = GetRule(mytok.tt);
     HLNode *rhs = parsePrecedence(PREC_UNARY);
 
-    HLNode *node = ensure(hlir->unary());
+    // Special case?
+    if(rule->tok == Lexer::TOK_PLUS || rule->tok == Lexer::TOK_MINUS)
+    {
+        if(rhs->type == HLNODE_CONSTANT_VALUE)
+        {
+            ValU &v = rhs->u.constant.val;
+            switch(v.type.id)
+            {
+                case PRIMTYPE_UINT: // Change type from uint to sint when explicitly prefixed with sign.
+                    // This is important for automatic type deduction. C/C++ uses '42u' to denote unsigned;
+                    // we use unsigned-by-default and make it signed by explicitly stating +42 or -42.
+                    v.type.id = PRIMTYPE_SINT;
+                    if(rule->tok == Lexer::TOK_MINUS)
+                        v.u.si = -v.u.si; // FIXME: limit, MAX_INT handling
+                    return rhs;
+
+                case PRIMTYPE_FLOAT: // Flip sign instead of emitting an unary op.
+                    // Doing this here is not strictly necessary since the type doesn't change,
+                    // but this way it doesn't rely on constant folding to not suck.
+                    if(rule->tok == Lexer::TOK_MINUS)
+                        v.u.f = -v.u.f;
+                    return rhs;
+            }
+        }
+    }
+
+    // Regular unary op
+    HLNode *node = ensure(hlir->unary(), mytok);
     if(node)
     {
+        // Initially, we're a uniary operator node.
         node->tok = rule->tok;
         node->u.unary.rhs = rhs;
     }
@@ -924,11 +982,19 @@ HLNode * Parser::binary(Context ctx, const Parser::ParseRule *rule, HLNode *lhs)
 
 HLNode* Parser::ensure(HLNode* node)
 {
-    if(!node)
+    return ensure(node, curtok);
+}
+
+HLNode* Parser::ensure(HLNode* node, const Lexer::Token& tok)
+{
+    if(node)
+        node->line = tok.line;
+    else
         outOfMemory();
-    node->line = curtok.line; // HACK: FIXME: pass line as param
+
     return node;
 }
+
 
 void Parser::advance()
 {
@@ -965,7 +1031,7 @@ void Parser::eat(Lexer::TokenType tt)
     }
 
     char buf[64];
-    sprintf(&buf[0], "Expected '%s', got '%s", Lexer::GetTokenText(tt), Lexer::GetTokenText(curtok.tt));
+    sprintf(&buf[0], "Expected '%s', got '%s'", Lexer::GetTokenText(tt), Lexer::GetTokenText(curtok.tt));
     errorAtCurrent(&buf[0]);
 }
 
@@ -1002,8 +1068,9 @@ void Parser::errorAt(const Lexer::Token& tok, const char *msg, const char *hint)
 
     printf("(%s:%u): %s (Token: %s)\n", _fn, tok.line, msg, Lexer::GetTokenText(tok.tt));
 
-    const char * const beg = _lex->getLineBegin();
-    if(beg < tok.begin)
+    const char * const beg = tok.linebegin; //_lex->getLineBegin();
+    assert(beg);
+    if(beg <= tok.begin)
     {
         const char *p = beg;
         for( ; *p && *p != '\r' && *p != '\n'; ++p) {}

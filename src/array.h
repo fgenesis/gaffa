@@ -9,6 +9,7 @@ class PodArrayBase
 {
 public:
     FORCEINLINE tsize size() const { return sz; }
+    FORCEINLINE bool empty() const { return !sz; }
     FORCEINLINE void clear() { sz = 0; }
     void *ptr;
     tsize sz;
@@ -43,7 +44,10 @@ public:
     FORCEINLINE T *reserve(GC& gc, tsize n) { return n <= cap ? data() : (T*)_chsize(gc, n, sizeof(T)); }
     FORCEINLINE T *resize(GC& gc, tsize n) { return (T*)_resize(gc, n, sizeof(T)); }
 
-    FORCEINLINE T pop_back() { assert(sz); return arr[--sz]; }
+    FORCEINLINE T pop_back() { assert(sz); return data()[--sz]; }
+
+    FORCEINLINE T& back() { assert(sz); return data()[sz-1]; }
+    FORCEINLINE const T& back() const { assert(sz); return arr[sz-1]; }
 
     // Returns pointer to n free slots
     FORCEINLINE T *alloc_n(GC& gc, tsize n)

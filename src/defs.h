@@ -199,13 +199,23 @@ struct Val : public ValU
 
 enum UnOpType
 {
-    UOP_INVALID,
+    UOP_INVALID, // 0
     UOP_NOT,
     UOP_POS,
     UOP_NEG,
     UOP_BIN_COMPL,
     UOP_TRY,
     UOP_UNWRAP,
+    // 7
+    // 8
+    // 9
+    // 10
+    // 11
+    // 12
+    // 13
+    // 14
+    // 15
+    UOP_MAX = 16
 };
 
 enum BinOpType
@@ -242,7 +252,7 @@ enum BinOpType
     // 29
     // 30
     // 31
-    OP_MAX = 32,
+    OP_MAX = 32
 };
 
 BinOpType BinOp_TokenToOp(unsigned tok);

@@ -71,10 +71,12 @@ public:
         TOK_BREAK,  // break
         TOK_RETURN, // return
         TOK_CONTINUE,// continue
-        TOK_FALLTHROUGH,//fallthrough
         TOK_AND,    // and
         TOK_OR,     // or
         TOK_LIKE,   // like
+        TOK_EXPORT, // export
+        TOK_YIELD,  // yield
+        TOK_EMIT,   // emit
         // rest
         TOK_LITSTR, // "...", '...'
         TOK_LITNUM, // 123, 123.45
@@ -86,6 +88,7 @@ public:
     {
         TokenType tt;
         const char *begin;
+        const char *linebegin;
         union
         {
             unsigned len;

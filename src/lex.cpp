@@ -79,6 +79,9 @@ static const Keyword Keywords[] =
     { "continue",  Lexer::TOK_CONTINUE },
     { "and",       Lexer::TOK_AND      },
     { "or",        Lexer::TOK_OR       },
+    { "yield",     Lexer::TOK_YIELD    },
+    { "export",    Lexer::TOK_EXPORT   },
+    { "emit",      Lexer::TOK_EMIT     },
 };
 
 
@@ -275,6 +278,7 @@ Lexer::Token Lexer::tok(TokenType tt, const char *where, const char *end)
     Token t;
     t.tt = tt;
     t.begin = where;
+    t.linebegin = _linebegin;
     t.line = _line;
     t.u.len = len;
     return t;

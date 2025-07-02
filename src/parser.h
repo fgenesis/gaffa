@@ -97,6 +97,7 @@ protected:
     HLNode *primaryexpr(); // the start of any expr-as-statement
     HLNode *suffixedexpr();
     HLNode *_suffixed(HLNode *prefix);
+    HLNode *_export();
 
     // prefixexpr { .ident | [expr] | :ident paramlist | paramlist }
 
@@ -130,6 +131,7 @@ protected:
 
 private:
     HLNode *ensure(HLNode *node);
+    HLNode *ensure(HLNode *node, const Lexer::Token& tok);
     void advance();
     void lookAhead();
     HLNode *parsePrecedence(Prec p);

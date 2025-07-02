@@ -6,6 +6,7 @@
 
 #include "gainternal.h"
 #include "lex.h"
+#include "gaalloc.h"
 
 struct GC;
 
@@ -38,7 +39,8 @@ enum FuncFlags
 enum DeclFlags
 {
     DECLFLAG_DEFAULT = 0x00,
-    DECLFLAG_MUTABLE = 0x01
+    DECLFLAG_MUTABLE = 0x01,
+    DECLFLAG_EXPORT  = 0x02
 };
 
 enum HLNodeType
@@ -55,11 +57,10 @@ enum HLNodeType
     HLNODE_WHILELOOP,
     HLNODE_ASSIGNMENT,
     HLNODE_VARDECLASSIGN,
-    HLNODE_AUTODECL,
     HLNODE_FUNCDECL,
     HLNODE_VARDEF,
     HLNODE_DECLLIST,
-    HLNODE_RETURN,
+    HLNODE_RETURNYIELD,
     HLNODE_CALL,
     HLNODE_MTHCALL,
     HLNODE_IDENT,
@@ -72,7 +73,8 @@ enum HLNodeType
     HLNODE_INDEX,
     HLNODE_FUNCTION,
     HLNODE_FUNCTIONHDR,
-    HLNODE_SINK
+    HLNODE_SINK,
+    HLNODE_EXPORT
 };
 
 enum HLTypeFlags
@@ -84,7 +86,7 @@ enum HLTypeFlags
 struct HLNode;
 struct HLNodeBase {};
 
-// Important: Any must be the FIRST struct members!
+// Important: Any children must be the FIRST struct members!
 
 struct HLConstantValue : HLNodeBase
 {
@@ -145,18 +147,10 @@ struct HLList : HLNodeBase
     HLNode *add(HLNode *node, GC& gc); // returns node, unless memory allocation fails
 };
 
-struct HLVarDef : HLNodeBase
+struct HLVarDef : HLNodeBase // appears only as child of HLVarDeclList
 {
     enum { EnumType = HLNODE_VARDEF, Children = 2 };
     HLNode *ident;
-    HLNode *type;
-};
-
-struct HLAutoDecl : HLNodeBase
-{
-    enum { EnumType = HLNODE_AUTODECL, Children = 3 };
-    HLNode *ident;
-    HLNode *value;
     HLNode *type;
 };
 
@@ -182,9 +176,9 @@ struct HLAssignment : HLNodeBase
     HLNode *vallist;
 };
 
-struct HLReturn : HLNodeBase
+struct HLReturnYield : HLNodeBase
 {
-    enum { EnumType = HLNODE_RETURN, Children = 1 };
+    enum { EnumType = HLNODE_RETURNYIELD, Children = 1 };
     HLNode *what;
 };
 
@@ -248,6 +242,13 @@ struct HLFunction : HLNodeBase
     HLNode *body;
 };
 
+struct HLExport : HLNodeBase
+{
+    enum { EnumType = HLNODE_EXPORT, Children = 1 };
+    HLNode *what;
+    HLNode *name; // any expr
+};
+
 // All of the node types intentionally occupy the same memory.
 // This is so that a node type can be easily mutated into another,
 // while keeping pointers intact.
@@ -266,12 +267,11 @@ struct HLNode
         HLName name;
         HLAssignment assignment;
         HLVarDeclList vardecllist;
-        HLAutoDecl autodecl;
         HLFuncDecl funcdecl;
         HLVarDef vardef;
         HLForLoop forloop;
         HLWhileLoop whileloop;
-        HLReturn retn;
+        HLReturnYield retn;
         HLBranchAlways branch;
         HLFnCall fncall;
         HLMthCall mthcall;
@@ -279,6 +279,7 @@ struct HLNode
         HLFunction func;
         HLFunctionHdr fhdr;
         HLSink sink;
+        HLExport exprt;
 
         HLNode *aslist[3];
     } u;
@@ -291,9 +292,35 @@ struct HLNode
     template<typename T> T *as()
     {
         assert(type == T::EnumType);
-        return reinterpret_cast<T*>(&this->u);
+        return reinterpret_cast<T*>(&u);
     }
 
+    template<typename T> const T *as() const
+    {
+        assert(type == T::EnumType);
+        return reinterpret_cast<const T*>(&u);
+    }
+
+    unsigned numchildren() const
+    {
+        return _nch == HLList::Children
+            ? u.list.used
+            : _nch;
+    }
+
+    HLNode **children()
+    {
+        return _nch == HLList::Children
+            ? u.list.list
+            : &u.aslist[0];
+    }
+
+    const HLNode * const *children() const
+    {
+        return _nch == HLList::Children
+            ? u.list.list
+            : &u.aslist[0];
+    }
 };
 
 
@@ -313,10 +340,9 @@ public:
     inline HLNode *whileloop()     { return allocT<HLWhileLoop>();     }
     inline HLNode *assignment()    { return allocT<HLAssignment>();    }
     inline HLNode *vardecllist()   { return allocT<HLVarDeclList>();   }
-    inline HLNode *autodecl()      { return allocT<HLAutoDecl>();      }
     inline HLNode *funcdecl()      { return allocT<HLFuncDecl>();      }
     inline HLNode *vardef()        { return allocT<HLVarDef>();        }
-    inline HLNode *retn()          { return allocT<HLReturn>();        }
+    inline HLNode *retn()          { return allocT<HLReturnYield>();   }
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
     inline HLNode *brk()           { return allocT<HLBranchAlways>();  }
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
@@ -327,19 +353,15 @@ public:
     inline HLNode *func()          { return allocT<HLFunction>();      }
     inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();   }
     inline HLNode *sink()          { return allocT<HLSink>();          }
+    inline HLNode *exprt()         { return allocT<HLExport>();        }
 
 private:
-    struct Block
-    {
-        Block *prev;
-        size_t used;
-        size_t cap;
-        // payload follows
-        HLNode *alloc();
-    };
+
+    BlockListAllocator bla;
+
     template<typename T> inline HLNode *allocT()
     {
-        HLNode *node = alloc();
+        HLNode *node = (HLNode*)bla.alloc(sizeof(HLNode));
         if(node)
         {
             node->type = HLNodeType(T::EnumType);
@@ -347,10 +369,5 @@ private:
         }
         return node;
     }
-    HLNode *alloc();
-    void clear();
-    Block *allocBlock(size_t sz);
-    GC& gc;
-    Block *b;
 };
 

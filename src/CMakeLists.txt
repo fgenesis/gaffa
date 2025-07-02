@@ -40,6 +40,10 @@ set(src
     gaobj.h
     valstore.cpp
     valstore.h
+    gaalloc.cpp
+    gaalloc.h
+    mlgraph.cpp
+    mlgraph.h
 )
 
 add_library(gaffa ${src})

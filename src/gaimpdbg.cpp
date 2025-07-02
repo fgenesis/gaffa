@@ -20,10 +20,9 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_ASSIGNMENT:     return "assign";
         case HLNODE_VARDECLASSIGN:  return "decl=";
         case HLNODE_VARDEF:         return "vardef";
-        case HLNODE_AUTODECL:       return "autodecl";
         case HLNODE_FUNCDECL:       return "funcdecl";
         case HLNODE_DECLLIST:       return "decllist";
-        case HLNODE_RETURN:         return "return";
+        case HLNODE_RETURNYIELD:    return "return/yield";
         case HLNODE_CALL:           return "call";
         case HLNODE_MTHCALL:        return "methodcall";
         case HLNODE_IDENT:          return "ident";
@@ -37,6 +36,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_FUNCTION:       return "function";
         case HLNODE_FUNCTIONHDR:    return "functionhdr";
         case HLNODE_SINK:           return "sink";
+        case HLNODE_EXPORT:         return "export";
     }
     return NULL;
 }
@@ -44,6 +44,17 @@ static const char *getLabel(HLNodeType t)
 
 #include <stdio.h>
 #include "strings.h"
+
+
+static void declflags(const HLNode *n)
+{
+    if(n->flags & DECLFLAG_MUTABLE)
+        printf(" [mutable!]");
+
+    if(n->flags & DECLFLAG_EXPORT)
+        printf(" [export]");
+}
+
 
 static void indent(size_t n)
 {
@@ -91,10 +102,23 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
         }
         return true;
     }
-    else if(n->type == HLNODE_VARDECLASSIGN)
+    else if(n->type == HLNODE_VARDECLASSIGN || n->type == HLNODE_FUNCDECL)
     {
-        if(n->flags & DECLFLAG_MUTABLE)
-            printf(" [mutable!]");
+        declflags(n);
+    }
+    else if(n->type == HLNODE_RETURNYIELD)
+    {
+        if(n->tok == Lexer::TOK_RETURN)
+            printf("return");
+        else if(n->tok == Lexer::TOK_YIELD)
+            printf("yield");
+        else if(n->tok == Lexer::TOK_EMIT)
+            printf("emit");
+        else
+        {
+            printf("yield/return/emit/???");
+            assert(false);
+        }
     }
     else
     {
@@ -113,15 +137,10 @@ static void dumprec(const StringPool& p, const HLNode *n, unsigned level)
         return;
 
     if(dump(p, n, level))
-        return;
+    {}//return;
 
-    unsigned N = n->_nch;
-    const HLNode * const *ch = &n->u.aslist[0];
-    if(N == HLList::Children)
-    {
-        ch = n->u.list.list;
-        N = n->u.list.used;
-    }
+    unsigned N = n->numchildren();
+    const HLNode * const *ch = n->children();
 
     for(unsigned i = 0; i < N; ++i)
         dumprec(p, ch[i], level+1);
@@ -134,40 +153,3 @@ void hlirDebugDump(const StringPool& p, const HLNode *root)
 
 // -----------------------------
 
-struct MLOpInfo
-{
-    const char *name;
-    tsize n;
-};
-
-const MLOpInfo mlirOpInfo(MLCmd cmd)
-{
-    switch(cmd)
-    {
-#define E(cls) case (cls::Cmd): { MLOpInfo ret = { #cls, sizeof(cls) / sizeof(u32) }; return ret; }
-        E(MLDeclSym)
-        E(MLDeclSymNS)
-        E(MLCloseSyms)
-        E(MLConditional)
-        E(MLWhile)
-        E(MLFnCall)
-        E(MLFuncDefBody)
-        E(MLFuncDefBegin)
-        E(MLFuncDefEnd)
-        E(MLNew1)
-        E(MLNew2)
-        E(MLLoadK)
-        E(MLOp)
-        E(MLFor)
-#undef E
-    }
-
-    assert(false);
-    MLOpInfo oops { NULL, 0 };
-    return oops;
-}
-
-void mlirDebugDump(const MLIRContainer& mc, const StringPool& pool)
-{
-
-}

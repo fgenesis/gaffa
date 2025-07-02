@@ -88,15 +88,23 @@
 -- declare "method". also goes into current namespace
 --func Point:isZero() { return self.x == 0.0 }
 
---int x = 0
+int x = -1
+--int x, y = 0, 1
 --var y: f() = 0
 
-int C = 0x1ff
-string S = "hello"
-string T = "world"
+--a = var x = 0 -- FIXME
 
-func add(int a, int b) -> int
-	return a + b + 15
+--export var s := +0x42 * 5
+
+--int C = 0x1ff
+--var unused = 0
+--string S = "hello"
+--string T = "world"
+
+--int M := 0
+--func add(int a, int b) -> int
+--	return a + b + C + M
+--M = 1
 
 --func nothing() {}
 
