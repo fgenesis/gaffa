@@ -11,6 +11,7 @@ typedef size_t usize;
 typedef int64_t sint;
 typedef uint64_t uint;
 typedef float real;
+typedef uint32_t realui;
 
 typedef uint32_t u32;
 typedef unsigned char byte;
@@ -155,6 +156,7 @@ union _AnyValU
     sint si;
     uint ui;
     real f;
+    realui f_as_u; // same size as real
     void *p;
     sref str;
     GCobj *obj;

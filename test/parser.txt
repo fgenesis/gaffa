@@ -1,0 +1,31 @@
+##< int=type a=var
+int b = a+1
+
+##< int=type b=var c=var
+int a = 0
+vat t = {a,b,c}
+
+##< int=type
+int a, b = 0, 0
+
+##< Point=type
+func Point:isZero() return this.x == 0
+
+##< Point=type
+func Point.Zero() { return Point(0, 0) }
+
+##< Point=callable bool=type
+var p = Point(0,0)
+bool b = p:isZero()
+
+##< Point=type bool=type
+Point p = Point(0,0)
+bool b = p:isZero()
+
+##< f=callable xx=callable
+var x = xx()
+return f(x)
+
+##< x=var
+func f(any a) return a
+return f(x)

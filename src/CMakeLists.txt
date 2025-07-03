@@ -44,6 +44,10 @@ set(src
     gaalloc.h
     mlgraph.cpp
     mlgraph.h
+    serialio.cpp
+    serialio.h
+    llir.cpp
+    llir.h
 )
 
 add_library(gaffa ${src})

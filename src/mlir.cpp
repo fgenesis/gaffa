@@ -651,6 +651,8 @@ GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool, const cha
         {
             ValU v = literalConstants.vals[i];
             printf("(%u)  type(%u)  %016llX\n", (unsigned)i, v.type.id, v.u.ui); // FIXME: pretty-print this
+            //mops.push_back(v.type);
+            //mops.push_back(v.);
         }
     }
 
@@ -665,7 +667,6 @@ GaffaError MLIRContainer::import(HLNode* root, const StringPool& pool, const cha
             printf("(%u)  %s (%s)\n", s.lineused, name, wh.c_str()); // TODO: first use in line xxx
         }
     }
-
 
     for(size_t i = 0; i < oplist.size(); ++i)
     {
