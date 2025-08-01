@@ -96,10 +96,9 @@ public:
         Range<sint> *ri;
         Range<real> *rf;*/
     } storage;
-    tsize sz; // usable size in elements
+    tsize sz; // used size in elements
     tsize cap; // capacity in elements
     const Type t; // element type
-    //const Type lowt; // low-level type, ie. what is actually stored. must be <= PRIMTYPE_ANY.
     const tsize elementSize;
 
     void *ensure(GC& gc, tsize n);

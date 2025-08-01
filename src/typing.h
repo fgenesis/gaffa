@@ -6,6 +6,8 @@
 struct GC;
 class Table;
 
+class DType;
+
 // Structs have no defined field order.
 // But for the sake of making types comparable, the order of member types is sorted by ID.
 /*
@@ -20,9 +22,8 @@ class Table;
 
 enum TDescBits
 {
-    TDESC_BITS_IS_UNION   = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 1u), // is a union type, instead of a struct
-    TDESC_BITS_IS_ALIAS   = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 2u), // only links to the actual type
-    TDESC_LENMASK = ~(TDESC_BITS_IS_UNION | TDESC_BITS_IS_ALIAS)
+    TDESC_BITS_IS_UNION   = 1 << 0, // is a union type, instead of a struct
+    TDESC_BITS_NO_NAMES   = 1 << 1
 };
 
 struct TDescAlias
@@ -31,26 +32,44 @@ struct TDescAlias
     uint counter;
 };
 
+struct _FieldDefault
+{
+    _AnyValU u; // This is NOT ValU and instead is split into two to make sure that there's
+    Type t;     // no unused padding in TDesc that could interfere with deduplication.
+    tsize idx;
+};
+
 // Type descriptor
+// This struct is variable sized and must not contain pointers (except at the start of the struct)
+// The struct memory itself is subject to deduplication (like strings), with the underlying idea that
+// multiple created types with the same members and properties are actually the same type.
+// If you want types to be explicitly different and intentionally incompatible, create an alias to an existing type.
 struct TDesc
 {
-    tsize bits; // n = bits & TDESC_LENMASK. If n > 0, it's a struct
+    DType *dtype; // This is ignored for deduplication
+
+    tsize n; // n > 0, it's a struct
     tsize allocsize; // for the GC, but also adds some entropy for hashing/deduplication
 
     // Defines what kind of type description this is.
     // If it's an alias:
     // - Holds the original type. n == 0.
     // If it's not an alias:
-    // - Always: t < PRIMTYPE_ANY
+    // - Always: primtype < PRIMTYPE_ANY
     // - if PRIMTYPE_ARRAY, n == 1 and the type that follows is the array specialization
     // - if PRIMTYPE_TABLE, n == 2 and the types that follow are key and value types
     // - if PRIMTYPE_OBJECT, n >= 0 and the types that follow are struct members
-    // - if PRIMTYPE_STRUCT, n == 2. first type is the func params as an ordered struct,
+    // - if PRIMTYPE_FUNC, n == 2. first type is the func params as an ordered struct,
     //                               second is the same for the return values
-    Type t;
+    Type primtype;
+    u32 bits;
 
     //Type members[n] follows behind the struct
-    //sref nameStrIds[] follows behind that. Doesn't exist if it's a union.
+    //sref nameStrIds[n] follows behind that. Doesn't exist if it's a union.
+
+    tsize defaultsOffset;
+    tsize numdefaults;
+
 
 
     inline const Type *types() const
@@ -71,15 +90,27 @@ struct TDesc
         return reinterpret_cast<sref*>(types() + size());
     }
 
-    FORCEINLINE tsize size() const { return bits & TDESC_LENMASK; }
+    inline _FieldDefault *defaults()
+    {
+        return reinterpret_cast<_FieldDefault*>(((char*)this) + defaultsOffset);
+    }
+
+    inline const _FieldDefault *defaults() const
+    {
+        return reinterpret_cast<const _FieldDefault*>(((const char*)this) + defaultsOffset);
+    }
+
+    FORCEINLINE tsize size() const { return n; }
 };
 
-TDesc *TDesc_New(const GC& gc, tsize numFieldsAndBits, tsize extrasize);
+TDesc *TDesc_New(const GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize);
 
-struct TypeAndName
+struct _StructMember
 {
+    tsize idx;
 	Type t;
 	sref name;
+    Val defaultval; // xnil if no default
 };
 
 class TypeRegistry
@@ -90,11 +121,7 @@ public:
     bool init();
     void dealloc();
 
-    // Make a new type from t.
-    // If normalize is true, reorder fields so that {x=int, y=int} is the same as {y=int, x=int}.
-    // normalize=true is usually what you want for dynamically created types.
-    // normalize=false
-    Type mkstruct(const Table& t, bool normalize); // makes a struct from t
+    Type mkstruct(const Table& t); // makes a struct from t
     Type mkstruct(const DArray& t);
 
     // Create an alias of an existing type that is not deduplicated and thus becomes an entirely different type
@@ -105,16 +132,12 @@ public:
 
     // TODO: function to make union
 
-    const TDesc *lookup(Type t) const; // get type descriptor directly (may be an alias)
-    const TDesc *getstruct(Type t) const; // get underlying structure type (resolves aliases)
+    const TDesc *lookup(Type t) const; // get type descriptor
 
     FORCEINLINE void mark(Type t) { if(t.id > PRIMTYPE_MAX) _tt.mark(t.id - PRIMTYPE_MAX); }
 
 private:
     Type _store(TDesc *);
-    Type _mkalias(Type t, uint counter);
-    bool _isAlias(Type t) const;
     Dedup _tt;
     Type _builtins[PRIMTYPE_MAX];
-    uint _aliasCounter;
 };

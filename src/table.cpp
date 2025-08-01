@@ -58,29 +58,6 @@ Table::Table(Type keytype, Type valtype)
 {
 }
 
-tsize Table::_addRef(GC& gc, uint v)
-{
-    uint firstfree = get(uint(0)).u.ui;
-    if(firstfree)
-    {
-        Val next = pop(firstfree);
-        set(gc, uint(0), next);
-    }
-    else
-    {
-        firstfree = vals.sz + 1;
-    }
-    set(gc, firstfree, v);
-    return firstfree;
-}
-
-uint Table::_unRef(GC& gc, tsize ref)
-{
-    assert(ref);
-    Val last = set(gc, uint(0), ref); // last = t.root; t.root = ref
-    return set(gc, ref, last).u.ui;   // prev = t[ref]; t[ref] = last; return prev
-}
-
 // never returns NULL
 TKey *Table::_getkey(ValU findkey, tsize mask) const
 {
@@ -339,4 +316,13 @@ KV Table::index(tsize idx) const
 {
     KV e = { keyat(idx), vals.dynamicLookup(idx) };
     return e;
+}
+
+void Table::loadAll(const Table& o, GC& gc)
+{
+    // TODO: this could be optimized with a bunch of memcpy if this is empty
+
+    const tsize n = o.size();
+    for(tsize i = 0; i < n; ++i)
+        set(gc, o.keyat(i), o.vals.dynamicLookup(i));
 }

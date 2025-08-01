@@ -7,12 +7,10 @@ struct ga_RT;
 
 typedef void* (*Galloc)(void *ud, void *ptr, size_t osize, size_t nsize);
 
-enum GCflagsExt
+enum GCflagsExt // bits 0..7 are reserved for the gc base type; bits 8..15 are externally visible flags
 {
-    _GCF_GC_ALLOCATED = (1 << 16), // internally set when object was actually allocated via GC
-    _GCF_COLOR_1 = (1 << 17),
-    _GCF_COLOR_2 = (1 << 18),
-    _GCF_COLOR_MASK = _GCF_COLOR_1 | _GCF_COLOR_2
+    _GCF_FINALIZER = (1 << 8), // has a finalizer
+    _GCF_PINNED = (1 << 9)     // is pinned and must not be collected
 };
 
 
@@ -32,11 +30,14 @@ typedef size_t (*GCwalk)(ga_RT& rt, GCobj *obj, size_t steps);
 
 struct GC
 {
-    GCprefix *curobj;
+    GCprefix *normallywhite; // Regular objects
+    GCprefix *grey;          // Grey list, used during mark phase
+    GCprefix *pinned;
+    GCprefix *tosplice;
+    GCprefix *dead;
     GCiter iter;
     GCwalk walkfunc;
-    unsigned curcolor;
-    unsigned gcstep;
+    unsigned phase;
     Galloc alloc;
     void *gcud;
     struct

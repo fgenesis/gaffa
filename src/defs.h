@@ -50,9 +50,11 @@ struct Type
 enum TypeBits
 {
     TB_OPTION  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 1u), // is option type
-    TB_TYPEMASK = ~(TB_OPTION)
+    TB_VARARG  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 2u), // is option type
+    TB_TYPEMASK = ~(TB_OPTION | TB_VARARG)
 };
 
+// TODO: userdata; types are actually objects
 enum PrimType
 {
     // T/F/? - truthyness of value (always true, always false, depends)
@@ -71,17 +73,19 @@ enum PrimType
     PRIMTYPE_STRING, // T  R     g   //
     PRIMTYPE_TYPE,   // T  R     g   //
     PRIMTYPE_FUNC,   // T     S  G   //
-    PRIMTYPE_VARARG, // T     S      // only for the type system, can't make an object out of this
     PRIMTYPE_TABLE,  // T  o  S  G   //
     PRIMTYPE_ARRAY,  // T  o  S  G   //
     PRIMTYPE_OBJECT, // T  o     G   //
 
     PRIMTYPE_ANY,    // can hold any value. must be last in the enum.
     // These are the engine-level types. Runtime-created types are any IDs after this.
-    PRIMTYPE_MAX
+    PRIMTYPE_MAX,
+
+    _PRIMTYPE_FIRST_OBJ = PRIMTYPE_FUNC
 };
 
 struct _Nil {};
+struct _Xnil {}; // the "invalid nil", used as sentinel, marker, etc
 
 struct MemBlock
 {
@@ -111,44 +115,23 @@ struct _Str
     sref ref;
 };
 
-enum GCflags
-{
-    GCF_NOT_INTERESTING = 0,
+struct DType;
 
-    GCF_RECURSIVE = 0x0100, // object has children that must be traversed
-    GCF_WEAK = 0x0200,
-    CFG_MOD_MARK = 0x0400, // set whenever a container object is modified
-};
 
 // This is the base of every GC collectible object.
 // Most likely (but not necessarily!) preceded in memory by a GCprefix, see gc.h
 struct GCobj
 {
-    inline GCobj() : gcTypeAndFlags(0), gcsize(0) {}
-    // Beware: These are overlaid with GCprefix members!
+    // Beware: These are overlaid with GCprefix members and intentionally NOT initialized in a ctor!
+    // The GC initializes the overlay part already and it MUST NOT be touched afterwards.
 
     // HMM: This could be merged. lower u8 is primtype, next 8 bits regular gc flags,
     // upper 16 bits reserved for internal gc things.
     // BUT: This needs to be pointer-size aligned, so we'd waste something on 64bit arch
     u32 gcTypeAndFlags;
     u32 gcsize;
+    DType *dtype;
 };
-
-template<typename T>
-struct Range
-{
-    T begin, end, step;
-};
-
-// HMM: consider making ValU::u register sized.
-// Move Range into a new IterSlot class that is bigger, for iteration.
-// VM gets a stack of IterSlot; and each iteration can fill multiple slots, one per iterator
-/*
-- array (idx, array ptr) <- max idx via array ptr
-- table (idx, table ptr) <- ditto
-- ranges (begin, end, step)
-- user (a, b, function)
-*/
 
 union _AnyValU
 {
@@ -160,10 +143,7 @@ union _AnyValU
     void *p;
     sref str;
     GCobj *obj;
-    /*Range<uint> urange;
-    Range<sint> srange;
-    Range<real> frange;*/
-    Type t;
+    Type t; // TODO: make new TYPEID field, but for runtime types use Dtype*
     uintptr_t opaque; // this must be large enough to contain all bits of the union
 };
 
@@ -185,6 +165,7 @@ struct Val : public ValU
     inline Val(const ValU& v)           { this->u = v.u; this->type = v.type; }
     inline Val()                        { _init(PRIMTYPE_NIL); }
     inline Val(_Nil)                    { _init(PRIMTYPE_NIL); }
+    inline Val(_Xnil)                   { _init(PRIMTYPE_NIL);    u.opaque = 1; }
     inline Val(bool b)                  { _init(PRIMTYPE_BOOL);   u.ui = b; }
     inline Val(unsigned int i)          { _init(PRIMTYPE_UINT);   u.ui = i; }
     inline Val(int i)                   { _init(PRIMTYPE_SINT);   u.si = i; }
@@ -194,9 +175,6 @@ struct Val : public ValU
     inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
     inline Val(_Str s)                  { _init(PRIMTYPE_STRING); u.str = s.ref; }
     inline Val(Type t)                  { _init(PRIMTYPE_TYPE);   u.t = t; }
-    /*inline Val(const Range<uint>& r)    { _init(PRIMTYPE_URANGE); u.urange = r; }
-    inline Val(const Range<sint>& r)    { _init(PRIMTYPE_SRANGE); u.srange = r; }
-    inline Val(const Range<real>& r)    { _init(PRIMTYPE_FRANGE); u.frange = r; }*/
 };
 
 enum UnOpType
@@ -208,16 +186,6 @@ enum UnOpType
     UOP_BIN_COMPL,
     UOP_TRY,
     UOP_UNWRAP,
-    // 7
-    // 8
-    // 9
-    // 10
-    // 11
-    // 12
-    // 13
-    // 14
-    // 15
-    UOP_MAX = 16
 };
 
 enum BinOpType
@@ -250,11 +218,6 @@ enum BinOpType
     // 25 wrap-sub
     // 26 wrap-mul
     // 27 wrap-shl
-    // 28
-    // 29
-    // 30
-    // 31
-    OP_MAX = 32
 };
 
 BinOpType BinOp_TokenToOp(unsigned tok);
@@ -267,7 +230,7 @@ size_t GetPrimTypeStorageSize(unsigned t);
 inline static bool isTrueish(const ValU v)
 {
     static_assert(PRIMTYPE_BOOL == 2, "ey");
-    return v.type.id > PRIMTYPE_BOOL && v.u.ui;
+    return v.type.id > PRIMTYPE_BOOL || (v.type.id == PRIMTYPE_BOOL && v.u.ui);
 }
 
 // Small-size memcpy() that's wired specifially to copy any values a ValU may contain.

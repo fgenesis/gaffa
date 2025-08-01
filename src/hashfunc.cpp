@@ -32,8 +32,9 @@ uhash memhash(uhash h, const void *buf, size_t size)
 uhash hashvalue(uhash h, ValU v)
 {
     h ^= rotl(0x811c9dc5, v.type.id);
-	h += v.u.opaque;
+    h += v.u.opaque;
+    h ^= v.u.opaque >> 6u; // Improve binning for pointer values (which usually have the lower 2-3 bits at zero due to alignment)
     if(sizeof(v.u.opaque) > sizeof(uhash))
-        h += h >> 29u;
-	return (uhash)h;
+        h += v.u.opaque >> 29u;
+    return h;
 }

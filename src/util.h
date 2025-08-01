@@ -146,3 +146,8 @@ static inline T roundUpToPowerOfTwo(T v)
     return v;
 }
 
+template<typename T>
+static inline T alignTo(T val, T aln)
+{
+    return ((val + (aln - 1)) / aln) * aln;
+}

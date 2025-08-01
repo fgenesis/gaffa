@@ -47,14 +47,16 @@ public:
     KV index(tsize idx) const;
     Val keyat(tsize idx) const;
 
-    const DArray& values() { return vals; }
+    const DArray& values() const { return vals; }
+    DArray& values() { return vals; }
     tsize size() const { return vals.sz; }
 
+    void loadAll(const Table& o, GC& gc);
 
-protected:
     Table(Type keytype, Type valtype);
-    tsize _addRef(GC& gc, uint v);
-    uint _unRef(GC& gc, tsize ref);
+
+    // Accessible because the GC needs this
+    TKey *keys;
 
 private:
 
@@ -64,40 +66,12 @@ private:
     void _rehash(tsize oldsize, tsize newmask);
 
     DArray vals;
-    TKey *keys;
+
+public:
     const Type keytype;
+private:
     tsize idxmask; // capacity = idxmask + 1
     tsize *backrefs;
 
     Table(const Table&); // forbidden
 };
-
-/*
-template<typename T>
-class RefTable : private Table
-{
-public:
-    RefTable() : Table(PRIMTYPE_UINT, PRIMTYPE_UINT) {}
-    tsize addref(GC& gc, const T& x)
-    {
-        return arr.push_back(gc, x) ? _addRef(gc, arr.size()) : 0;
-    }
-    T *getref(tsize ref)
-    {
-        if(!ref)
-            return NULL;
-        uint idx = get(uint(ref - 1)).u.ui; // 0 if nil
-        return idx ? &arr[idx] : NULL;
-    }
-    T *unref(GC& gc, tsize ref) // returns pointer that may be overwritten at the next non-const call
-    {
-        if(!ref)
-            return NULL;
-        uint idx = _unRef(ref).u.ui; // 0 if nil
-        return idx ? &arr[idx] : NULL;
-    }
-
-private:
-    PodArray<T> arr;
-};
-*/

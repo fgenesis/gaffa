@@ -77,7 +77,6 @@ static const unsigned char TypeElementSizes[] =
     /* PRIMTYPE_STRING */ sizeof(sref),
     /* PRIMTYPE_TYPE   */ sizeof(Type),
     /* PRIMTYPE_FUNC   */ sizeof(void*), // TODO
-    /* PRIMTYPE_VARARG */ sizeof(void*), // TODO
     /* PRIMTYPE_TABLE  */ sizeof(GCobj*), // table/array/object are always dynamically allocated
     /* PRIMTYPE_ARRAY  */ sizeof(GCobj*),
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),

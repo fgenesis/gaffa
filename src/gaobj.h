@@ -4,17 +4,40 @@
 #include "table.h"
 #include "typing.h"
 
-// generated from TDesc
-class DStructDef : public GCobj
-{
-    Type t;
-    Table name2idx;
-    PodArray<ValU> fields; // type is type of field, value is default value for field
-};
+/* Idea:
+Use a butterfly construction:
+<obj header stuff>
+--- obj ptr points here ---
+<any number of bytes follows>
+
+That way write<T> to obj memory can be the same for all objs -> obj+offs (userdata or not)
+Only need to ensure that we always know if a pointer is headered or not (user pointers won't be)
+*/
+
+
+class DType;
 
 class DObj : public GCobj
 {
-    DStructDef *def;
-    PodArray<ValU> fields;
+    DObj(DType *dty);
+public:
+    static DObj *GCNew(GC& gc, DType *dty);
+
+    Table *dfields; // Extra fields, usually NULL
+    usize nmembers;
+
+    inline       Val *memberArray()        { return reinterpret_cast<      Val*>(this + 1); }
+    inline const Val *memberArray() const  { return reinterpret_cast<const Val*>(this + 1); }
+
+    Val *member(const Val& key);
+
+    // additional extra storage space may follow
 };
 
+// generated from TDesc
+class DType : public DObj
+{
+public:
+    TDesc *tdesc;
+    tsize numfields() const;
+};

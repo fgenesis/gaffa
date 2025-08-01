@@ -2,36 +2,43 @@
 #include "table.h"
 #include "array.h"
 #include "gc.h"
-#include <algorithm>
+
+#include <string.h>
 
 static const Type NilType = {PRIMTYPE_NIL};
+static const Val XNil = _Xnil();
 
-size_t TDesc_AllocSize(tsize numFieldsAndBits)
-{
-    size_t n = numFieldsAndBits & TDESC_LENMASK;
-    return sizeof(TDesc) + n * sizeof(Type) + n * sizeof(sref);
-}
 
-TDesc *TDesc_New(GC& gc, tsize numFieldsAndBits, tsize extrasize)
+TDesc *TDesc_New(GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize)
 {
-    size_t sz = TDesc_AllocSize(numFieldsAndBits) + extrasize;
+    size_t minsz = sizeof(TDesc)
+        + n * sizeof(Type)
+        + n * sizeof(sref);
+    size_t defaultsOffset = numdefaults
+        ? alignTo(minsz, sizeof(Val::u.opaque)) // FIXME: this should be fine but find a better way to figure out alignment
+        : 0;
+    size_t dsz =  numdefaults * sizeof(_FieldDefault);
+
+    size_t sz = defaultsOffset + dsz + extrasize;
     TDesc *td = (TDesc*)gc_alloc_unmanaged(gc, NULL, 0, sz);
     if(td)
     {
-        td->bits = numFieldsAndBits;
-        td->allocsize = sz;
+        td->n = n;
+        td->bits = bits;
+        td->allocsize = (tsize)sz;
+        td->defaultsOffset = (tsize)defaultsOffset;
+        td->numdefaults = numdefaults;
     }
     return td;
 }
 
 void TDesc_Delete(GC& gc, TDesc *td)
 {
-    size_t sz = TDesc_AllocSize(td->bits);
-    gc_alloc_unmanaged(gc, td, sz, 0);
+    gc_alloc_unmanaged(gc, td, td->allocsize, 0);
 }
 
 TypeRegistry::TypeRegistry(GC& gc)
-    : _tt(gc, false)
+    : _tt(gc, false, 0)
 {
 }
 
@@ -53,7 +60,7 @@ bool TypeRegistry::init()
 
     _builtins[PRIMTYPE_ARRAY]  = mksub(PRIMTYPE_ARRAY, anysub, 1); // array = Array(any)
     _builtins[PRIMTYPE_TABLE]  = mksub(PRIMTYPE_TABLE, anysub, 2); // table = Table(any, any)
-    _builtins[PRIMTYPE_VARARG] = mksub(PRIMTYPE_VARARG, anysub, 1); // ... = VarArg(any)
+    //_builtins[PRIMTYPE_VARARG] = mksub(PRIMTYPE_VARARG, anysub, 1); // ... = VarArg(any)
     _builtins[PRIMTYPE_ERROR]  = mksub(PRIMTYPE_ERROR, &str, 1);
 
     return true;
@@ -64,37 +71,52 @@ void TypeRegistry::dealloc()
     _tt.dealloc();
 }
 
-static bool _sortfields(const TypeAndName& a, const TypeAndName& b)
+Type TypeRegistry::mkstruct(const Table& t)
 {
-    return a.t.id < b.t.id;
-}
-
-Type TypeRegistry::mkstruct(const Table& t, bool normalize)
-{
-    PodArray<TypeAndName> tn;
+    PodArray<_StructMember> tn;
     const tsize N = t.size();
     if(!tn.resize(_tt.gc, N))
         return NilType;
 
+    tsize numdefaults = 0;
     for(tsize i = 0; i < N; ++i)
     {
         const KV e = t.index(i);
         if(e.k.type.id != PRIMTYPE_STRING)
             return NilType;
-        if(e.v.type.id != PRIMTYPE_TYPE) // TODO: support initializers
-            return NilType;
+        if(e.v.type.id == PRIMTYPE_TYPE)
+        {
+            tn[i].defaultval = XNil;
+            tn[i].t = e.v.u.t;
+        }
+        else
+        {
+            ++numdefaults;
+            tn[i].defaultval = e.v;
+            tn[i].t = e.v.type;
+        }
         tn[i].name = e.k.u.str;
-        tn[i].t = e.v.u.t;
+        tn[i].idx = i;
     }
-    if(normalize)
-        std::sort(tn.data(), tn.data() + N, _sortfields);
-    tsize bits = N;
 
-    TDesc *td = TDesc_New(_tt.gc, bits, 0);
+    u32 bits = 0; // TODO: make union? other bits?
+
+    TDesc *td = TDesc_New(_tt.gc, N, bits, numdefaults, 0);
+    _FieldDefault *fd = td->defaults();
     for(size_t i = 0; i < tn.size(); ++i)
     {
         td->names()[i] = tn[i].name;
         td->types()[i] = tn[i].t;
+
+        const Val& d = tn[i].defaultval;
+        if(d == XNil)
+            continue;
+
+        // Record fields with defaults and their index so setting them is a simple loop on object creation
+        fd->idx = i;
+        fd->t = d.type;
+        fd->u = d.u;
+        ++fd;
     }
     tn.dealloc(_tt.gc);
 
@@ -104,7 +126,7 @@ Type TypeRegistry::mkstruct(const Table& t, bool normalize)
 Type TypeRegistry::mkstruct(const DArray& t)
 {
     const tsize N = t.size();
-    TDesc *td = TDesc_New(_tt.gc, N, 0);
+    TDesc *td = TDesc_New(_tt.gc, N, TDESC_BITS_NO_NAMES, 0, 0);
     if(t.t.id == PRIMTYPE_TYPE)
         for(size_t i = 0; i < N; ++i)
         {
@@ -127,12 +149,6 @@ Type TypeRegistry::mkstruct(const DArray& t)
     return _store(td);
 }
 
-Type TypeRegistry::mkalias(Type t)
-{
-    // FIXME: the counter works, but is not safe long term
-    return _mkalias(t, ++_aliasCounter);
-}
-
 const TDesc *TypeRegistry::lookup(Type t) const
 {
     sref idx = t.id < PRIMTYPE_MAX ? _builtins[t.id].id : t.id - PRIMTYPE_MAX;
@@ -140,25 +156,12 @@ const TDesc *TypeRegistry::lookup(Type t) const
     return (TDesc*)mb.p;
 }
 
-const TDesc* TypeRegistry::getstruct(Type t) const
-{
-    for(;;)
-    {
-        const TDesc *td = lookup(t);
-        if(!td)
-            return NULL;
-        if(!(td->bits & TDESC_BITS_IS_ALIAS))
-            return td;
-        t = td->t;
-    }
-}
-
 Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
 {
     assert(prim < PRIMTYPE_ANY);
 
-    TDesc *a = TDesc_New(_tt.gc, n, 0);
-    a->t.id = prim;;
+    TDesc *a = TDesc_New(_tt.gc, n, TDESC_BITS_NO_NAMES, 0, 0);
+    a->primtype.id = prim;
     for(size_t i = 0; i < n; ++i)
         a->types()[i] = sub[i];
 
@@ -171,32 +174,9 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
 
 Type TypeRegistry::_store(TDesc *td)
 {
-    size_t sz = TDesc_AllocSize(td->bits);
+    size_t sz = td->allocsize;
     Type ret = { _tt.putTakeOver(td, sz, sz) };
     assert(ret.id); // TODO: handle OOM
     ret.id += PRIMTYPE_MAX;
     return ret;
-}
-
-Type TypeRegistry::_mkalias(Type t, uint counter)
-{
-    if(t.id == PRIMTYPE_NIL)
-        return NilType;
-
-    // Can't make an alias to an alias type
-    assert(!_isAlias(t));
-
-    TDesc *a = TDesc_New(_tt.gc, TDESC_BITS_IS_ALIAS, sizeof(_aliasCounter));
-    *((uint*)a->types()) = counter;
-    a->t = t;
-    Type ret = { _tt.putCopy(&a, a->allocsize) };
-    assert(ret.id); // TODO: handle OOM
-    ret.id += PRIMTYPE_MAX;
-    return ret;
-}
-
-bool TypeRegistry::_isAlias(Type t) const
-{
-    const TDesc *td = lookup(t);
-    return td && (td->bits & TDESC_BITS_IS_ALIAS);
 }

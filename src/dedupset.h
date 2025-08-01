@@ -17,7 +17,7 @@ enum
 class Dedup
 {
 public:
-    Dedup(GC& gc, bool extrabyte);
+    Dedup(GC& gc, bool extrabyte, tsize skipAtStart);
     ~Dedup();
     bool init();
     void dealloc();
@@ -39,17 +39,18 @@ public:
 
     struct HBlock
     {
-        MemBlock mb;          // ^
-        uhash h;              // |-- All of this (sizeof(HBlock)-1) is used to store a short block
-        unsigned char pad[2]; // v
-        unsigned char extraBytesToFree;
+        MemBlock mb;                     // ^
+        uhash h;                         // |-- All of this (sizeof(HBlock)-1) is used to store a short block
+        unsigned char pad[2];            // |
+        unsigned char extraBytesToFree;  // v
         unsigned char x;      // extra bits, 0 if ready to be kicked during _compact()
     };
 
     enum
     {
         MAX_SHORT_LEN = sizeof(HBlock) - 1,
-        SHRT_SIZE_MASK = 0x3f,
+        SHRT_SIZE_MASK = 0x1f,
+        _UNUSED_BIT = 0x20,
         LONG_BIT = 0x40,
         MARK_BIT = 0x80,
     };
@@ -77,6 +78,7 @@ private:
     PodArray<HBlock> arr; // arr[0], arr[1] are sentinels and store an empty and a zero-sized MemBlock, respectively
 
     const tsize _extrabyte;
+    const tsize _skipAtStart; // When deduplicating, skip this many bytes at the start (eg. to allow a pointer to mismatch but still consider things equal)
     uhash _hashseed;
     tsize _nextfree; // no unused freelist element if this is < 2 (it's either 0 or >= 2)
     // for the GC
