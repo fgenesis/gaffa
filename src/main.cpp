@@ -144,8 +144,13 @@ void testtype()
     st.dealloc();
 }
 
+extern void vmtest();
+
 int main(int argc, char **argv)
 {
+    vmtest();
+    return 0;
+
     //testdedup();
     //testref();
     //testtable();
