@@ -715,6 +715,7 @@ void vmtest()
     stk[11].v = Val(1u);
     vm.cur.ins = &tc.init0;
     vm.cur.sp = &stk[0];
+    vm.cur.sbase = &stk[0];
 
     runloop(&vm);
 

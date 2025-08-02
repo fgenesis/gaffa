@@ -49,7 +49,7 @@ MLNode* MLNode::addChild(MLNode* const child, GC& gc)
             if(!u.mid.ch.some[i])
             {
                 u.mid.ch.some[i] = child;
-                return;
+                return child;
             }
         // No more space in fixed array, need to allocate
         cap = 0;

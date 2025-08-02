@@ -75,16 +75,18 @@ void testdedup()
     GC gc = {0};
     gc.alloc = myalloc;
 
-    Dedup dd(gc, 0);
+    Dedup dd(gc, 0, 0);
     dd.init();
 
-    sref a = dd.putCopy("1234", 5);
-    sref b = dd.putCopy("abc", 4);
-    sref a2 = dd.putCopy("1234", 5);
-    assert(a == a2);
+    {
+        sref a = dd.putCopy("1234", 5);
+        sref b = dd.putCopy("abc", 4);
+        sref a2 = dd.putCopy("1234", 5);
+        assert(a == a2);
 
-    puts(dd.get(a).p);
-    puts(dd.get(b).p);
+        puts(dd.get(a).p);
+        puts(dd.get(b).p);
+    }
 
     PodArray<sref> aa;
     /*for(unsigned i = 0; i < 99999; ++i)
@@ -104,6 +106,20 @@ void testdedup()
     dd.sweepfinish(true);
 
     aa.dealloc(gc);
+
+    {
+        Dedup d4(gc, 0, 4);
+        d4.init();
+        sref a = d4.putCopy("1234abcd", 8);
+        sref b = d4.putCopy("2345abcd", 8);
+        sref c = d4.putCopy("----abcd", 8);
+        sref d = d4.putCopy("----Abcd", 8);
+        assert(a == b);
+        assert(a == c);
+        assert(a != d);
+        d4.sweepstep(0);
+        d4.sweepfinish(true);
+    }
 }
 
 void testtype()
@@ -111,7 +127,7 @@ void testtype()
     GC gc = {0};
     gc.alloc = myalloc;
 
-    Dedup st(gc, 1);
+    Dedup st(gc, 1, 0);
     st.init();
 
     TypeRegistry tr(gc);
@@ -132,8 +148,8 @@ void testtype()
         assert(ye.v.type.id == PRIMTYPE_TYPE);
     }
 
-    Type fvec2 = tr.mkstruct(*tvec, true);
-    const TDesc *td = tr.getstruct(fvec2);
+    Type fvec2 = tr.mkstruct(*tvec);
+    const TDesc *td = tr.lookup(fvec2);
     printf("Struct of %u:\n", (unsigned)td->size());
     for(tsize i = 0; i < td->size(); ++i)
     {
@@ -148,6 +164,7 @@ extern void vmtest();
 
 int main(int argc, char **argv)
 {
+    testdedup();
     vmtest();
     return 0;
 

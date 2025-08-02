@@ -71,7 +71,6 @@ struct TDesc
     tsize numdefaults;
 
 
-
     inline const Type *types() const
     {
         return reinterpret_cast<const Type*>(this + 1);
@@ -123,9 +122,6 @@ public:
 
     Type mkstruct(const Table& t); // makes a struct from t
     Type mkstruct(const DArray& t);
-
-    // Create an alias of an existing type that is not deduplicated and thus becomes an entirely different type
-    Type mkalias(Type t);
 
     // Create a subtype of an existing internal type (eg. Table<string, Any>)
     Type mksub(PrimType prim, const Type *sub, size_t n);

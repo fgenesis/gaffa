@@ -6,7 +6,7 @@ static const Str None = {0, 0};
 
 
 StringPool::StringPool(GC& gc)
-    : Dedup(gc, true)
+    : Dedup(gc, true, 0)
 {
 }
 

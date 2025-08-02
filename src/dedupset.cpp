@@ -148,6 +148,10 @@ MemBlock Dedup::get(sref ref) const
 
 sref Dedup::find(const void* mem, size_t bytes) const
 {
+    assert(_skipAtStart <= bytes);
+    mem = (const char*)mem + _skipAtStart;
+    bytes -= _skipAtStart;
+
     if(!bytes)
         return !!mem;
 
@@ -187,7 +191,11 @@ sref Dedup::find(const void* mem, size_t bytes) const
 
 Dedup::HKey *Dedup::_prepkey(const void* mem, size_t bytes)
 {
-    assert(bytes);
+    const tsize skip = _skipAtStart;
+    assert(skip < bytes);
+    mem = (const char*)mem + skip;
+    bytes -= skip;
+
     HKey *k = keys;
     if(!k)
         k = _kresize(INITIAL_ELEMS);
@@ -207,24 +215,29 @@ Dedup::HKey *Dedup::_prepkey(const void* mem, size_t bytes)
         {
             const HBlock& b = arr[k[i].ref];
             unsigned char x = b.x;
+            const char *m;
+            tsize n;
             if(x & LONG_BIT)
             {
                 assert(b.h == h);
-                if(b.mb.n == bytes && !memcmp(mem, b.mb.p, bytes))
-                    return &k[i];
+                n = b.mb.n;
+                m = b.mb.p;
             }
             else // the size check naturally fails when x==0 (ie. unused block) since we never end up here with bytes==0
             {
-                tsize n = x & SHRT_SIZE_MASK;
-                if(n == bytes && !memcmp(mem, &b, n))
-                    return &k[i];
+                n = x & SHRT_SIZE_MASK;
+                m = (const char*)&b;
             }
+
+            if(n == bytes + skip && !memcmp(mem, m + skip, n - skip))
+                goto done;
         }
         ++i;
     }
 
     // Found empty slot.
     k[i].h = h;
+done:
     return &k[i];
 }
 

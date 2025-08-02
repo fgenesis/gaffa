@@ -23,6 +23,7 @@ TDesc *TDesc_New(GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize)
     TDesc *td = (TDesc*)gc_alloc_unmanaged(gc, NULL, 0, sz);
     if(td)
     {
+        td->dtype = NULL;
         td->n = n;
         td->bits = bits;
         td->allocsize = (tsize)sz;
@@ -37,8 +38,13 @@ void TDesc_Delete(GC& gc, TDesc *td)
     gc_alloc_unmanaged(gc, td, td->allocsize, 0);
 }
 
+enum
+{
+    PrefixBytes = sizeof(((TDesc*)NULL)->dtype)
+};
+
 TypeRegistry::TypeRegistry(GC& gc)
-    : _tt(gc, false, 0)
+    : _tt(gc, false, PrefixBytes)
 {
 }
 
