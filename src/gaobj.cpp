@@ -2,7 +2,7 @@
 #include "gc.h"
 
 DObj::DObj(DType * dty)
-    : dfields(NULL), nmembers(dty->tdesc->size())
+    : /*dfields(NULL),*/ nmembers(dty->numfields())
 {
     this->dtype = dty;
     const _FieldDefault *def = dty->tdesc->defaults();
@@ -23,6 +23,14 @@ DObj* DObj::GCNew(GC& gc, DType* dty)
 
 Val* DObj::member(const Val& key)
 {
-    assert(false);
-    return NULL; // TODO
+    Val idxv = dtype->fieldIndices.get(key);
+    assert(idxv.type.id == PRIMTYPE_UINT);
+    return memberArray() + idxv.u.ui;
+}
+
+tsize DObj::memberOffset(const Val* pmember) const
+{
+    const Val *beg = memberArray();
+    assert(beg <= pmember && pmember < beg + nmembers);
+    return (const char*)pmember - (const char*)this;
 }

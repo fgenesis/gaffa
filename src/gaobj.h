@@ -23,15 +23,21 @@ class DObj : public GCobj
 public:
     static DObj *GCNew(GC& gc, DType *dty);
 
-    Table *dfields; // Extra fields, usually NULL
+    //Table *dfields; // Extra fields, usually NULL
     usize nmembers;
 
     inline       Val *memberArray()        { return reinterpret_cast<      Val*>(this + 1); }
     inline const Val *memberArray() const  { return reinterpret_cast<const Val*>(this + 1); }
 
     Val *member(const Val& key);
+    tsize memberOffset(const Val *pmember) const; // Returns offset for memberAtOffset()
 
-    // additional extra storage space may follow
+    FORCEINLINE Val *memberAtOffset(tsize offs)
+    {
+        return (Val*)((char*)this + offs);
+    }
+
+    // additional extra storage space for members follows
 };
 
 // generated from TDesc
@@ -39,5 +45,6 @@ class DType : public DObj
 {
 public:
     TDesc *tdesc;
-    tsize numfields() const;
+    Table fieldIndices;
+    tsize numfields() const { return tdesc->size(); }
 };
