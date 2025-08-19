@@ -5,34 +5,177 @@
 
 #include <vector>
 
-
-struct StackSlot
+enum
 {
-    ValU v;
+    MINSTACK = 16
 };
+
 
 struct Inst;
 
 struct VMCallFrame
 {
-    StackSlot *sp;
-    StackSlot *sbase;
+    Val *sp;
+    Val *sbase;
     const Inst *ins;
+};
+
+class Stack : public PodArray<Val>
+{
+public:
+    GC& gc;
+
+    inline Val *root() { return this->data(); }
+
+    Stack(GC& gc) : gc(gc) {}
+    ~Stack() { this->dealloc(gc); }
+
+    inline Val *push(Val v)
+    {
+        return this->push_back(gc, v);
+    }
+
+    inline Val *alloc(size_t n)
+    {
+        return this->alloc_n(gc, n);
+    }
+
+    inline Val *allocz(size_t n)
+    {
+        Val *a = alloc(n);
+        if(a)
+            memset(a, 0, sizeof(Val) * n);
+        return a;
+    }
 };
 
 struct VM
 {
+    VM(GC& gc) : stk(gc), cur({}) {}
+    Stack stk;
     VMCallFrame cur;
     int err;
-    int yield;
     std::vector<VMCallFrame> callstack;
     std::vector<VmIter> iterstack;
 };
 
-// Protocol:
-// Write return values to ret[0..n), then return n
-// On error, write error to ret[0], then return -1
-typedef int (*CFunc)(VM *vm, Val *ret, const Val *args, size_t nargs);
+// This is exposed to the C API.
+// The idea is that this removes the need for manual
+// index tracking, making each designated stack loction
+// easily accessible via stackref[0..n)
+struct StackCRef
+{
+    Stack * const stk;
+    const size_t offs;
+
+    FORCEINLINE StackCRef(Stack *stk, Val *where)
+        : stk(stk), offs(where - stk->data())
+    {
+    }
+
+    FORCEINLINE Val *operator[](size_t idx)
+    {
+        return &(*stk)[offs + idx];
+    }
+
+    FORCEINLINE const Val *operator[](size_t idx) const
+    {
+        return &(*stk)[offs + idx];
+    }
+};
+
+struct StackRef : public StackCRef
+{
+    FORCEINLINE StackRef(Stack *stk, Val *where) : StackCRef(stk, where)
+    {
+    }
+
+    FORCEINLINE Val *push(Val v)
+    {
+        return stk->push(v);
+    }
+
+    FORCEINLINE Val *alloc(size_t n)
+    {
+        return stk->alloc(n);
+    }
+
+    FORCEINLINE Val pop()
+    {
+        return stk->pop_back();
+    }
+
+    FORCEINLINE void popn(size_t n)
+    {
+        return stk->pop_n(n);
+    }
+};
+
+// C leaf function; fastest to call but has some restrictions:
+// - Non-variadic, max(#parameters, #retvals) must be <= MINSTACK
+// - Read args from inout[0..], write return values to inout[0..]
+// - Must NOT call back into the VM (no call frame is pushed)
+// - Can not reallocate the VM stack
+// - You need to know the number of parameters and return values,
+//   and the function must be registered correctly so the VM
+//   and type system know this too.
+// - Stack space is limited; up to MINSTACK usable slots total
+// - Can't throw errors (but can return error values)
+typedef void (*LeafFunc)(VM *vm, Val inout[MINSTACK]);
+
+// Full-fledged C function; slower to call
+// - May or may not be variadic (params, return values, or both)
+// - Calling back into the VM is allowed
+// - Can grow the stack
+// ---- C function call protocol: ----
+// - Parameters are in args[0..nargs)
+// - If normal return: Write return values to ret[0..n), then return n
+// - If variadic return: Write regular return values to ret[0..n),
+//   push extra variadic ones onto the stack, then return (n + #variadic)
+// - To throw an error, write error to ret[0], then return -1
+typedef int (*CFunc)(VM *vm, size_t nargs, StackCRef *ret,
+    const StackCRef *args, StackRef *stack);
+
+
+
+struct FuncInfo
+{
+    u32 nargs; // Minimal number. If variadic, there may be more.
+    u32 nrets;
+    enum Flags
+    {
+        VarArgs = 1 << 0,
+        VarRets = 1 << 1,
+    };
+    u32 flags;
+};
+
+struct DebugInfo
+{
+    u32 linestart;
+    u32 lineend;
+    sref name;
+     // TODO
+};
+
+struct DFunc
+{
+    FuncInfo info;
+    // TODO: (DType: Func(Args, Ret))
+    union
+    {
+        CFunc native;
+        struct
+        {
+            void *vmcode; // TODO
+            DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
+        }
+        gfunc;
+    } u;
+};
+
+
+#define RETVAL(idx) (*(vals+(retidx)))
 
 
 struct Imm_None
@@ -58,12 +201,6 @@ struct Imm_4xu32
     u32 a, b, c, d;
 };
 
-struct Imm_Call
-{
-    Inst *ins;
-    unsigned nargs;
-};
-
 struct Imm_DCall
 {
     Inst *ins;
@@ -71,6 +208,18 @@ struct Imm_DCall
     unsigned localidx;
 };
 
+struct Imm_LeafCall
+{
+    LeafFunc f;
+};
+
+struct Imm_CCall
+{
+    CFunc f;
+    byte nargs;
+    byte nret;
+    byte flags;
+};
 
 static u32 slotsForU32(u32 n)
 {
@@ -104,7 +253,7 @@ template<typename T> static FORCEINLINE const T *_imm(const Inst *ins)
 // Invariant: Each Inst array ends with an entry that has func=NULL,
 // and gfunc holds the object that contains this instruction array.
 
-#define VMPARAMS const Inst *ins, VM *vm, StackSlot *sbase, StackSlot *sp
+#define VMPARAMS const Inst *ins, VM * const vm, Val *sbase, Val *sp
 #define VMARGS ins, vm, sbase, sp
 
 // Inst and OpFunc are kinda the same, but a C function typedef can't use
@@ -140,18 +289,18 @@ static FORCEINLINE VMFUNC_DEF(nextop)
 
 #define CHAIN(name) TAIL_RETURN(op_ ## name(VMARGS))
 #define NEXT() do { ins += immslots(imm); CHAIN(nextop); } while(0)
+
 #define TAILFWD(nx) do { ins = nx; TAIL_RETURN(ins->f(VMARGS)); } while(0)
 #define FAIL(e) do { vm->err = (e); CHAIN(rer); } while(0)
 #define FORWARD(a) do { imm += (a); CHAIN(nextop); } while(0)
 
 #define LOCAL(i) (&sbase[i])
 
-
 // Call stack rollback helper. Set ins, then CHAIN(rer) to return all the way and resume at ins.
 static VMFUNC_DEF(rer)
 {
+    // sbase is only changed by function call/return
     vm->cur.sp = sp;
-    vm->cur.sbase = sbase;
     return ins;
 }
 
@@ -159,8 +308,9 @@ static VMFUNC_DEF(rer)
 
 VMFUNC(yield)
 {
-    vm->yield = 1;
-    CHAIN(rer);
+    vm->cur.sp = sp;
+    vm->cur.ins = ins + 1; // store for resuming to next instruction
+    return NULL;
 }
 
 VMFUNC_IMM(jf, Imm_u32)
@@ -175,42 +325,6 @@ VMFUNC_IMM(jb, Imm_u32)
     ins -= imm->a;
     CHAIN(rer);
 }
-
-struct FuncInfo
-{
-    u32 nargs; // Minimnal number. If variadic, there may be more.
-    u32 nrets;
-    enum Flags
-    {
-        VarArgs = 1 << 0,
-        VarRets = 1 << 1,
-    };
-    u32 flags;
-};
-
-struct DebugInfo
-{
-    u32 linestart;
-    u32 lineend;
-    sref name;
-     // TODO
-};
-
-struct DFunc
-{
-    FuncInfo info;
-    // TODO: (DType: Func(Args, Ret))
-    union
-    {
-        CFunc native;
-        struct
-        {
-            void *vmcode; // TODO
-            DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
-        }
-        gfunc;
-    } u;
-};
 
 
 /*
@@ -249,14 +363,6 @@ VMFUNC_IMM(call, Imm_Call)
     CHAIN(rer);
 }
 
-VMFUNC_IMM(dcall, Imm_DCall)
-{
-    vm->returns.push_back(ins + 1);
-    sp -= imm->nargs;
-    StackSlot *f = LOCAL(imm->localidx);
-    ins = imm.gfunc->ins;
-    CHAIN(rer);
-}
 
 */
 
@@ -320,6 +426,36 @@ Observations:
 
 */
 
+// Call a nonvariadic C leaf function -- no stack fixup necessary
+// Assumes params are already on top of the stack and the stack is large enough
+VMFUNC_IMM(leafcall, Imm_LeafCall)
+{
+    imm->f(vm, sp); // this writes to return slots
+    NEXT();
+}
+
+VMFUNC_IMM(ccall, Imm_CCall)
+{
+    const tsize totalstack = MINSTACK + imm->nargs + imm->nret;
+    const size_t stackBaseOffs = sp - sbase;
+    sp = vm->stk.alloc(totalstack);
+    // TODO: when we realloc, fixup all stack frames in the VM??
+    StackCRef rets(&vm->stk, sp);
+    StackCRef args(&vm->stk, sp + imm->nret); // args follow after return slots
+    StackRef stk(&vm->stk, sp + imm->nargs + imm->nret);
+    int r = imm->f(vm, imm->nargs, &rets, &args, &stk); // this writes to return slots
+    if(r < 0)
+    {
+        assert(false); // TODO: throw error
+        return NULL;
+    }
+
+    assert(r == imm->nret
+        || ((imm->flags & FuncInfo::VarRets) && r >= imm->nret));
+
+    stk.popn(totalret);
+    NEXT();
+}
 
 // The imm param here is just for type inference and to get the correst number of slots
 template<typename Imm>
@@ -336,10 +472,10 @@ static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
 {
     VMCallFrame f = vm->callstack.back();
     vm->callstack.pop_back();
-    ins = f.ins;
     sp = f.sp + nret; // The function left some things on the stack
+    ins = f.ins;
     sbase = f.sbase;
-    CHAIN(rer);
+    CHAIN(curop); // A return directly continues with the loaded ins
 }
 
 // single return without return value
@@ -350,31 +486,31 @@ VMFUNC(ret0)
 
 VMFUNC_IMM(ret1, Imm_u32)
 {
-    sbase[0].v = LOCAL(imm->a)->v;
+    sbase[0] = LOCAL(imm->a);
     return doreturn(VMARGS, 1);
 }
 
 VMFUNC_IMM(ret2, Imm_2xu32)
 {
-    sbase[0].v = LOCAL(imm->a)->v;
-    sbase[1].v = LOCAL(imm->b)->v;
+    sbase[0] = LOCAL(imm->a);
+    sbase[1] = LOCAL(imm->b);
     return doreturn(VMARGS, 2);
 }
 
 VMFUNC_IMM(ret3, Imm_3xu32)
 {
-    sbase[0].v = LOCAL(imm->a)->v;
-    sbase[1].v = LOCAL(imm->b)->v;
-    sbase[2].v = LOCAL(imm->c)->v;
+    sbase[0] = LOCAL(imm->a);
+    sbase[1] = LOCAL(imm->b);
+    sbase[2] = LOCAL(imm->c);
     return doreturn(VMARGS, 3);
 }
 
 VMFUNC_IMM(ret4, Imm_4xu32)
 {
-    sbase[0].v = LOCAL(imm->a)->v;
-    sbase[1].v = LOCAL(imm->b)->v;
-    sbase[2].v = LOCAL(imm->c)->v;
-    sbase[3].v = LOCAL(imm->d)->v;
+    sbase[0] = LOCAL(imm->a);
+    sbase[1] = LOCAL(imm->b);
+    sbase[2] = LOCAL(imm->c);
+    sbase[3] = LOCAL(imm->d);
     return doreturn(VMARGS, 4);
 }
 
@@ -387,7 +523,7 @@ VMFUNC_IMM(retn, Imm_u32)
     const u32 n = imm->a; // how many return slots to fill
     const u32 * const p = &imm->a + 1; // locals indices array start
     for(u32 i = 0; i < n; ++i)
-        sp[i].v = LOCAL(p[i])->v;
+        sp[i] = LOCAL(p[i]);
 
     return doreturn(VMARGS, n);
 }
@@ -420,7 +556,7 @@ VMFUNC_IMM(retv, Imm_2xu32)
 
     // Put locals into return slots
     for(u32 i = 0; i < n; ++i)
-        sp[i].v = LOCAL(p[i])->v;
+        sp[i] = LOCAL(p[i]);
 
     return vreturn(VMARGS, n, imm->b);
 }
@@ -429,9 +565,8 @@ VMFUNC_IMM(retv, Imm_2xu32)
 
 VMFUNC_IMM(loadkui32, Imm_2xu32)
 {
-    StackSlot *slot = LOCAL(imm->a);
-    slot->v.u.ui = imm->b;
-    slot->v.type.id = PRIMTYPE_UINT;
+    Val *slot = LOCAL(imm->a);
+    *slot = imm->b;
     NEXT();
 }
 
@@ -493,12 +628,12 @@ static uint iter_init_f(ValU& v, VmIter& it)
 }
 
 // This is for when we know all values have the correct type
-static VmIter *setupiter(VM *vm, const StackSlot *sp, const Imm_3xu32 *imm)
+static VmIter *setupiter(VM *vm, const Val *sp, const Imm_3xu32 *imm)
 {
     VmIter *it = newiter(vm);
-    it->u.numeric.start = sp[imm->a].v;
-    it->u.numeric.end = sp[imm->b].v.u;
-    it->u.numeric.step = sp[imm->c].v.u;
+    it->u.numeric.start = sp[imm->a];
+    it->u.numeric.end = sp[imm->b].u;
+    it->u.numeric.step = sp[imm->c].u;
     return it;
 }
 
@@ -587,7 +722,7 @@ VMFUNC_IMM(iternext, Imm_3xu32)
     const u32 firstlocal = imm->b;
     VmIter * const iters = &vm->iterstack.back() - niters + 1;
     for(u32 i = 0; i < niters; ++i)
-        if(!iters[i].next(sp[firstlocal + i].v, iters[i]))
+        if(!iters[i].next(sp[firstlocal + i], iters[i]))
             NEXT();
 
     // Jump back
@@ -614,16 +749,16 @@ end:
 
 VMFUNC_IMM(addui, Imm_2xu32)
 {
-    LOCAL(imm->a)->v.u.ui += LOCAL(imm->b)->v.u.ui;
+    LOCAL(imm->a)->u.ui += LOCAL(imm->b)->u.ui;
     NEXT();
 }
 
 // Simple, integer-only loop
 VMFUNC_IMM(simplenext, Imm_3xu32)
 {
-    StackSlot *ctr = LOCAL(imm->a);
-    const uint limit = LOCAL(imm->b)->v.u.ui;
-    if(++ctr->v.u.ui < limit)
+    Val *ctr = LOCAL(imm->a);
+    const uint limit = LOCAL(imm->b)->u.ui;
+    if(++ctr->u.ui < limit)
     {
         ins -= imm->c;
         CHAIN(rer);
@@ -634,6 +769,7 @@ VMFUNC_IMM(simplenext, Imm_3xu32)
 
 VMFUNC(halt)
 {
+    vm->cur.ins = NULL;
     return NULL;
 }
 
@@ -664,22 +800,31 @@ struct Testcode
 
 static void runloop(VM *vm)
 {
-    const Inst *ins = vm->cur.ins;
-    for(;;)
+    if(const Inst *ins = vm->cur.ins)
     {
-        StackSlot * const sbase = vm->cur.sbase;
-        StackSlot * const sp = vm->cur.sp;
-        ins = op_curop(VMARGS);
-        if(!ins || vm->yield)
-            break;
+        Val * const sbase = vm->cur.sbase;
+        do
+        {
+            // sp is saved by rer or yield; since it's passed along as
+            // funcparam upon return it needs to be saved there and restored here.
+            // sbase doesn't need to be changed here because it's only
+            // changed by function call & return; those handle that internally.
+            Val * const sp = vm->cur.sp;
+            ins = op_curop(VMARGS);
+            // We end up here on rer, yield, or error. Most likely a rer.
+            // In that case just loop around since we got the next instruction
+            // returned. More expensive handling is only necessary for ins == NULL.
+        }
+        while(ins);
     }
-    vm->cur.ins = ins;
+
+    assert(!vm->err);
 }
 
 
 Testcode tc;
 
-void vmtest()
+void vmtest(GC& gc)
 {
     tc.init0 = { op_loadkui32 };
     tc.init0p = { 0, 0 };
@@ -706,19 +851,17 @@ void vmtest()
     //tc.iterpopp = { 1 };
     tc.halt = { op_halt };
 
-
-    VM vm;
-    vm.yield = 0;
-    StackSlot stk[32];
-    //stk[10].v = Val(101u);
-    stk[10].v = Val(uint(500) * uint(1000000) + 1);
-    stk[11].v = Val(1u);
+    VM vm(gc);
+    vm.stk.alloc(16);
+    vm.err = 0;
+    vm.stk[10] = Val(uint(500) * uint(1000000) + 1);
+    vm.stk[11] = Val(1u);
     vm.cur.ins = &tc.init0;
-    vm.cur.sp = &stk[0];
-    vm.cur.sbase = &stk[0];
+    vm.cur.sp = vm.stk.data();
+    vm.cur.sbase = vm.cur.sp;
 
     runloop(&vm);
 
-    printf("r0 = %zu\n", stk[0].v.u.ui);
+    printf("r0 = %zu\n", vm.stk[0].u.ui);
 
 };

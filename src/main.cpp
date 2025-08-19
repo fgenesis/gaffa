@@ -160,12 +160,15 @@ void testtype()
     st.dealloc();
 }
 
-extern void vmtest();
+extern void vmtest(GC& gc);
 
 int main(int argc, char **argv)
 {
-    testdedup();
-    vmtest();
+    GC gc = {0};
+    gc.alloc = myalloc;
+
+    //testdedup();
+    vmtest(gc);
     return 0;
 
     //testdedup();
@@ -175,9 +178,6 @@ int main(int argc, char **argv)
     //return 0;
 
     const char *fn = "test.txt";
-
-    GC gc = {0};
-    gc.alloc = myalloc;
 
     const char *code = slurp(fn);
     if(!code)

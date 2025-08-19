@@ -6,7 +6,7 @@
 
 void* PodArrayBase::_enlarge(GC& gc, tsize elementSize)
 {
-    tsize n = ((sz + (sz >> 1u)) | 63u) + 1;
+    tsize n = ((sz + (sz >> 1u)) | 3u) + 1;
     return _chsize(gc, n, elementSize);
 }
 

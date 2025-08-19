@@ -41,10 +41,11 @@ public:
     FORCEINLINE const T *data() const { return (const T*)this->ptr; }
     FORCEINLINE       T *data()       { return (T*)this->ptr; }
 
-    FORCEINLINE T *reserve(GC& gc, tsize n) { return n <= cap ? data() : (T*)_chsize(gc, n, sizeof(T)); }
+    FORCEINLINE T *reserve(GC& gc, tsize n) { return n <= cap ? data() : _chsize(gc, n); }
     FORCEINLINE T *resize(GC& gc, tsize n) { return (T*)_resize(gc, n, sizeof(T)); }
 
     FORCEINLINE T pop_back() { assert(sz); return data()[--sz]; }
+    FORCEINLINE void pop_n(tsize n) { assert(n <= sz); sz -= n; }
 
     FORCEINLINE T& back() { assert(sz); return data()[sz-1]; }
     FORCEINLINE const T& back() const { assert(sz); return arr[sz-1]; }
@@ -56,7 +57,7 @@ public:
         const tsize N = sz;
         if(N == cap)
         {
-            a = _enlarge(gc);
+            a = this->_chsize(gc, N + n);
             if(!a)
                 return NULL;
         }
@@ -66,13 +67,21 @@ public:
 
     FORCEINLINE T *push_back(GC& gc, T x)
     {
-        T *a = alloc_n(gc, 1);
-        if(a)
-            *a = x;
-        return a;
+        T *a = data();
+        const tsize N = sz;
+        if(N == cap)
+        {
+            a = this->_enlarge(gc);
+            if(!a)
+                return NULL;
+        }
+        sz = N + 1;
+        a[N] = x;
+        return &a[N];
     }
 
 private:
+    FORCEINLINE T *_chsize(GC& gc, tsize n) { return (T*)PodArrayBase::_chsize(gc, n, sizeof(T)); }
     FORCEINLINE T *_enlarge(GC& gc) { return (T*)PodArrayBase::_enlarge(gc, sizeof(T)); }
 };
 

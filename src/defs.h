@@ -14,6 +14,7 @@ typedef float real;
 typedef uint32_t realui;
 
 typedef uint32_t u32;
+typedef uint16_t u16;
 typedef unsigned char byte;
 
 // "big enough" size type for containers. For when 64-bit size_t is too big and a smaller type is more practical.
