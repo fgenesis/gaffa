@@ -12,12 +12,14 @@ enum
 
 
 struct Inst;
+struct DFunc;
 
 struct VMCallFrame
 {
     Val *sp;
     Val *sbase;
     const Inst *ins;
+    const DFunc *func;
 };
 
 class Stack : public PodArray<Val>
@@ -57,6 +59,8 @@ struct VM
     int err;
     std::vector<VMCallFrame> callstack;
     std::vector<VmIter> iterstack;
+
+    const DFunc *currentFunc() { return callstack.back().func; }
 };
 
 // This is exposed to the C API.
@@ -73,14 +77,24 @@ struct StackCRef
     {
     }
 
-    FORCEINLINE Val *operator[](size_t idx)
+    FORCEINLINE Val *ptr()
     {
-        return &(*stk)[offs + idx];
+        return &(*stk)[offs];
     }
 
-    FORCEINLINE const Val *operator[](size_t idx) const
+    FORCEINLINE const Val *ptr() const
     {
-        return &(*stk)[offs + idx];
+        return &(*stk)[offs];
+    }
+
+    FORCEINLINE Val& operator[](size_t idx)
+    {
+        return (*stk)[offs + idx];
+    }
+
+    FORCEINLINE const Val& operator[](size_t idx) const
+    {
+        return (*stk)[offs + idx];
     }
 };
 
@@ -136,7 +150,11 @@ typedef void (*LeafFunc)(VM *vm, Val inout[MINSTACK]);
 typedef int (*CFunc)(VM *vm, size_t nargs, StackCRef *ret,
     const StackCRef *args, StackRef *stack);
 
+// sp = stack_push(sp, Val)
+// sp = stack_require(sp, 42)
 
+// ALT: C calls don't need return slots
+typedef int (*CFunc2)(VM *vm, Val *inout, size_t nargs);
 
 struct FuncInfo
 {
@@ -146,6 +164,7 @@ struct FuncInfo
     {
         VarArgs = 1 << 0,
         VarRets = 1 << 1,
+        IsCFunc = 1 << 2,
     };
     u32 flags;
 };
@@ -167,7 +186,7 @@ struct DFunc
         CFunc native;
         struct
         {
-            void *vmcode; // TODO
+            Inst *vmcode; // TODO
             DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
         }
         gfunc;
@@ -199,13 +218,6 @@ struct Imm_3xu32
 struct Imm_4xu32
 {
     u32 a, b, c, d;
-};
-
-struct Imm_DCall
-{
-    Inst *ins;
-    unsigned nargs;
-    unsigned localidx;
 };
 
 struct Imm_LeafCall
@@ -302,6 +314,13 @@ static VMFUNC_DEF(rer)
     // sbase is only changed by function call/return
     vm->cur.sp = sp;
     return ins;
+}
+
+VMFUNC(error)
+{
+    // TODO: use ins to figure out where exactly we are
+    vm->err = 1;
+    return NULL;
 }
 
 // TODO/IDEA: in debug codegen, insert a "line reached" opcode after each line and forward to breakpoint handler
@@ -422,7 +441,7 @@ Observations:
 - Args is always a contiguous array
 - Return values must be shifted if variadic
 - After shifting, return values are contiguous
-- 
+-
 
 */
 
@@ -434,39 +453,85 @@ VMFUNC_IMM(leafcall, Imm_LeafCall)
     NEXT();
 }
 
-VMFUNC_IMM(ccall, Imm_CCall)
+static const Inst *fullCcall(VMPARAMS, CFunc f, size_t nargs, size_t nret, u32 flags, size_t skipslots)
 {
-    const tsize totalstack = MINSTACK + imm->nargs + imm->nret;
+    const tsize totalstack = MINSTACK + nargs + nret;
     const size_t stackBaseOffs = sp - sbase;
     sp = vm->stk.alloc(totalstack);
     // TODO: when we realloc, fixup all stack frames in the VM??
     StackCRef rets(&vm->stk, sp);
-    StackCRef args(&vm->stk, sp + imm->nret); // args follow after return slots
-    StackRef stk(&vm->stk, sp + imm->nargs + imm->nret);
-    int r = imm->f(vm, imm->nargs, &rets, &args, &stk); // this writes to return slots
+    StackCRef args(&vm->stk, sp + nret); // args follow after return slots
+    StackRef stk(&vm->stk, sp + nargs + nret);
+    int r = f(vm, nargs, &rets, &args, &stk); // this writes to return slots and may invalidate sp, sbase
     if(r < 0)
     {
         assert(false); // TODO: throw error
         return NULL;
     }
 
-    assert(r == imm->nret
-        || ((imm->flags & FuncInfo::VarRets) && r >= imm->nret));
+    assert(r == nret
+        || ((flags & FuncInfo::VarRets) && r >= nret));
 
-    stk.popn(totalret);
-    NEXT();
+    sbase = rets.ptr();
+    sp = sbase + nret;
+
+    const Val *pend = stk.stk->pend();
+    if(flags & FuncInfo::VarRets)
+    {
+        // Move extra return values after the regular return slots
+
+        if(const size_t nv = size_t(r) - nret)
+        {
+            size_t availAtEnd = pend - sp;
+            assert(nv < availAtEnd);
+            const Val *lastfew = pend - availAtEnd;
+            memmove(sp, lastfew, nv);
+            sp += nv;
+        }
+    }
+
+    const size_t topop = pend - sp;
+    stk.popn(topop);
+
+    ins += skipslots + 1;
+    CHAIN(rer);
+}
+
+VMFUNC_IMM(ccall, Imm_CCall)
+{
+    return fullCcall(VMARGS, imm->f, imm->nargs, imm->nret, imm->flags, immslots(imm));
 }
 
 // The imm param here is just for type inference and to get the correst number of slots
 template<typename Imm>
-static FORCEINLINE void pushret(VMPARAMS, const Imm *imm)
+static FORCEINLINE void pushret(VMPARAMS, const Imm *imm, const DFunc *func)
 {
     VMCallFrame f;
-    f.ins = ins + immslots(imm)
+    f.ins = ins + immslots(imm);
     f.sp = sp;
     f.sbase = sbase;
-    vm->returns.push_back(f);
+    f.func = func;
+    vm->callstack.push_back(f);
 }
+
+VMFUNC_IMM(dcall, Imm_u32)
+{
+    const Val *a = LOCAL(imm->a);
+    assert(false);
+    DFunc *d = NULL; // FIXME: get this from a
+
+    if(d->info.flags & FuncInfo::IsCFunc)
+    {
+        return fullCcall(VMARGS, d->u.native, d->info.nargs, d->info.nrets, d->info.flags, immslots(imm));
+    }
+
+    pushret(VMARGS, imm, d);
+
+    ins = d->u.gfunc.vmcode;
+    CHAIN(rer);
+}
+
+
 
 static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
 {
@@ -840,13 +905,13 @@ void vmtest(GC& gc)
 
     tc.i0 = { op_addui };
     tc.i0p = { 0, 2 };
-    
+
     //tc.loopnext = { op_iternext };
     //tc.loopnextp = { 1, 2, 2 };
 
     tc.loopnext = { op_simplenext };
     tc.loopnextp = { 2, 10, 2 };
-    
+
     //tc.iterpop = { op_iterpop };
     //tc.iterpopp = { 1 };
     tc.halt = { op_halt };

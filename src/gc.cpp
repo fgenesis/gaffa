@@ -203,8 +203,8 @@ static int traverse_table(ga_RT& rt, Table *t, int steps)
 
 static int traverse_dobj(ga_RT& rt, DObj *d, int steps)
 {
-    if(d->dfields)
-        makegrey(rt.gc, d->dfields);
+    //if(d->dfields)
+    //    makegrey(rt.gc, d->dfields);
 
     Val *v = d->memberArray();
     const tsize n = d->nmembers;

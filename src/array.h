@@ -41,6 +41,9 @@ public:
     FORCEINLINE const T *data() const { return (const T*)this->ptr; }
     FORCEINLINE       T *data()       { return (T*)this->ptr; }
 
+    FORCEINLINE const T *pend() const { return data() + sz; }
+    FORCEINLINE       T *pend()       { return data() + sz; }
+
     FORCEINLINE T *reserve(GC& gc, tsize n) { return n <= cap ? data() : _chsize(gc, n); }
     FORCEINLINE T *resize(GC& gc, tsize n) { return (T*)_resize(gc, n, sizeof(T)); }
 
