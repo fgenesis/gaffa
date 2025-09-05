@@ -2,6 +2,7 @@
 
 #include "gainternal.h"
 #include "lex.h"
+#include "symstore.h"
 
 class HLIRBuilder;
 struct HLNode;
@@ -40,6 +41,12 @@ public:
     {
         CTX_DEFAULT = 0x00,
         // TODO: inside of value block
+    };
+
+    enum IdentUsage // how an identifier is used
+    {
+        IDENT_USAGE_USE, // ident/variable is used in an expression (ie. evaluated)
+        IDENT_USAGE_DECL, // ident/variable is being declared (but not yet usable)
     };
 
     Parser(Lexer *lex, const char *fn, GC& gc, StringPool& strpool);
@@ -117,7 +124,7 @@ protected:
     HLNode *nil(Context ctx);
     HLNode *tablecons(Context ctx);
     HLNode *arraycons(Context ctx);
-    HLNode *_ident(const Lexer::Token& tok, const char *whatfor);
+    HLNode *_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage);
 
     HLNode *unaryRange(Context ctx);
     HLNode *binaryRange(Context ctx, const ParseRule *rule, HLNode *lhs);
@@ -157,6 +164,7 @@ private:
     bool hadError;
     bool panic;
     GC& gc;
+    Symstore syms;
 
     typedef HLNode* (Parser::*UnaryMth)(Context ctx);
     typedef HLNode* (Parser::*InfixMth)(Context ctx, const ParseRule *rule, HLNode *prefix);

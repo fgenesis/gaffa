@@ -1181,7 +1181,7 @@ HLNode* Parser::arraycons(Context ctx)
     return node;
 }
 
-HLNode* Parser::_ident(const Lexer::Token& tok, const char *whatfor)
+HLNode* Parser::_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage)
 {
     if(tok.tt == Lexer::TOK_SINK)
     {
@@ -1197,6 +1197,12 @@ HLNode* Parser::_ident(const Lexer::Token& tok, const char *whatfor)
     {
         Str s = _tokenStr(tok);
         node->u.ident.nameStrId = s.id;
+
+        switch(usage)
+        {
+        case IDENT_USAGE_DECL: a
+        case IDENT_USAGE_USE:
+        }
     }
     return node;
 }

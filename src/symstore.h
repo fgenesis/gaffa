@@ -67,7 +67,7 @@ public:
     struct Frame
     {
         ScopeType boundary;
-        std::vector<Sym> syms;
+        std::vector<unsigned> symids;
         // FIXME: This should be in the next lowering stage
         SlotDistrib localids; // only used when boundary == SCOPE_FUNCTION
     };
@@ -97,12 +97,19 @@ public:
     // If NULL: ok; otherwise: clashing symbol
     Decl decl(unsigned strid, unsigned line, MLSymbolRefContext referencedHow);
 
-    std::vector<Sym> missing;
+    Sym *getsym(unsigned uid);
+    unsigned getuid(const Sym *sym);
+
+    std::vector<unsigned> missing;
 
 private:
 
     Frame& funcframe();
+    Sym *newsym();
+    Sym *findinframe(const unsigned *uids, size_t n, sref strid);
+    unsigned indexinframe(const unsigned *uids, size_t n, const Sym *sym);
 
     unsigned _indexbase;
     std::vector<Frame> frames;
+    std::vector<Sym> allsyms;
 };

@@ -8,7 +8,7 @@ Symstore::Symstore()
 void Symstore::push(ScopeType boundary)
 {
     if(!frames.empty())
-        _indexbase += frames.back().syms.size();
+        _indexbase += frames.back().symids.size();
     Frame f;
     f.boundary = boundary;
     frames.push_back(f);
@@ -23,14 +23,15 @@ void Symstore::pop(Frame& f)
 {
     f = frames.back();
     frames.pop_back();
-    _indexbase -= f.syms.size();
+    const size_t fsz = f.symids.size();
+    _indexbase -= fsz;
 
     if(f.boundary != SCOPE_FUNCTION)
     {
         // Return locals from this scope to enclosing function
         Frame& ff = funcframe();
-        for(size_t i = 0; i < f.syms.size(); ++i)
-            ff.localids.putback(f.syms[i].localslot);
+        for(size_t i = 0; i < fsz; ++i)
+            ff.localids.putback(getsym(f.symids[i])->localslot);
     }
 }
 
@@ -50,18 +51,25 @@ const Symstore::Frame& Symstore::peek() const
     return frames.back();
 }
 
-static Symstore::Sym *findinframe(std::vector<Symstore::Sym>& syms, unsigned strid)
+Symstore::Sym *Symstore::findinframe(const unsigned *uids, size_t n, sref strid)
 {
-    const size_t N = syms.size();
-    for(size_t i = 0; i < N; ++i)
-        if(syms[i].nameStrId == strid)
-            return &syms[i];
+    for(size_t i = 0; i < n; ++i)
+    {
+        Symstore::Sym *s = getsym(uids[i]);
+        if(s->nameStrId == strid)
+            return s;
+    }
     return NULL;
 }
 
-static unsigned indexinframe(std::vector<Symstore::Sym>& syms, const Symstore::Sym *sym)
+unsigned Symstore::indexinframe(const unsigned *uids, size_t n, const Sym *sym)
 {
-    return sym - &syms[0];
+    const unsigned uid = getuid(sym);
+    for(size_t i = 0; i < n; ++i)
+        if(uids[i] == uid)
+            return i;
+    assert(false);
+    return -1;
 }
 
 
@@ -73,7 +81,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, MLSymbolRefCont
     for(size_t k = frames.size(); k --> 0; )
     {
         Frame& f = frames[k];
-        if(Sym *s = findinframe(f.syms, strid))
+        if(Sym *s = findinframe(f.symids.data(), f.symids.size(), strid))
         {
             if(!(s->referencedHow & SYMREF_NOTAVAIL)) // Intentionally skip symbols flagged as such
             {
@@ -82,7 +90,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, MLSymbolRefCont
                 if(!s->lineused)
                     s->lineused = line;
                 res.sym = s;
-                res.symindex = _indexbase + indexinframe(f.syms, s);
+                res.symindex = _indexbase + indexinframe(f.symids.data(), f.symids.size(), s);
                 return res;
             }
         }
@@ -99,16 +107,20 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, MLSymbolRefCont
     usage = SYMUSE_USED;
 
     // Record as missing
-    Sym *s = findinframe(missing, strid);
+    Sym *s = findinframe(missing.data(), missing.size(), strid);
     if(s)
         s->referencedHow |= referencedHow;
     else
     {
-        Sym add = { strid, 0, line, referencedHow, usage };
-        missing.push_back(add);
-        s = &missing.back();
+        s = newsym();
+        s->nameStrId = strid;
+        s->linedefined = 0;
+        s->lineused = line;
+        s->referencedHow = referencedHow;
+        s->usage = usage;
+        missing.push_back(getuid(s));
     }
-    res.symindex = -1 - (int)indexinframe(missing, s);
+    res.symindex = -1 - (int)indexinframe(missing.data(), missing.size(), s);
     res.sym = s;
     return res;
 }
@@ -120,7 +132,7 @@ Symstore::Decl Symstore::decl(unsigned strid, unsigned line, MLSymbolRefContext 
     for(size_t k = frames.size(); k --> 0; )
     {
         ff = &frames[k];
-        if(Sym *s = findinframe(ff->syms, strid))
+        if(Sym *s = findinframe(ff->symids.data(), ff->symids.size(), strid))
         {
             res.clashing = s;
             return res;
@@ -130,17 +142,35 @@ Symstore::Decl Symstore::decl(unsigned strid, unsigned line, MLSymbolRefContext 
             break;
     }
 
-    Sym s;
-    s.linedefined = line;
-    s.nameStrId = strid;
-    s.lineused = 0;
-    s.referencedHow = referencedHow;
-    s.usage = SYMUSE_UNUSED;
-    s.localslot = ff->localids.pick();
-    frames.back().syms.push_back(s);
-    res.sym = &frames.back().syms.back();
+    Sym *s = newsym();
+    s->linedefined = line;
+    s->nameStrId = strid;
+    s->lineused = 0;
+    s->referencedHow = referencedHow;
+    s->usage = SYMUSE_UNUSED;
+    s->localslot = ff->localids.pick();
+    frames.back().symids.push_back(getuid(s));
+    res.sym = s;
 
     return res;
+}
+
+Symstore::Sym *Symstore::newsym()
+{
+    allsyms.push_back(Sym());
+    return &allsyms.back();
+}
+
+Symstore::Sym *Symstore::getsym(unsigned uid)
+{
+    return &allsyms[uid];
+}
+
+unsigned Symstore::getuid(const Sym *sym)
+{
+    size_t pos = sym - allsyms.data();
+    assert(pos < allsyms.size());
+    return (unsigned)pos;
 }
 
 u32 SlotDistrib::pick()
