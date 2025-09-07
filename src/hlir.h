@@ -207,6 +207,7 @@ struct HLIdent : HLNodeBase
 {
     enum { EnumType = HLNODE_IDENT, Children = 0 };
     sref nameStrId;
+    sref symid;
 };
 
 struct HLName : HLNodeBase

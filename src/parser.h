@@ -45,8 +45,9 @@ public:
 
     enum IdentUsage // how an identifier is used
     {
-        IDENT_USAGE_USE, // ident/variable is used in an expression (ie. evaluated)
+        IDENT_USAGE_UNTRACKED, // just parse identifier but don't track it as a local variable
         IDENT_USAGE_DECL, // ident/variable is being declared (but not yet usable)
+        IDENT_USAGE_USE, // ident/variable is used in an expression (ie. evaluated/referenced)
     };
 
     Parser(Lexer *lex, const char *fn, GC& gc, StringPool& strpool);
@@ -118,13 +119,13 @@ protected:
     HLNode *btrue(Context ctx);
     HLNode *bfalse(Context ctx);
     HLNode *name(const char *whatfor);
-    HLNode *ident(const char *whatfor);
+    HLNode *ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref);
     HLNode *typeident();
     HLNode *_identInExpr(Context ctx);
     HLNode *nil(Context ctx);
     HLNode *tablecons(Context ctx);
     HLNode *arraycons(Context ctx);
-    HLNode *_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage);
+    HLNode *_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage, SymbolRefContext symref);
 
     HLNode *unaryRange(Context ctx);
     HLNode *binaryRange(Context ctx, const ParseRule *rule, HLNode *lhs);
@@ -155,6 +156,7 @@ private:
     Str _tokenStr(const Lexer::Token& tok);
     Str _identStr(const Lexer::Token& tok);
     bool _checkname(const Lexer::Token& tok, const char *whatfor);
+    void _applyUsage(const Lexer::Token& tok, HLNode *node, IdentUsage usage, SymbolRefContext symref);
 
     Lexer::Token curtok;
     Lexer::Token prevtok;

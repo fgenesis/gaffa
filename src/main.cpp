@@ -4,7 +4,6 @@
 #include "gainternal.h"
 #include "strings.h"
 #include "gaimpdbg.h"
-#include "mlir.h"
 #include "table.h"
 #include "gc.h"
 #include "dedupset.h"
@@ -168,8 +167,8 @@ int main(int argc, char **argv)
     gc.alloc = myalloc;
 
     //testdedup();
-    vmtest(gc);
-    return 0;
+    //vmtest(gc);
+    //return 0;
 
     //testdedup();
     //testref();
@@ -195,8 +194,8 @@ int main(int argc, char **argv)
 
     hlirDebugDump(strtab, node);
 
-    MLIRContainer mc(gc);
-    mc.import(node, strtab, fn);
+    //MLIRContainer mc(gc);
+    //mc.import(node, strtab, fn);
 
 
    return 0;

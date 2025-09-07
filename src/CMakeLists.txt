@@ -28,8 +28,8 @@ set(src
     rtdata.cpp
     symstore.cpp
     symstore.h
-    mlir.cpp
-    mlir.h
+    #mlir.cpp
+    #mlir.h
     gaimpdbg.cpp
     gaimpdbg.h
     hashfunc.cpp
@@ -42,8 +42,8 @@ set(src
     valstore.h
     gaalloc.cpp
     gaalloc.h
-    mlgraph.cpp
-    mlgraph.h
+    #mlgraph.cpp
+    #mlgraph.h
     serialio.cpp
     serialio.h
     llir.cpp

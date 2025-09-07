@@ -73,7 +73,7 @@ unsigned Symstore::indexinframe(const unsigned *uids, size_t n, const Sym *sym)
 }
 
 
-Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, MLSymbolRefContext referencedHow)
+Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, SymbolRefContext referencedHow)
 {
     unsigned usage = SYMUSE_USED;
 
@@ -125,7 +125,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, MLSymbolRefCont
     return res;
 }
 
-Symstore::Decl Symstore::decl(unsigned strid, unsigned line, MLSymbolRefContext referencedHow)
+Symstore::Decl Symstore::decl(unsigned strid, unsigned line, SymbolRefContext referencedHow)
 {
     Frame *ff;
     Decl res = {};
@@ -173,6 +173,24 @@ unsigned Symstore::getuid(const Sym *sym)
     return (unsigned)pos;
 }
 
+Symstore::Sym& Symstore::makeUsable(unsigned uid)
+{
+    Sym *sym = getsym(uid);
+    assert(sym);
+    assert(sym->referencedHow & SYMREF_NOTAVAIL);
+    sym->referencedHow = (SymbolRefContext)(sym->referencedHow & ~SYMREF_NOTAVAIL);
+    return *sym;
+}
+
+Symstore::Sym& Symstore::makeMutable(unsigned uid)
+{
+    Sym *sym = getsym(uid);
+    assert(sym);
+    assert(sym->referencedHow & SYMREF_NOTAVAIL);
+    sym->referencedHow = (SymbolRefContext)(sym->referencedHow | SYMREF_MUTABLE);
+    return *sym;
+}
+
 u32 SlotDistrib::pick()
 {
     u32 slot;
@@ -193,4 +211,17 @@ void SlotDistrib::putback(u32 slot)
 {
     assert(slot < _used);
     avail.push_back(slot);
+}
+
+const char* Symstore::Lookup::namewhere() const
+{
+    switch(where)
+    {
+        case SCOPEREF_LOCAL:    return "local";
+        case SCOPEREF_UPVAL:    return "upvalue";
+        case SCOPEREF_EXTERNAL: return "extern";
+    }
+
+    assert(false);
+    return NULL;
 }

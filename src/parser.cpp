@@ -116,6 +116,41 @@ bool Parser::_checkname(const Lexer::Token& tok, const char *whatfor)
     return false;
 }
 
+void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage, SymbolRefContext symref)
+{
+    if(usage == IDENT_USAGE_UNTRACKED)
+        return;
+
+    HLIdent& ident = *node->as<HLIdent>();
+    const sref strid = ident.nameStrId;
+    Strp name = strpool.lookup(strid);
+
+    switch(usage)
+    {
+        case IDENT_USAGE_DECL:
+        {
+            assert(symref == SYMREF_STANDARD); // not used
+            Symstore::Decl decl = syms.decl(strid, node->line, SYMREF_NOTAVAIL);
+            if(decl.clashing)
+            {
+                std::ostringstream os;
+                os << "redefinition of '" << name.s << "' -- first defined in line " << decl.clashing->linedefined;
+                errorAt(tok, os.str().c_str(), NULL);
+            }
+            ident.symid = syms.getuid(decl.sym);
+        }
+        break;
+
+        case IDENT_USAGE_USE:
+        {
+            Symstore::Lookup f = syms.lookup(strid, node->line, symref);
+            Strp name = strpool.lookup(strid);
+            printf("Referring '%s' in line %u as %s from line %u (symindex %d)\n",
+                name.s, node->line, f.namewhere(), f.sym->linedefined, f.symindex);
+        }
+    }
+}
+
 
 const Parser::ParseRule Parser::Rules[] =
 {
@@ -196,10 +231,16 @@ Parser::Parser(Lexer* lex, const char *fn, GC& gc, StringPool& strpool)
 HLNode *Parser::parse()
 {
     advance();
+    syms.push(SCOPE_FUNCTION);
 
     HLNode *root = stmtlist(Lexer::TOK_E_EOF);
+    if(hadError)
+        return NULL;
 
-    return !hadError ? root : NULL;
+    Symstore::Frame top;
+    syms.pop(top);
+
+    return root;
 }
 
 HLNode *Parser::expr()
@@ -399,22 +440,26 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 
     if(pname) // Named functions can be declared in a namespace
     {
-        HLNode *nname = ident("function or namespace"); // namespace or function name
+        const Lexer::Token tok = curtok; // used in case fo error
+        HLNode *nname = ident("function or namespace", IDENT_USAGE_UNTRACKED, SYMREF_STANDARD); // namespace or function name
         HLNode *ns = NULL;
+        SymbolRefContext nameref = SYMREF_STANDARD;
 
         if(tryeat(Lexer::TOK_DOT)) // . follows -> it's a namespaced function (namespace can be a type or table)
         {
             ns = nname;
-            nname = ident("functionName");
+            nname = ident("functionName", IDENT_USAGE_DECL, SYMREF_STANDARD);
         }
         else if(tryeat(Lexer::TOK_COLON)) // : follows -> it's a method (syntax sugar only; Lua style)
         {
             ns = nname;
-            nname = ident("methodName");
+            nname = ident("methodName", IDENT_USAGE_DECL, SYMREF_STANDARD);
             flags |= FUNCFLAGS_METHOD_SUGAR;
         }
         *pname = nname;
         *pnamespac = ns;
+
+        _applyUsage(tok, nname, ns ? IDENT_USAGE_USE : IDENT_USAGE_DECL, nameref);
     }
 
     h->u.fhdr.paramlist = _funcparams();
@@ -568,58 +613,42 @@ HLNode* Parser::_restassign(HLNode* firstLhs)
 // int x, y, var z,q
 HLNode* Parser::_decllist()
 {
-    // curtok is ident or var
+    // curtok is ident or 'var'
     HLNode * const node = ensure(hlir->list());
     if(!node)
         return NULL;
 
-    bool isvar = curtok.tt == Lexer::TOK_VAR;
     HLNode *lasttype = NULL;
-    HLNode *first = NULL;
-    HLNode *second = NULL;
-
-    if(isvar)
-        advance();
-    else
-        lasttype = first = typeident();
-
-    goto begin;
-
-    for(;;)
+    
+    do
     {
-        second = NULL;
-
-        // one decl done, need a comma to start another
-        if(!tryeat(Lexer::TOK_COMMA))
-            break;
+        HLNode *first = NULL;
 
         // either 'var' or a type name. This switches context.
         // In 'var' context, types are deduced, in 'C' context, they need to be known.
         if(tryeat(Lexer::TOK_VAR))
-        {
-            isvar = true;
             lasttype = NULL;
-            first = NULL;
-        }
         else
         {
-            first = typeident(); // type name, if present
-            if(!match(Lexer::TOK_IDENT))
+            lookAhead();
+            // If two identifiers in a row ('int x') --  First is the type, second one the variable.
+            // If only one, it's parsed below, using the previous type.
+            if(lookahead.tt == Lexer::TOK_IDENT)
+                lasttype = first = typeident();
+            else if(!lasttype)
             {
-                second = first;
-                first = NULL;
+                // This branch is only hit when we've just entered the for loop
+                error("A declaration needs to start with 'var' or a type name");
+                break;
             }
         }
-begin:
 
         HLNode * const def = hlir->vardef();
 
-        if(!second)
-            second = ident("variable"); // var name
+        HLNode * const second = ident("variable", IDENT_USAGE_DECL, SYMREF_STANDARD); // var name
 
-        if(isvar) // 'var x'
+        if(!lasttype) // 'var x'
         {
-            lasttype = NULL;
             assert(!first);
             def->u.vardef.ident = second; // always var name
             if(tryeat(Lexer::TOK_COLON))
@@ -634,21 +663,13 @@ begin:
         }
         else // C-style decl
         {
-            if(first)
-            {
-                def->u.vardef.type = first;
-                def->u.vardef.ident = second;
-                lasttype = first;
-            }
-            else
-            {
-                def->u.vardef.type = lasttype;
-                def->u.vardef.ident = second;
-            }
+            def->u.vardef.type = first ? first : lasttype;
+            def->u.vardef.ident = second;
         }
 
         node->u.list.add(def, gc);
     }
+    while(tryeat(Lexer::TOK_COMMA));
 
     return node;
 }
@@ -733,15 +754,19 @@ HLNode* Parser::decl()
         if(tryeat(Lexer::TOK_MASSIGN))
         {
             node->flags = DECLFLAG_MUTABLE;
-            // Mutable decl assignment, give all individual HLVarDef that flag too
+            // Mutable decl assignment, give all individual HLVarDef that flag too...
             if(decls)
             {
                 HLNode **ch = decls->u.list.list;
                 const size_t N = decls->u.list.used;
                 for(size_t i = 0; i < N; ++i)
                 {
-                    assert(ch[i]->type == HLNODE_VARDEF);
-                    ch[i]->flags |= DECLFLAG_MUTABLE;
+                    HLNode *c = ch[i];
+                    assert(c->type == HLNODE_VARDEF);
+                    c->flags |= DECLFLAG_MUTABLE;
+                    // ... and mark the symbol as mutable
+                    sref symid = c->as<HLVarDef>()->ident->as<HLIdent>()->symid;
+                    syms.makeMutable(symid);
                 }
             }
         }
@@ -794,7 +819,7 @@ HLNode* Parser::primaryexpr()
 {
     return tryeat(Lexer::TOK_LPAREN)
         ? grouping(CTX_DEFAULT)
-        : ident("identifier");
+        : ident("identifier", IDENT_USAGE_USE, SYMREF_STANDARD);
 }
 
 HLNode* Parser::suffixedexpr()
@@ -886,9 +911,9 @@ HLNode* Parser::name(const char *whatfor)
     return node;
 }
 
-HLNode* Parser::ident(const char *whatfor)
+HLNode* Parser::ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref)
 {
-    HLNode *node = _ident(curtok, whatfor);
+    HLNode *node = _ident(curtok, whatfor, usage, symref);
     advance();
     return node;
 }
@@ -898,7 +923,7 @@ HLNode* Parser::typeident()
     unsigned flags = 0;
     if(tryeat(Lexer::TOK_LIKE))
         flags |= IDENTFLAGS_DUCKYTYPE;
-    HLNode *node = ident("type");
+    HLNode *node = ident("type", IDENT_USAGE_USE, SYMREF_TYPE);
     if(tryeat(Lexer::TOK_QM))
         flags |= IDENTFLAGS_OPTIONALTYPE;
     if(node)
@@ -908,7 +933,7 @@ HLNode* Parser::typeident()
 
 HLNode* Parser::_identInExpr(Context ctx)
 {
-    return _suffixed(_ident(prevtok, "identifier"));
+    return _suffixed(_ident(prevtok, "identifier", IDENT_USAGE_USE, SYMREF_STANDARD));
 }
 
 HLNode *Parser::grouping(Context ctx)
@@ -1018,8 +1043,8 @@ void Parser::advance()
 
 void Parser::lookAhead()
 {
-    assert(lookahead.tt == Lexer::TOK_E_UNDEF);
-    lookahead = _lex->next();
+    if(lookahead.tt == Lexer::TOK_E_UNDEF)
+        lookahead = _lex->next();
 }
 
 void Parser::eat(Lexer::TokenType tt)
@@ -1140,7 +1165,7 @@ HLNode* Parser::tablecons(Context ctx)
 
             if(lookahead.tt == Lexer::TOK_CASSIGN)
             {
-                key = ident("key"); // key=...
+                key = ident("key", IDENT_USAGE_UNTRACKED, SYMREF_STANDARD); // key=...
                 eat(Lexer::TOK_CASSIGN);
             }
             // else it's a single var lookup; handle as expr
@@ -1181,7 +1206,7 @@ HLNode* Parser::arraycons(Context ctx)
     return node;
 }
 
-HLNode* Parser::_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage)
+HLNode* Parser::_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage, SymbolRefContext symref)
 {
     if(tok.tt == Lexer::TOK_SINK)
     {
@@ -1197,12 +1222,7 @@ HLNode* Parser::_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage 
     {
         Str s = _tokenStr(tok);
         node->u.ident.nameStrId = s.id;
-
-        switch(usage)
-        {
-        case IDENT_USAGE_DECL: a
-        case IDENT_USAGE_USE:
-        }
+        _applyUsage(tok, node, usage, symref);
     }
     return node;
 }

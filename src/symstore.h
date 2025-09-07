@@ -19,17 +19,16 @@ enum ScopeReferral
     SCOPEREF_EXTERNAL, // unknown identifier
 };
 
-enum MLSymbolRefContext
+enum SymbolRefContext
 {
     SYMREF_STANDARD = 0x00,  // Just any symbol (plain old variable, no special properties)
     SYMREF_MUTABLE  = 0x01,  // Symbol is target of an assignment after declaration
     SYMREF_TYPE     = 0x02,  // Symbol is used as a type
-    SYMREF_CALL     = 0x04,  // Symbol is called (-> symbol is function-ish)
-    SYMREF_EXPORTED = 0x08,  // Symbol is exported
-    SYMREF_NOTAVAIL = 0x10,  // Force symbol lookup to fail
+    SYMREF_EXPORTED = 0x04,  // Symbol is exported
+    SYMREF_NOTAVAIL = 0x08,  // Force symbol lookup to fail
 };
 
-enum MLSymbolUsageFlags
+enum SymbolUsageFlags
 {
     SYMUSE_UNUSED   = 0x00, // Variable is unused
     SYMUSE_USED     = 0x01, // Variable is used at least once
@@ -76,6 +75,7 @@ public:
         const Sym *sym;
         ScopeReferral where;
         int symindex;
+        const char *namewhere() const;
     };
     struct Decl
     {
@@ -92,13 +92,16 @@ public:
     const Frame& peek() const;
 
 
-    Lookup lookup(unsigned strid, unsigned line, MLSymbolRefContext referencedHow);
+    Lookup lookup(unsigned strid, unsigned line, SymbolRefContext referencedHow);
 
     // If NULL: ok; otherwise: clashing symbol
-    Decl decl(unsigned strid, unsigned line, MLSymbolRefContext referencedHow);
+    Decl decl(unsigned strid, unsigned line, SymbolRefContext referencedHow);
 
     Sym *getsym(unsigned uid);
     unsigned getuid(const Sym *sym);
+
+    Sym& makeUsable(unsigned uid); // helper for the parser; removes SYMREF_NOTAVAIL flag
+    Sym& makeMutable(unsigned uid); // helper for the parser; removes SYMREF_NOTAVAIL flag
 
     std::vector<unsigned> missing;
 
