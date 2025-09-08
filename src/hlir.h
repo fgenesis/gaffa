@@ -289,6 +289,7 @@ struct HLNode
     Lexer::TokenType tok;
     unsigned char flags; // any of the flags above, depends on type
     unsigned char _nch; // number of child nodes
+    u16 column;
 
     template<typename T> T *as()
     {

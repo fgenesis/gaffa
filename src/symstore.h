@@ -2,7 +2,9 @@
 
 #include "defs.h"
 #include <vector>
+#include "lex.h"
 
+struct GC;
 
 enum ScopeType
 {
@@ -14,6 +16,7 @@ enum ScopeType
 
 enum ScopeReferral
 {
+    SCOPEREF_INVALID,  // invalid scope, unavailable, etc
     SCOPEREF_LOCAL,    // in local scope
     SCOPEREF_UPVAL,    // not in local scope but exists in an outer scope across a function boundary
     SCOPEREF_EXTERNAL, // unknown identifier
@@ -26,6 +29,7 @@ enum SymbolRefContext
     SYMREF_TYPE     = 0x02,  // Symbol is used as a type
     SYMREF_EXPORTED = 0x04,  // Symbol is exported
     SYMREF_NOTAVAIL = 0x08,  // Force symbol lookup to fail
+    SYMREF_EXTERNAL = 0x10,  // Symbol is external
 };
 
 enum SymbolUsageFlags
@@ -53,15 +57,19 @@ class Symstore
 public:
     struct Sym
     {
+        Lexer::Token tok;
         unsigned nameStrId;
-        unsigned linedefined;
         unsigned lineused; // first usage; if 0, var is never used
         unsigned referencedHow; // MLSymbolRefContext
         unsigned usage;
         unsigned localslot; // FIXME remove this
 
+        inline unsigned linedefined() const { return tok.line; }
         inline bool used() const { return usage || (referencedHow & SYMREF_MUTABLE); }
         inline bool mustclose() const { return (usage & SYMUSE_UPVAL) && (referencedHow & SYMREF_MUTABLE); }
+
+        void makeUsable(); // helper for the parser; removes SYMREF_NOTAVAIL flag
+        void makeMutable();
     };
     struct Frame
     {
@@ -86,22 +94,25 @@ public:
     Symstore();
     ~Symstore();
 
+    void dealloc(GC& gc);
+
     void push(ScopeType boundary);
     void pop(Frame& f);
 
     const Frame& peek() const;
 
 
-    Lookup lookup(unsigned strid, unsigned line, SymbolRefContext referencedHow);
+    Lookup lookup(unsigned strid, const Lexer::Token& tok, SymbolRefContext referencedHow, bool createExternal);
 
     // If NULL: ok; otherwise: clashing symbol
-    Decl decl(unsigned strid, unsigned line, SymbolRefContext referencedHow);
+    Decl decl(unsigned strid, const Lexer::Token& tok, SymbolRefContext referencedHow);
 
     Sym *getsym(unsigned uid);
+    const Sym *getsym(unsigned uid) const;
     unsigned getuid(const Sym *sym);
 
-    Sym& makeUsable(unsigned uid); // helper for the parser; removes SYMREF_NOTAVAIL flag
-    Sym& makeMutable(unsigned uid); // helper for the parser; removes SYMREF_NOTAVAIL flag
+    Sym& makeUsable(unsigned uid);
+    Sym& makeMutable(unsigned uid);
 
     std::vector<unsigned> missing;
 

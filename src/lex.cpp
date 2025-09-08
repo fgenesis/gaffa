@@ -269,7 +269,6 @@ bool Lexer::IsKeyword(TokenType tt)
     return false;
 }
 
-
 Lexer::Token Lexer::tok(TokenType tt, const char *where, const char *end)
 {
     assert(where <= end);
@@ -289,6 +288,7 @@ Lexer::Token Lexer::errtok(const char *msg)
     Token t;
     t.tt = TOK_E_ERROR;
     t.begin = _p;
+    t.linebegin = _linebegin;
     t.line = _line;
     t.u.err = msg;
     return t;

@@ -157,6 +157,9 @@ private:
     Str _identStr(const Lexer::Token& tok);
     bool _checkname(const Lexer::Token& tok, const char *whatfor);
     void _applyUsage(const Lexer::Token& tok, HLNode *node, IdentUsage usage, SymbolRefContext symref);
+    void _checkAssignTarget(const HLNode *node);
+    const char *symbolname(const HLNode *node) const;
+    const char *symbolname(const Symstore::Sym *sym) const;
 
     Lexer::Token curtok;
     Lexer::Token prevtok;

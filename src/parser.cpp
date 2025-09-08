@@ -68,6 +68,23 @@ static Val makenum(const char *s, const char *end)
     return u;
 }
 
+const char *Parser::symbolname(const HLNode *node) const
+{
+    if(node->type == HLNODE_IDENT)
+    {
+        return symbolname(syms.getsym(node->u.ident.symid));
+    }
+    return NULL;
+}
+
+const char* Parser::symbolname(const Symstore::Sym* sym) const
+{
+    if(!sym)
+        return NULL;
+    Strp sp = strpool.lookup(sym->nameStrId);
+    return sp.s;
+}
+
 Val Parser::makestr(const char *s, const char *end)
 {
     Str q = strpool.put(s, end - s + 1);
@@ -130,27 +147,37 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
         case IDENT_USAGE_DECL:
         {
             assert(symref == SYMREF_STANDARD); // not used
-            Symstore::Decl decl = syms.decl(strid, node->line, SYMREF_NOTAVAIL);
+            Symstore::Decl decl = syms.decl(strid, tok, SYMREF_NOTAVAIL);
             if(decl.clashing)
             {
                 std::ostringstream os;
-                os << "redefinition of '" << name.s << "' -- first defined in line " << decl.clashing->linedefined;
-                errorAt(tok, os.str().c_str(), NULL);
+                os << "redefinition of '" << name.s << "' -- first defined in line " << decl.clashing->linedefined();
+                errorAt(tok, os.str().c_str());
             }
             ident.symid = syms.getuid(decl.sym);
+            printf("Declared symbol '%s' (symid %u) in line %u\n", name.s, ident.symid, tok.line);
         }
         break;
 
         case IDENT_USAGE_USE:
         {
-            Symstore::Lookup f = syms.lookup(strid, node->line, symref);
-            Strp name = strpool.lookup(strid);
-            printf("Referring '%s' in line %u as %s from line %u (symindex %d)\n",
-                name.s, node->line, f.namewhere(), f.sym->linedefined, f.symindex);
+            Symstore::Lookup f = syms.lookup(strid, tok, symref, true);
+            if(f.sym)
+            {
+                printf("Referring '%s' in line %u as %s from line %u (symindex %d)\n",
+                    name.s, node->line, f.namewhere(), f.sym->linedefined(), f.symindex);
+                ident.symid = syms.getuid(f.sym);
+            }
+            if(f.where == SCOPEREF_INVALID)
+            {
+                std::ostringstream os;
+                os << "Can't use variable '" << name.s << "' in its own declaraction";
+                errorAt(tok, os.str().c_str());
+            }
+
         }
     }
 }
-
 
 const Parser::ParseRule Parser::Rules[] =
 {
@@ -235,7 +262,10 @@ HLNode *Parser::parse()
 
     HLNode *root = stmtlist(Lexer::TOK_E_EOF);
     if(hadError)
+    {
+        syms.dealloc(gc);
         return NULL;
+    }
 
     Symstore::Frame top;
     syms.pop(top);
@@ -580,6 +610,8 @@ HLNode* Parser::_funcreturns(unsigned *pfuncflags)
 // EXPR[index] = ...
 HLNode* Parser::_assignmentWithPrefix(HLNode *lhs)
 {
+    assert(lhs->as<HLList>());
+
     eat(Lexer::TOK_CASSIGN); // eat '='
     HLNode *node = ensure(hlir->assignment());
     if(node)
@@ -596,13 +628,48 @@ HLNode* Parser::_restassign(HLNode* firstLhs)
     if(!lhs)
         return NULL;
 
+    _checkAssignTarget(firstLhs);
     lhs->u.list.add(firstLhs, gc);
     while(tryeat(Lexer::TOK_COMMA))
     {
-        lhs->u.list.add(suffixedexpr(), gc);
+        HLNode *n = suffixedexpr();
+        _checkAssignTarget(n);
+        lhs->u.list.add(n, gc);
     }
 
     return _assignmentWithPrefix(lhs);
+}
+
+// Check that any symbol directly assigned to is mutable and a local or upvalue.
+// Don't allow assignment to external symbols.
+void Parser::_checkAssignTarget(const HLNode* node)
+{
+    if(node->type == HLNODE_IDENT)
+    {
+        sref symid = node->u.ident.symid;
+        Symstore::Sym *sym = syms.getsym(symid);
+        if(sym->referencedHow & SYMREF_EXTERNAL)
+        {
+            std::ostringstream os;
+            os << "'" << symbolname(sym) << "': undeclared identifier";
+            errorAt(sym->tok, os.str().c_str());
+        }
+        else if(!(sym->referencedHow & SYMREF_MUTABLE))
+        {
+            Symstore::Lookup lookup = syms.lookup(sym->nameStrId, curtok, SYMREF_STANDARD, false);
+            assert(lookup.sym == sym);
+            {
+                std::ostringstream os;
+                os << "'" << symbolname(sym) << "': Can't assign, " << lookup.namewhere() << " is not mutable";
+                errorAt(curtok, os.str().c_str());
+            }
+            if(sym->tok.line)
+            {
+                panic = false; // HACK
+                errorAt(sym->tok, "(Previously declared here)", "(Use := for declaring as mutable)");
+            }
+        }
+    }
 }
 
 // var x, y
@@ -619,7 +686,7 @@ HLNode* Parser::_decllist()
         return NULL;
 
     HLNode *lasttype = NULL;
-    
+
     do
     {
         HLNode *first = NULL;
@@ -731,12 +798,14 @@ HLNode* Parser::_exprlist()
 // int i (2 identifiers)
 HLNode* Parser::trydecl()
 {
-    if(match(Lexer::TOK_VAR) || match(Lexer::TOK_IDENT) || match(Lexer::TOK_FUNC))
+    if(match(Lexer::TOK_IDENT))
     {
         lookAhead();
         if(lookahead.tt == Lexer::TOK_IDENT)
             return decl();
     }
+    else if(match(Lexer::TOK_VAR) || match(Lexer::TOK_FUNC))
+        return decl();
 
     return NULL;
 }
@@ -750,31 +819,35 @@ HLNode* Parser::decl()
     if(node)
     {
         HLNode *decls = _decllist();
-
         if(tryeat(Lexer::TOK_MASSIGN))
-        {
             node->flags = DECLFLAG_MUTABLE;
-            // Mutable decl assignment, give all individual HLVarDef that flag too...
-            if(decls)
-            {
-                HLNode **ch = decls->u.list.list;
-                const size_t N = decls->u.list.used;
-                for(size_t i = 0; i < N; ++i)
-                {
-                    HLNode *c = ch[i];
-                    assert(c->type == HLNODE_VARDEF);
-                    c->flags |= DECLFLAG_MUTABLE;
-                    // ... and mark the symbol as mutable
-                    sref symid = c->as<HLVarDef>()->ident->as<HLIdent>()->symid;
-                    syms.makeMutable(symid);
-                }
-            }
-        }
         else
             eat(Lexer::TOK_CASSIGN);
 
         node->u.vardecllist.decllist = decls;
         node->u.vardecllist.vallist = _exprlist();
+
+        // Declaration is finished, make all declared symbols usable and optionally mutable
+        if(decls)
+        {
+            HLNode **ch = decls->u.list.list;
+            const size_t N = decls->u.list.used;
+            for(size_t i = 0; i < N; ++i)
+            {
+                HLNode *c = ch[i];
+                assert(c->type == HLNODE_VARDEF);
+
+                sref symid = c->as<HLVarDef>()->ident->as<HLIdent>()->symid;
+                Symstore::Sym *sym = syms.getsym(symid);
+                if(node->flags & DECLFLAG_MUTABLE)
+                {
+                    c->flags |= DECLFLAG_MUTABLE;
+                    sym->makeMutable();
+                }
+                sym->makeUsable();
+            }
+        }
+
     }
 
     tryeat(Lexer::TOK_SEMICOLON);
@@ -1013,7 +1086,10 @@ HLNode* Parser::ensure(HLNode* node)
 HLNode* Parser::ensure(HLNode* node, const Lexer::Token& tok)
 {
     if(node)
+    {
         node->line = tok.line;
+        node->column = tok.column();
+    }
     else
         outOfMemory();
 
@@ -1091,7 +1167,8 @@ void Parser::errorAt(const Lexer::Token& tok, const char *msg, const char *hint)
     if(panic)
         return;
 
-    printf("(%s:%u): %s (Token: %s)\n", _fn, tok.line, msg, Lexer::GetTokenText(tok.tt));
+    //printf("(%s:%u): %s (Token: %s)\n", _fn, tok.line, msg, Lexer::GetTokenText(tok.tt));
+    printf("(%s:%u): %s\n", _fn, tok.line, msg);
 
     const char * const beg = tok.linebegin; //_lex->getLineBegin();
     assert(beg);
@@ -1100,6 +1177,7 @@ void Parser::errorAt(const Lexer::Token& tok, const char *msg, const char *hint)
         const char *p = beg;
         for( ; *p && *p != '\r' && *p != '\n'; ++p) {}
         const int linelen = int(p - beg);
+
         printf("|%.*s\n|", linelen, beg);
         for(const char *q = beg; q < tok.begin; ++q)
             putchar(' ');

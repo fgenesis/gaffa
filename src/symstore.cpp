@@ -35,6 +35,12 @@ void Symstore::pop(Frame& f)
     }
 }
 
+void Symstore::dealloc(GC& gc)
+{
+    frames.clear();
+    allsyms.clear();
+}
+
 Symstore::Frame& Symstore::funcframe()
 {
     for(size_t i = frames.size(); i --> 0; )
@@ -73,7 +79,7 @@ unsigned Symstore::indexinframe(const unsigned *uids, size_t n, const Sym *sym)
 }
 
 
-Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, SymbolRefContext referencedHow)
+Symstore::Lookup Symstore::lookup(unsigned strid, const Lexer::Token& tok, SymbolRefContext referencedHow, bool createExternal)
 {
     unsigned usage = SYMUSE_USED;
 
@@ -83,12 +89,14 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, SymbolRefContex
         Frame& f = frames[k];
         if(Sym *s = findinframe(f.symids.data(), f.symids.size(), strid))
         {
-            if(!(s->referencedHow & SYMREF_NOTAVAIL)) // Intentionally skip symbols flagged as such
+            if(s->referencedHow & SYMREF_NOTAVAIL) // Intentionally skip symbols flagged as such
+                res.where = SCOPEREF_INVALID;
+            else
             {
                 s->referencedHow |= referencedHow;
                 s->usage |= usage;
                 if(!s->lineused)
-                    s->lineused = line;
+                    s->lineused = tok.line;
                 res.sym = s;
                 res.symindex = _indexbase + indexinframe(f.symids.data(), f.symids.size(), s);
                 return res;
@@ -102,9 +110,13 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, SymbolRefContex
             usage |= SYMUSE_UPVAL;
         }
     }
+    // In case there was no upper scope to contain the symbol we're looking for, get out now
+    if(res.where == SCOPEREF_INVALID)
+        return res;
     // Symbol not found, must be supplied as external (global) symbol
     res.where = SCOPEREF_EXTERNAL;
     usage = SYMUSE_USED;
+    referencedHow = SymbolRefContext(referencedHow | SYMREF_EXTERNAL);
 
     // Record as missing
     Sym *s = findinframe(missing.data(), missing.size(), strid);
@@ -112,10 +124,12 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, SymbolRefContex
         s->referencedHow |= referencedHow;
     else
     {
+        if(!createExternal)
+            return res;
         s = newsym();
         s->nameStrId = strid;
-        s->linedefined = 0;
-        s->lineused = line;
+        s->tok = tok;
+        s->lineused = tok.line;
         s->referencedHow = referencedHow;
         s->usage = usage;
         missing.push_back(getuid(s));
@@ -125,7 +139,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, unsigned line, SymbolRefContex
     return res;
 }
 
-Symstore::Decl Symstore::decl(unsigned strid, unsigned line, SymbolRefContext referencedHow)
+Symstore::Decl Symstore::decl(unsigned strid, const Lexer::Token& tok, SymbolRefContext referencedHow)
 {
     Frame *ff;
     Decl res = {};
@@ -143,7 +157,7 @@ Symstore::Decl Symstore::decl(unsigned strid, unsigned line, SymbolRefContext re
     }
 
     Sym *s = newsym();
-    s->linedefined = line;
+    s->tok = tok;
     s->nameStrId = strid;
     s->lineused = 0;
     s->referencedHow = referencedHow;
@@ -166,6 +180,11 @@ Symstore::Sym *Symstore::getsym(unsigned uid)
     return &allsyms[uid];
 }
 
+const Symstore::Sym *Symstore::getsym(unsigned uid) const
+{
+    return &allsyms[uid];
+}
+
 unsigned Symstore::getuid(const Sym *sym)
 {
     size_t pos = sym - allsyms.data();
@@ -173,22 +192,15 @@ unsigned Symstore::getuid(const Sym *sym)
     return (unsigned)pos;
 }
 
-Symstore::Sym& Symstore::makeUsable(unsigned uid)
+void Symstore::Sym::makeUsable()
 {
-    Sym *sym = getsym(uid);
-    assert(sym);
-    assert(sym->referencedHow & SYMREF_NOTAVAIL);
-    sym->referencedHow = (SymbolRefContext)(sym->referencedHow & ~SYMREF_NOTAVAIL);
-    return *sym;
+    assert(referencedHow & SYMREF_NOTAVAIL);
+    referencedHow = (SymbolRefContext)(referencedHow & ~SYMREF_NOTAVAIL);
 }
 
-Symstore::Sym& Symstore::makeMutable(unsigned uid)
+void Symstore::Sym::makeMutable()
 {
-    Sym *sym = getsym(uid);
-    assert(sym);
-    assert(sym->referencedHow & SYMREF_NOTAVAIL);
-    sym->referencedHow = (SymbolRefContext)(sym->referencedHow | SYMREF_MUTABLE);
-    return *sym;
+    referencedHow = (SymbolRefContext)(referencedHow | SYMREF_MUTABLE);
 }
 
 u32 SlotDistrib::pick()
@@ -217,6 +229,7 @@ const char* Symstore::Lookup::namewhere() const
 {
     switch(where)
     {
+        case SCOPEREF_INVALID:  return "invalid";
         case SCOPEREF_LOCAL:    return "local";
         case SCOPEREF_UPVAL:    return "upvalue";
         case SCOPEREF_EXTERNAL: return "extern";

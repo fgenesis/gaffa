@@ -95,6 +95,7 @@ public:
             const char *err;
         } u;
         unsigned line;
+        unsigned column() const { return begin - linebegin; }
     };
 
     Lexer(const char *text);

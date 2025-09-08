@@ -89,7 +89,9 @@
 
 --func Point:isZero() { return self.x == 0.0 }
 
-int x = -1
+int x = 1
+x = 2
+
 --int x, y = 0, 1
 --var y: f() = 0
 
