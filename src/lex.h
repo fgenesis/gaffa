@@ -87,6 +87,7 @@ public:
     struct Token
     {
         TokenType tt;
+        unsigned line;
         const char *begin;
         const char *linebegin;
         union
@@ -94,8 +95,9 @@ public:
             unsigned len;
             const char *err;
         } u;
-        unsigned line;
         unsigned column() const { return begin - linebegin; }
+        bool operator==(const Token& o) const { return tt == o.tt && begin == o.begin && line == o.line; }
+        inline bool operator!=(const Token& o) const { return !(*this == o); }
     };
 
     Lexer(const char *text);

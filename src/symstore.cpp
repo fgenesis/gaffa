@@ -89,14 +89,12 @@ Symstore::Lookup Symstore::lookup(unsigned strid, const Lexer::Token& tok, Symbo
         Frame& f = frames[k];
         if(Sym *s = findinframe(f.symids.data(), f.symids.size(), strid))
         {
-            if(s->referencedHow & SYMREF_NOTAVAIL) // Intentionally skip symbols flagged as such
-                res.where = SCOPEREF_INVALID;
-            else
+            if(!(s->referencedHow & SYMREF_NOTAVAIL)) // Intentionally skip symbols flagged as such
             {
                 s->referencedHow |= referencedHow;
                 s->usage |= usage;
-                if(!s->lineused)
-                    s->lineused = tok.line;
+                if(!s->firstuse.line)
+                    s->firstuse = tok;
                 res.sym = s;
                 res.symindex = _indexbase + indexinframe(f.symids.data(), f.symids.size(), s);
                 return res;
@@ -110,9 +108,6 @@ Symstore::Lookup Symstore::lookup(unsigned strid, const Lexer::Token& tok, Symbo
             usage |= SYMUSE_UPVAL;
         }
     }
-    // In case there was no upper scope to contain the symbol we're looking for, get out now
-    if(res.where == SCOPEREF_INVALID)
-        return res;
     // Symbol not found, must be supplied as external (global) symbol
     res.where = SCOPEREF_EXTERNAL;
     usage = SYMUSE_USED;
@@ -129,7 +124,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, const Lexer::Token& tok, Symbo
         s = newsym();
         s->nameStrId = strid;
         s->tok = tok;
-        s->lineused = tok.line;
+        s->firstuse = tok;
         s->referencedHow = referencedHow;
         s->usage = usage;
         missing.push_back(getuid(s));
@@ -159,7 +154,7 @@ Symstore::Decl Symstore::decl(unsigned strid, const Lexer::Token& tok, SymbolRef
     Sym *s = newsym();
     s->tok = tok;
     s->nameStrId = strid;
-    s->lineused = 0;
+    s->firstuse.line = 0;
     s->referencedHow = referencedHow;
     s->usage = SYMUSE_UNUSED;
     s->localslot = ff->localids.pick();
@@ -194,7 +189,6 @@ unsigned Symstore::getuid(const Sym *sym)
 
 void Symstore::Sym::makeUsable()
 {
-    assert(referencedHow & SYMREF_NOTAVAIL);
     referencedHow = (SymbolRefContext)(referencedHow & ~SYMREF_NOTAVAIL);
 }
 
@@ -229,7 +223,6 @@ const char* Symstore::Lookup::namewhere() const
 {
     switch(where)
     {
-        case SCOPEREF_INVALID:  return "invalid";
         case SCOPEREF_LOCAL:    return "local";
         case SCOPEREF_UPVAL:    return "upvalue";
         case SCOPEREF_EXTERNAL: return "extern";

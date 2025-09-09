@@ -45,15 +45,6 @@ static const char *getLabel(HLNodeType t)
 #include "strings.h"
 
 
-static void declflags(const HLNode *n)
-{
-    if(n->flags & DECLFLAG_MUTABLE)
-        printf(" [mutable!]");
-
-    if(n->flags & DECLFLAG_EXPORT)
-        printf(" [export]");
-}
-
 
 static void indent(size_t n)
 {
@@ -74,7 +65,7 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
 
     if(n->type == HLNODE_IDENT)
     {
-        unsigned strid =  n->u.ident.nameStrId;
+        unsigned strid = n->u.ident.nameStrId;
         if(strid)
         {
             const char *s = p.lookup(strid);
@@ -100,10 +91,6 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
             printf("(type is inferred)\n");
         }
         return true;
-    }
-    else if(n->type == HLNODE_VARDECLASSIGN || n->type == HLNODE_FUNCDECL)
-    {
-        declflags(n);
     }
     else if(n->type == HLNODE_RETURNYIELD)
     {

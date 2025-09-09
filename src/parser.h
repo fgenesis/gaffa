@@ -85,7 +85,7 @@ protected:
     HLNode *_funcreturns(unsigned *pfuncflags);
 
     HLNode *_assignmentWithPrefix(HLNode *lhs); // = EXPR or := EXPR
-    HLNode *_restassign(HLNode *firstLhs); // returns list
+    HLNode *_restassign(HLNode *firstLhs, const Lexer::Token& lhsTok); // returns list
     HLNode *_decllist();
 
     HLNode *_fncall(HLNode *callee);
@@ -146,7 +146,7 @@ private:
     void eat(Lexer::TokenType tt);
     bool tryeat(Lexer::TokenType tt);
     bool match(Lexer::TokenType tt) const;
-    void eatmatching(Lexer::TokenType tt, char opening, unsigned linebegin);
+    void eatmatching(Lexer::TokenType tt, const Lexer::Token& begintok);
     void errorAt(const Lexer::Token& tok, const char *msg, const char *hint = NULL);
     void error(const char *msg, const char *hint = NULL);
     void errorAtCurrent(const char *msg, const char *hint = NULL);
@@ -157,7 +157,7 @@ private:
     Str _identStr(const Lexer::Token& tok);
     bool _checkname(const Lexer::Token& tok, const char *whatfor);
     void _applyUsage(const Lexer::Token& tok, HLNode *node, IdentUsage usage, SymbolRefContext symref);
-    void _checkAssignTarget(const HLNode *node);
+    void _checkAssignTarget(const HLNode *node, const Lexer::Token& nodetok);
     const char *symbolname(const HLNode *node) const;
     const char *symbolname(const Symstore::Sym *sym) const;
 

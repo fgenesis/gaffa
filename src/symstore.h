@@ -16,7 +16,6 @@ enum ScopeType
 
 enum ScopeReferral
 {
-    SCOPEREF_INVALID,  // invalid scope, unavailable, etc
     SCOPEREF_LOCAL,    // in local scope
     SCOPEREF_UPVAL,    // not in local scope but exists in an outer scope across a function boundary
     SCOPEREF_EXTERNAL, // unknown identifier
@@ -24,12 +23,13 @@ enum ScopeReferral
 
 enum SymbolRefContext
 {
-    SYMREF_STANDARD = 0x00,  // Just any symbol (plain old variable, no special properties)
-    SYMREF_MUTABLE  = 0x01,  // Symbol is target of an assignment after declaration
-    SYMREF_TYPE     = 0x02,  // Symbol is used as a type
-    SYMREF_EXPORTED = 0x04,  // Symbol is exported
-    SYMREF_NOTAVAIL = 0x08,  // Force symbol lookup to fail
-    SYMREF_EXTERNAL = 0x10,  // Symbol is external
+    SYMREF_STANDARD    = 0x00,  // Just any symbol (plain old variable, no special properties)
+    SYMREF_MUTABLE     = 0x01,  // Symbol is target of an assignment after declaration
+    SYMREF_TYPE        = 0x02,  // Symbol is used as a type
+    SYMREF_EXPORTED    = 0x04,  // Symbol is exported
+    SYMREF_NOTAVAIL    = 0x08,  // Force symbol lookup to fail
+    SYMREF_EXTERNAL    = 0x10,  // Symbol is external
+    SYMREF_KNOWN_VALUE = 0x20,  // Symbol has a value that is compile-time known
 };
 
 enum SymbolUsageFlags
@@ -57,14 +57,15 @@ class Symstore
 public:
     struct Sym
     {
-        Lexer::Token tok;
         unsigned nameStrId;
-        unsigned lineused; // first usage; if 0, var is never used
         unsigned referencedHow; // MLSymbolRefContext
         unsigned usage;
         unsigned localslot; // FIXME remove this
+        Lexer::Token tok, firstuse;
+        Val val;
 
         inline unsigned linedefined() const { return tok.line; }
+        inline unsigned lineused() const { return firstuse.line; } // first usage; if 0, var is never used
         inline bool used() const { return usage || (referencedHow & SYMREF_MUTABLE); }
         inline bool mustclose() const { return (usage & SYMUSE_UPVAL) && (referencedHow & SYMREF_MUTABLE); }
 

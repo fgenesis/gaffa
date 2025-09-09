@@ -148,33 +148,30 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
         {
             assert(symref == SYMREF_STANDARD); // not used
             Symstore::Decl decl = syms.decl(strid, tok, SYMREF_NOTAVAIL);
+            if(decl.sym)
+            {
+                ident.symid = syms.getuid(decl.sym);
+                printf("DEBUG: Declared symbol '%s' (symid %u) in line %u\n", name.s, ident.symid, tok.line);
+            }
             if(decl.clashing)
             {
                 std::ostringstream os;
-                os << "redefinition of '" << name.s << "' -- first defined in line " << decl.clashing->linedefined();
+                os << "'" << name.s << "': redefinition; first defined in line " << decl.clashing->linedefined();
                 errorAt(tok, os.str().c_str());
+                panic = false;
+                errorAt(decl.clashing->tok, "(Previously defined here)");
             }
-            ident.symid = syms.getuid(decl.sym);
-            printf("Declared symbol '%s' (symid %u) in line %u\n", name.s, ident.symid, tok.line);
         }
         break;
 
         case IDENT_USAGE_USE:
         {
             Symstore::Lookup f = syms.lookup(strid, tok, symref, true);
-            if(f.sym)
-            {
-                printf("Referring '%s' in line %u as %s from line %u (symindex %d)\n",
-                    name.s, node->line, f.namewhere(), f.sym->linedefined(), f.symindex);
-                ident.symid = syms.getuid(f.sym);
-            }
-            if(f.where == SCOPEREF_INVALID)
-            {
-                std::ostringstream os;
-                os << "Can't use variable '" << name.s << "' in its own declaraction";
-                errorAt(tok, os.str().c_str());
-            }
+            assert(f.sym);
 
+            printf("Referring '%s' in line %u as %s from line %u (symindex %d)\n",
+                name.s, node->line, f.namewhere(), f.sym->linedefined(), f.symindex);
+            ident.symid = syms.getuid(f.sym);
         }
     }
 }
@@ -334,7 +331,7 @@ HLNode* Parser::stmt()
             ret = suffixedexpr();
             if(curtok.tt == Lexer::TOK_COMMA || curtok.tt == Lexer::TOK_CASSIGN)
             {
-                ret = _restassign(ret);
+                ret = _restassign(ret, beg);
             }
             // else it's just a function / method call, already handled
 
@@ -353,16 +350,22 @@ HLNode* Parser::stmt()
 
 // export DECL      // export a var decl
 // export func(...) // export a named function
+// export (EXPR) DECL // explicit named export
 HLNode* Parser::_export()
 {
-    const Lexer::Token beg = curtok;
+
     // 'export' keyword was consumed
-    HLNode *ret = ensure(decl());
+    HLNode *ret = ensure(hlir->exprt());
     if(ret)
     {
-        if(ret->flags & DECLFLAG_MUTABLE)
-            errorAt(beg, "exports can't be mutable"); // FIXME: this should be checked in MLIR validation
-        ret->flags |= DECLFLAG_EXPORT;
+        if(tryeat(Lexer::TOK_LPAREN))
+        {
+            const Lexer::Token opening = prevtok;
+            ret->u.exprt.name = expr();
+            eatmatching(Lexer::TOK_RPAREN, opening);
+        }
+
+        ret->u.exprt.what = decl();
     }
     return ret;
 }
@@ -509,9 +512,9 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 HLNode* Parser::_funcparams()
 {
     eat(Lexer::TOK_LPAREN);
-    const unsigned openbegin = prevtok.line;
+    const Lexer::Token opening = prevtok;
     HLNode *node = match(Lexer::TOK_RPAREN) ? NULL : _decllist();
-    eatmatching(Lexer::TOK_RPAREN, '(', openbegin);
+    eatmatching(Lexer::TOK_RPAREN, opening);
     return node;
 }
 
@@ -547,7 +550,7 @@ HLNode* Parser::functionbody()
 void Parser::_funcattribs(unsigned *pfuncflags)
 {
     // '[' was just eaten
-    const unsigned linebegin = prevtok.line;
+    const Lexer::Token opening = prevtok;
     const Str pure = this->strpool.put("pure");
 
     while(match(Lexer::TOK_IDENT))
@@ -562,7 +565,7 @@ void Parser::_funcattribs(unsigned *pfuncflags)
         tryeat(Lexer::TOK_COMMA);
 
     }
-    eatmatching(Lexer::TOK_RSQ, '[', linebegin);
+    eatmatching(Lexer::TOK_RSQ, opening);
 }
 
 // -> nil
@@ -622,18 +625,19 @@ HLNode* Parser::_assignmentWithPrefix(HLNode *lhs)
     return node;
 }
 
-HLNode* Parser::_restassign(HLNode* firstLhs)
+HLNode* Parser::_restassign(HLNode* firstLhs, const Lexer::Token& lhsTok)
 {
     HLNode *lhs = ensure(hlir->list());
     if(!lhs)
         return NULL;
 
-    _checkAssignTarget(firstLhs);
+    _checkAssignTarget(firstLhs, lhsTok);
     lhs->u.list.add(firstLhs, gc);
     while(tryeat(Lexer::TOK_COMMA))
     {
+        const Lexer::Token tok = curtok;
         HLNode *n = suffixedexpr();
-        _checkAssignTarget(n);
+        _checkAssignTarget(n, tok);
         lhs->u.list.add(n, gc);
     }
 
@@ -642,26 +646,51 @@ HLNode* Parser::_restassign(HLNode* firstLhs)
 
 // Check that any symbol directly assigned to is mutable and a local or upvalue.
 // Don't allow assignment to external symbols.
-void Parser::_checkAssignTarget(const HLNode* node)
+void Parser::_checkAssignTarget(const HLNode* node, const Lexer::Token& nodetok)
 {
     if(node->type == HLNODE_IDENT)
     {
         sref symid = node->u.ident.symid;
         Symstore::Sym *sym = syms.getsym(symid);
+
+        // Undeclared symbols are assumed to be an imported external symbol (which are always non-mutable).
+        // So if we get an external symbol, that's the equivalent of trying to assign to an undeclared variable
         if(sym->referencedHow & SYMREF_EXTERNAL)
         {
-            std::ostringstream os;
-            os << "'" << symbolname(sym) << "': undeclared identifier";
-            errorAt(sym->tok, os.str().c_str());
+            const char *sn = symbolname(sym);
+            //if(node->line == sym->lineused() && node->column == sym->firstuse.column())
+            if(sym->firstuse == nodetok)
+            {
+                std::ostringstream os;
+                os << "'" << sn << "': undeclared identifier";
+                errorAt(nodetok, os.str().c_str());
+            }
+            else
+            {
+                {
+                    std::ostringstream os;
+                    os << "'" << sn << "': is an external symbol that can't be assigned to";
+                    errorAt(nodetok, os.str().c_str());
+                }
+                {
+                    std::ostringstream os;
+                    const char *t = (sym->referencedHow & SYMREF_TYPE) ? "type" : "var";
+                    os << "(To import as mutable, put '" << t << " " << sn << " := " << sn << "' above)";
+                    panic = false; // HACK
+                    errorAt(sym->firstuse, "(Initially imported here)", os.str().c_str());
+                }
+            }
         }
+
         else if(!(sym->referencedHow & SYMREF_MUTABLE))
         {
-            Symstore::Lookup lookup = syms.lookup(sym->nameStrId, curtok, SYMREF_STANDARD, false);
+            const char *sn = symbolname(sym);
+            Symstore::Lookup lookup = syms.lookup(sym->nameStrId, nodetok, SYMREF_STANDARD, false);
             assert(lookup.sym == sym);
             {
                 std::ostringstream os;
-                os << "'" << symbolname(sym) << "': Can't assign, " << lookup.namewhere() << " is not mutable";
-                errorAt(curtok, os.str().c_str());
+                os << "'" << sn << "': Can't assign, " << lookup.namewhere() << " is not mutable";
+                errorAt(nodetok, os.str().c_str());
             }
             if(sym->tok.line)
             {
@@ -744,9 +773,9 @@ HLNode* Parser::_decllist()
 HLNode* Parser::_paramlist()
 {
     // '(' was eaten
-    unsigned begin = prevtok.line;
+    const Lexer::Token opening = prevtok;
     HLNode *ret = match(Lexer::TOK_RPAREN) ? NULL : _exprlist();
-    eatmatching(Lexer::TOK_RPAREN, '(', begin);
+    eatmatching(Lexer::TOK_RPAREN, opening);
     return ret;
 }
 
@@ -819,9 +848,8 @@ HLNode* Parser::decl()
     if(node)
     {
         HLNode *decls = _decllist();
-        if(tryeat(Lexer::TOK_MASSIGN))
-            node->flags = DECLFLAG_MUTABLE;
-        else
+        const bool mut = tryeat(Lexer::TOK_MASSIGN);
+        if(!mut)
             eat(Lexer::TOK_CASSIGN);
 
         node->u.vardecllist.decllist = decls;
@@ -839,11 +867,8 @@ HLNode* Parser::decl()
 
                 sref symid = c->as<HLVarDef>()->ident->as<HLIdent>()->symid;
                 Symstore::Sym *sym = syms.getsym(symid);
-                if(node->flags & DECLFLAG_MUTABLE)
-                {
-                    c->flags |= DECLFLAG_MUTABLE;
+                if(mut)
                     sym->makeMutable();
-                }
                 sym->makeUsable();
             }
         }
@@ -1149,7 +1174,7 @@ bool Parser::match(Lexer::TokenType tt) const
     return curtok.tt == tt;
 }
 
-void Parser::eatmatching(Lexer::TokenType tt, char opening, unsigned linebegin)
+void Parser::eatmatching(Lexer::TokenType tt, const Lexer::Token& begintok)
 {
     if(curtok.tt == tt)
     {
@@ -1157,9 +1182,13 @@ void Parser::eatmatching(Lexer::TokenType tt, char opening, unsigned linebegin)
         return;
     }
 
-    char buf[64];
-    sprintf(&buf[0], "Expected to close %c in line %u", opening, linebegin);
-    errorAtCurrent(&buf[0]);
+    char buf[64], hint[64];
+    sprintf(&buf[0], "Expected to close %c in line %u", *begintok.begin, begintok.line);
+    errorAt(curtok, &buf[0]);
+
+    sprintf(&buf[0], "'%s' expected", Lexer::GetTokenText(tt));
+    panic = false;
+    errorAt(begintok, "(Opened here)", &buf[0]);
 }
 
 void Parser::errorAt(const Lexer::Token& tok, const char *msg, const char *hint)
@@ -1214,7 +1243,7 @@ HLNode *Parser::nil(Context ctx)
 HLNode* Parser::tablecons(Context ctx)
 {
     // { was just eaten while parsing an expr
-    const unsigned beginline = prevtok.line;
+    const Lexer::Token opening = prevtok;
 
     HLNode *node = ensure(hlir->list());
     if(!node)
@@ -1254,7 +1283,7 @@ HLNode* Parser::tablecons(Context ctx)
     }
     while(tryeat(Lexer::TOK_COMMA) || tryeat(Lexer::TOK_SEMICOLON));
 
-    eatmatching(Lexer::TOK_RCUR, '{', beginline);
+    eatmatching(Lexer::TOK_RCUR, prevtok);
 
     return node;
 }
@@ -1262,7 +1291,7 @@ HLNode* Parser::tablecons(Context ctx)
 HLNode* Parser::arraycons(Context ctx)
 {
     // [ was just eaten while parsing an expr
-    const unsigned beginline = prevtok.line;
+    const Lexer::Token opening = prevtok;
 
     HLNode *node = ensure(hlir->list());
     if(node)
@@ -1279,7 +1308,7 @@ HLNode* Parser::arraycons(Context ctx)
         while(tryeat(Lexer::TOK_COMMA) || tryeat(Lexer::TOK_SEMICOLON));
     }
 
-    eatmatching(Lexer::TOK_RSQ, '[', beginline);
+    eatmatching(Lexer::TOK_RSQ, opening);
 
     return node;
 }

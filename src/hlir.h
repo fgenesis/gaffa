@@ -36,13 +36,6 @@ enum FuncFlags
     FUNCFLAGS_METHOD_SUGAR    = 0x10, // implicit first parameter is 'this'
 };
 
-enum DeclFlags
-{
-    DECLFLAG_DEFAULT = 0x00,
-    DECLFLAG_MUTABLE = 0x01,
-    DECLFLAG_EXPORT  = 0x02
-};
-
 enum HLNodeType
 {
     HLNODE_NONE,
