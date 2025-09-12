@@ -82,6 +82,7 @@ static const Keyword Keywords[] =
     { "yield",     Lexer::TOK_YIELD    },
     { "export",    Lexer::TOK_EXPORT   },
     { "emit",      Lexer::TOK_EMIT     },
+    { "defer",     Lexer::TOK_DEFER    },
 };
 
 

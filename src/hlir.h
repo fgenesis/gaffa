@@ -9,22 +9,18 @@
 #include "gaalloc.h"
 
 struct GC;
+struct HLFoldTracker;
+class Symstore;
 
-enum Comparison
-{
-    JUMP_ALWAYS,
-    JUMP_EQ,
-    JUMP_NEQ,
-    JUMP_LT,
-    JUMP_LTE,
-    JUMP_GTE
-};
 
 enum IdentFlags
 {
     IDENTFLAGS_NONE         = 0x00,
     IDENTFLAGS_OPTIONALTYPE = 0x01,
     IDENTFLAGS_DUCKYTYPE    = 0x02,
+    IDENTFLAGS_LHS          = 0x04, // Identifier is being declared or assigned to
+    IDENTFLAGS_RHS          = 0x08, // Identifier is in a context of being evaluated
+    // Neither LHS/RHS set: Identifier without a specific role
 };
 
 enum FuncFlags
@@ -226,7 +222,6 @@ struct HLFunctionHdr : HLNodeBase
     enum { EnumType = HLNODE_FUNCTIONHDR, Children = 2 };
     HLNode *paramlist; // list of HLVarDef // TODO: make this HLVarDeclList in the future when there are function default args?
     HLNode *rettypes; // OPTIONAL list of HLNode
-    //FuncFlags flags;
 };
 
 struct HLFunction : HLNodeBase
@@ -249,6 +244,8 @@ struct HLExport : HLNodeBase
 // This is to make node-based optimization easier.
 struct HLNode
 {
+    ~HLNode();
+
     union
     {
         HLConstantValue constant;
@@ -296,6 +293,13 @@ struct HLNode
         return reinterpret_cast<const T*>(&u);
     }
 
+    HLList *aslist(HLNodeType ty)
+    {
+        assert(_nch == HLList::Children);
+        assert(ty == type);
+        return &u.list;
+    }
+
     unsigned numchildren() const
     {
         return _nch == HLList::Children
@@ -316,6 +320,29 @@ struct HLNode
             ? u.list.list
             : &u.aslist[0];
     }
+
+    bool isconst() const;
+    bool iscall() const;
+    HLNode *fold(HLFoldTracker &ft);
+    HLNode *makeconst(GC& gc, const Val& val);
+    void clear(GC& gc);
+
+    template<typename T>
+    inline HLNode *unsafemorph()
+    {
+        type = HLNodeType(T::EnumType);
+        _nch = T::Children;
+        return this;
+    }
+
+    template<typename T>
+    inline HLNode *morph(GC& gc)
+    {
+        this->clear(gc);
+        return this->unsafemorph<T>();
+    }
+
+    HLNode *foldfunc(HLFoldTracker &ft);
 };
 
 
@@ -357,12 +384,13 @@ private:
     template<typename T> inline HLNode *allocT()
     {
         HLNode *node = (HLNode*)bla.alloc(sizeof(HLNode));
-        if(node)
-        {
-            node->type = HLNodeType(T::EnumType);
-            node->_nch = T::Children;
-        }
-        return node;
+        return node ? node->unsafemorph<T>() : node;
     }
 };
 
+struct HLFoldTracker
+{
+    GC& gc;
+    Symstore& syms;
+    TypeRegistry& tr;
+};

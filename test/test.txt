@@ -92,8 +92,12 @@
 -- import global symbol as mutable
 --type int = int
 
-int x, x = 1, 2
---int x = 2
+--int y = defer
+--int x = 1
+--int y = x
+--return y
+
+func i2f(int i) -> float { return i }
 
 --int x, y = 0, 1
 --var y: f() = 0

@@ -41,9 +41,8 @@ struct _FieldDefault
 
 // Type descriptor
 // This struct is variable sized and must not contain pointers (except at the start of the struct)
-// The struct memory itself is subject to deduplication (like strings), with the underlying idea that
+// The struct memory itself is subject to deduplication (like strings), with the idea that
 // multiple created types with the same members and properties are actually the same type.
-// If you want types to be explicitly different and intentionally incompatible, create an alias to an existing type.
 struct TDesc
 {
     DType *dtype; // This is ignored for deduplication
@@ -52,9 +51,6 @@ struct TDesc
     tsize allocsize; // for the GC, but also adds some entropy for hashing/deduplication
 
     // Defines what kind of type description this is.
-    // If it's an alias:
-    // - Holds the original type. n == 0.
-    // If it's not an alias:
     // - Always: primtype < PRIMTYPE_ANY
     // - if PRIMTYPE_ARRAY, n == 1 and the type that follows is the array specialization
     // - if PRIMTYPE_TABLE, n == 2 and the types that follow are key and value types
@@ -104,9 +100,8 @@ struct TDesc
 
 TDesc *TDesc_New(const GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize);
 
-struct _StructMember
+struct StructMember
 {
-    tsize idx;
 	Type t;
 	sref name;
     Val defaultval; // xnil if no default
@@ -120,8 +115,12 @@ public:
     bool init();
     void dealloc();
 
-    Type mkstruct(const Table& t); // makes a struct from t
+    Type mkstruct(const StructMember *m, size_t n, size_t numdefaults);
+    Type mkstruct(const Table& t); // makes a struct from t (named)
     Type mkstruct(const DArray& t);
+
+    // Helper to create a function type
+    //Type mkfunc(const Type *arglist, size_t nargs, const Type *retlist, size_t nrets);
 
     // Create a subtype of an existing internal type (eg. Table<string, Any>)
     Type mksub(PrimType prim, const Type *sub, size_t n);

@@ -83,7 +83,7 @@ static int markval(ga_RT& rt, ValU v, int steps)
             break;
 
         case PRIMTYPE_TYPE:
-            rt.tr.mark(v.u.t);
+            //rt.tr.mark(v.u.t);
             break;
 
         default:

@@ -121,6 +121,7 @@ void testdedup()
     }
 }
 
+/*
 void testtype()
 {
     GC gc = {0};
@@ -158,6 +159,7 @@ void testtype()
     tr.dealloc();
     st.dealloc();
 }
+*/
 
 extern void vmtest(GC& gc);
 
@@ -191,6 +193,15 @@ int main(int argc, char **argv)
     HLNode *node = pp.parse();
     if(!node)
         return 1;
+
+    hlirDebugDump(strtab, node);
+
+    TypeRegistry tr(gc);
+    HLFoldTracker ft = { gc, pp.syms, tr };
+
+    node->fold(ft);
+
+    puts("\n####### AFTER FOLDING #######\n");
 
     hlirDebugDump(strtab, node);
 

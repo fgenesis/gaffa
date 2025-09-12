@@ -2,6 +2,7 @@
 #include "table.h"
 #include "array.h"
 #include "gc.h"
+#include "gaobj.h"
 
 #include <string.h>
 
@@ -77,10 +78,41 @@ void TypeRegistry::dealloc()
     _tt.dealloc();
 }
 
+Type TypeRegistry::mkstruct(const StructMember* m, size_t n, size_t numdefaults)
+{
+    u32 bits = 0; // TODO: make union? other bits?
+
+    TDesc *td = TDesc_New(_tt.gc, n, bits, numdefaults, 0);
+    _FieldDefault *fd = td->defaults();
+    for(size_t i = 0; i < n; ++i)
+    {
+        td->names()[i] = m[i].name;
+        td->types()[i] = m[i].t;
+
+        const Val& d = m[i].defaultval;
+        if(d == XNil)
+        {
+            assert(numdefaults);
+            --numdefaults;
+            continue;
+        }
+
+        // Record fields with defaults and their index so setting them is a simple loop on object creation
+        fd->idx = i;
+        fd->t = d.type;
+        fd->u = d.u;
+        ++fd;
+    }
+
+    assert(numdefaults == 0); // Otherwise the allocation size was wrong and we're fucked now.
+
+    return _store(td);
+}
+
 Type TypeRegistry::mkstruct(const Table& t)
 {
-    PodArray<_StructMember> tn;
     const tsize N = t.size();
+    PodArray<StructMember> tn;
     if(!tn.resize(_tt.gc, N))
         return NilType;
 
@@ -93,40 +125,20 @@ Type TypeRegistry::mkstruct(const Table& t)
         if(e.v.type.id == PRIMTYPE_TYPE)
         {
             tn[i].defaultval = XNil;
-            tn[i].t = e.v.u.t;
+            tn[i].t = e.v.u.t->tid;
         }
         else
         {
-            ++numdefaults;
             tn[i].defaultval = e.v;
             tn[i].t = e.v.type;
         }
         tn[i].name = e.k.u.str;
-        tn[i].idx = i;
     }
 
-    u32 bits = 0; // TODO: make union? other bits?
-
-    TDesc *td = TDesc_New(_tt.gc, N, bits, numdefaults, 0);
-    _FieldDefault *fd = td->defaults();
-    for(size_t i = 0; i < tn.size(); ++i)
-    {
-        td->names()[i] = tn[i].name;
-        td->types()[i] = tn[i].t;
-
-        const Val& d = tn[i].defaultval;
-        if(d == XNil)
-            continue;
-
-        // Record fields with defaults and their index so setting them is a simple loop on object creation
-        fd->idx = i;
-        fd->t = d.type;
-        fd->u = d.u;
-        ++fd;
-    }
+    Type ret = mkstruct(tn.data(), N, numdefaults);
     tn.dealloc(_tt.gc);
 
-    return _store(td);
+    return ret;
 }
 
 Type TypeRegistry::mkstruct(const DArray& t)
@@ -149,11 +161,25 @@ Type TypeRegistry::mkstruct(const DArray& t)
                 return NilType;
             }
             td->names()[i] = 0;
-            td->types()[i] = e.u.t;
+            td->types()[i] = e.u.t->tid;
         }
 
     return _store(td);
 }
+
+/*
+Type TypeRegistry::mkfunc(const Type* arglist, size_t nargs, const Type* retlist, size_t nrets)
+{
+    // Both of these are just placeholders to store subtypes. Nil has no special properties so just use that.
+    const Type t[] =
+    {
+        mksub(PRIMTYPE_NIL, arglist, nargs),
+        mksub(PRIMTYPE_NIL, retlist, nrets)
+    };
+
+    return mksub(PRIMTYPE_FUNC, t, Countof(t));
+}
+*/
 
 const TDesc *TypeRegistry::lookup(Type t) const
 {

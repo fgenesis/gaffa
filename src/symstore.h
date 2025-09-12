@@ -29,7 +29,9 @@ enum SymbolRefContext
     SYMREF_EXPORTED    = 0x04,  // Symbol is exported
     SYMREF_NOTAVAIL    = 0x08,  // Force symbol lookup to fail
     SYMREF_EXTERNAL    = 0x10,  // Symbol is external
-    SYMREF_KNOWN_VALUE = 0x20,  // Symbol has a value that is compile-time known
+    SYMREF_KNOWN_TYPE  = 0x20,  // The symbol's type is known (but not necessarily the value)
+    SYMREF_KNOWN_VALUE = 0x40,  // Symbol has a valid value known at compile time
+    SYMREF_DEFERRED    = 0x80,  // Symbol was declared deferred, allow re-declaration
 };
 
 enum SymbolUsageFlags
@@ -58,11 +60,10 @@ public:
     struct Sym
     {
         unsigned nameStrId;
-        unsigned referencedHow; // MLSymbolRefContext
+        unsigned referencedHow; // SymbolRefContext
         unsigned usage;
         unsigned localslot; // FIXME remove this
         Lexer::Token tok, firstuse;
-        Val val;
 
         inline unsigned linedefined() const { return tok.line; }
         inline unsigned lineused() const { return firstuse.line; } // first usage; if 0, var is never used
@@ -71,6 +72,16 @@ public:
 
         void makeUsable(); // helper for the parser; removes SYMREF_NOTAVAIL flag
         void makeMutable();
+        void makeDeferred();
+
+        void setType(Type t);
+        void setValue(const Val& val);
+        void forgetValue();
+        inline const Val *value() const { return (referencedHow & SYMREF_KNOWN_VALUE) ? &val : NULL; }
+        inline const Type *valtype() const { return (referencedHow & SYMREF_KNOWN_TYPE) ? &val.type : NULL; }
+        inline bool isMutable() const { return !!(referencedHow & SYMREF_MUTABLE); }
+    private:
+        Val val;
     };
     struct Frame
     {
@@ -111,9 +122,6 @@ public:
     Sym *getsym(unsigned uid);
     const Sym *getsym(unsigned uid) const;
     unsigned getuid(const Sym *sym);
-
-    Sym& makeUsable(unsigned uid);
-    Sym& makeMutable(unsigned uid);
 
     std::vector<unsigned> missing;
 

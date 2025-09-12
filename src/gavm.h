@@ -2,8 +2,16 @@
 
 #include "defs.h"
 #include "typing.h"
+#include "gavm.h"
 
 struct VmIter;
+struct DType;
+struct VM;
+
+enum
+{
+    MINSTACK = 16
+};
 
 // advance iterator; old value is in val and updated to new value
 // continue iteration until this returns 0
@@ -28,3 +36,6 @@ struct VmIter
         } index;
     } u;
 };
+
+
+

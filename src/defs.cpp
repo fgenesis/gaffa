@@ -80,10 +80,7 @@ static const unsigned char TypeElementSizes[] =
     /* PRIMTYPE_TABLE  */ sizeof(GCobj*), // table/array/object are always dynamically allocated
     /* PRIMTYPE_ARRAY  */ sizeof(GCobj*),
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
-    /* PRIMTYPE_ANY    */ sizeof(ValU),
-    /* PRIMTYPE_URANGE */ //sizeof(Range<uint>),
-    /* PRIMTYPE_SRANGE */ //sizeof(Range<sint>),
-    /* PRIMTYPE_FRANGE */ //sizeof(Range<real>),
+    /* PRIMTYPE_ANY    */ sizeof(ValU)
 };
 
 size_t GetPrimTypeStorageSize(unsigned t)
@@ -118,5 +115,5 @@ void ValU::_init(tsize tyid)
 
 bool ValU::operator==(const ValU& o) const
 {
-    return u.t.id == o.u.t.id && u.opaque == o.u.opaque;
+    return type.id == o.type.id && u.opaque == o.u.opaque;
 }

@@ -34,3 +34,14 @@ tsize DObj::memberOffset(const Val* pmember) const
     assert(beg <= pmember && pmember < beg + nmembers);
     return (const char*)pmember - (const char*)this;
 }
+
+static const Type StrType = { PRIMTYPE_STRING };
+static const Type UintType = { PRIMTYPE_UINT };
+
+DType::DType(Type tid, TDesc* desc, DType* typeType)
+    : DObj(typeType)
+    , fieldIndices(StrType, UintType)
+    , tid(tid), tdesc(desc)
+{
+    assert(typeType->tid.id == PRIMTYPE_TYPE);
+}

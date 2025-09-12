@@ -70,9 +70,14 @@ static Val makenum(const char *s, const char *end)
 
 const char *Parser::symbolname(const HLNode *node) const
 {
-    if(node->type == HLNODE_IDENT)
+    switch(node->type)
     {
-        return symbolname(syms.getsym(node->u.ident.symid));
+        case HLNODE_IDENT:
+            return symbolname(syms.getsym(node->u.ident.symid));
+        case HLNODE_NAME:
+            return strpool.lookup(node->u.name.nameStrId).s;
+
+        default: ;
     }
     return NULL;
 }
@@ -119,7 +124,7 @@ bool Parser::_checkname(const Lexer::Token& tok, const char *whatfor)
 
         if(Lexer::IsKeyword(tok.tt))
         {
-            os << " (which is a reserved identifier)";
+            os << " (which is a reserved keyword)";
 
             if(!strcmp(whatfor, "method"))
             {
@@ -147,6 +152,7 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
         case IDENT_USAGE_DECL:
         {
             assert(symref == SYMREF_STANDARD); // not used
+            node->flags |= IDENTFLAGS_LHS;
             Symstore::Decl decl = syms.decl(strid, tok, SYMREF_NOTAVAIL);
             if(decl.sym)
             {
@@ -171,7 +177,9 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
 
             printf("Referring '%s' in line %u as %s from line %u (symindex %d)\n",
                 name.s, node->line, f.namewhere(), f.sym->linedefined(), f.symindex);
+
             ident.symid = syms.getuid(f.sym);
+            node->flags |= IDENTFLAGS_RHS;
         }
     }
 }
@@ -839,6 +847,8 @@ HLNode* Parser::trydecl()
     return NULL;
 }
 
+// DECLLIST = a, b, c
+// DECLLIST = defer
 HLNode* Parser::decl()
 {
     if(tryeat(Lexer::TOK_FUNC))
@@ -853,7 +863,11 @@ HLNode* Parser::decl()
             eat(Lexer::TOK_CASSIGN);
 
         node->u.vardecllist.decllist = decls;
-        node->u.vardecllist.vallist = _exprlist();
+
+        const bool deferred = !mut && tryeat(Lexer::TOK_DEFER);
+
+        if(!deferred)
+            node->u.vardecllist.vallist = _exprlist();
 
         // Declaration is finished, make all declared symbols usable and optionally mutable
         if(decls)
@@ -869,6 +883,8 @@ HLNode* Parser::decl()
                 Symstore::Sym *sym = syms.getsym(symid);
                 if(mut)
                     sym->makeMutable();
+                if(deferred)
+                    sym->makeDeferred();
                 sym->makeUsable();
             }
         }

@@ -77,6 +77,7 @@ public:
         TOK_EXPORT, // export
         TOK_YIELD,  // yield
         TOK_EMIT,   // emit
+        TOK_DEFER,  // defer
         // rest
         TOK_LITSTR, // "...", '...'
         TOK_LITNUM, // 123, 123.45

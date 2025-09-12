@@ -169,7 +169,9 @@ private:
     bool hadError;
     bool panic;
     GC& gc;
+public:
     Symstore syms;
+private:
 
     typedef HLNode* (Parser::*UnaryMth)(Context ctx);
     typedef HLNode* (Parser::*InfixMth)(Context ctx, const ParseRule *rule, HLNode *prefix);

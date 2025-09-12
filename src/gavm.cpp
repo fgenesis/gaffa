@@ -2,13 +2,9 @@
 
 #include "gavm.h"
 #include "util.h"
+#include "gaobj.h"
 
 #include <vector>
-
-enum
-{
-    MINSTACK = 16
-};
 
 
 struct Inst;
@@ -123,74 +119,6 @@ struct StackRef : public StackCRef
     {
         return stk->pop_n(n);
     }
-};
-
-// C leaf function; fastest to call but has some restrictions:
-// - Non-variadic, max(#parameters, #retvals) must be <= MINSTACK
-// - Read args from inout[0..], write return values to inout[0..]
-// - Must NOT call back into the VM (no call frame is pushed)
-// - Can not reallocate the VM stack
-// - You need to know the number of parameters and return values,
-//   and the function must be registered correctly so the VM
-//   and type system know this too.
-// - Stack space is limited; up to MINSTACK usable slots total
-// - Can't throw errors (but can return error values)
-typedef void (*LeafFunc)(VM *vm, Val inout[MINSTACK]);
-
-// Full-fledged C function; slower to call
-// - May or may not be variadic (params, return values, or both)
-// - Calling back into the VM is allowed
-// - Can grow the stack
-// ---- C function call protocol: ----
-// - Parameters are in args[0..nargs)
-// - If normal return: Write return values to ret[0..n), then return n
-// - If variadic return: Write regular return values to ret[0..n),
-//   push extra variadic ones onto the stack, then return (n + #variadic)
-// - To throw an error, write error to ret[0], then return -1
-typedef int (*CFunc)(VM *vm, size_t nargs, StackCRef *ret,
-    const StackCRef *args, StackRef *stack);
-
-// sp = stack_push(sp, Val)
-// sp = stack_require(sp, 42)
-
-// ALT: C calls don't need return slots
-typedef int (*CFunc2)(VM *vm, Val *inout, size_t nargs);
-
-struct FuncInfo
-{
-    u32 nargs; // Minimal number. If variadic, there may be more.
-    u32 nrets;
-    enum Flags
-    {
-        VarArgs = 1 << 0,
-        VarRets = 1 << 1,
-        IsCFunc = 1 << 2,
-    };
-    u32 flags;
-};
-
-struct DebugInfo
-{
-    u32 linestart;
-    u32 lineend;
-    sref name;
-     // TODO
-};
-
-struct DFunc
-{
-    FuncInfo info;
-    // TODO: (DType: Func(Args, Ret))
-    union
-    {
-        CFunc native;
-        struct
-        {
-            Inst *vmcode; // TODO
-            DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
-        }
-        gfunc;
-    } u;
 };
 
 
@@ -520,14 +448,14 @@ VMFUNC_IMM(dcall, Imm_u32)
     assert(false);
     DFunc *d = NULL; // FIXME: get this from a
 
-    if(d->info.flags & FuncInfo::IsCFunc)
+    if(d->info.flags & FuncInfo::CFunc)
     {
-        return fullCcall(VMARGS, d->u.native, d->info.nargs, d->info.nrets, d->info.flags, immslots(imm));
+        return fullCcall(VMARGS, d->u.cfunc, d->info.nargs, d->info.nrets, d->info.flags, immslots(imm));
     }
 
     pushret(VMARGS, imm, d);
 
-    ins = d->u.gfunc.vmcode;
+    ins = (Inst*)d->u.gfunc.vmcode;
     CHAIN(rer);
 }
 

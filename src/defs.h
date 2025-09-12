@@ -144,7 +144,7 @@ union _AnyValU
     void *p;
     sref str;
     GCobj *obj;
-    Type t; // TODO: make new TYPEID field, but for runtime types use Dtype*
+    DType *t;
     uintptr_t opaque; // this must be large enough to contain all bits of the union
 };
 
@@ -175,7 +175,7 @@ struct Val : public ValU
     inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
     inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
     inline Val(_Str s)                  { _init(PRIMTYPE_STRING); u.str = s.ref; }
-    inline Val(Type t)                  { _init(PRIMTYPE_TYPE);   u.t = t; }
+    inline Val(DType *t)                { _init(PRIMTYPE_TYPE);  u.t = t; }
 };
 
 enum UnOpType

@@ -136,13 +136,21 @@ Symstore::Lookup Symstore::lookup(unsigned strid, const Lexer::Token& tok, Symbo
 
 Symstore::Decl Symstore::decl(unsigned strid, const Lexer::Token& tok, SymbolRefContext referencedHow)
 {
+    assert(frames.size());
     Frame *ff;
     Decl res = {};
+    Sym *s;
     for(size_t k = frames.size(); k --> 0; )
     {
         ff = &frames[k];
-        if(Sym *s = findinframe(ff->symids.data(), ff->symids.size(), strid))
+        s = findinframe(ff->symids.data(), ff->symids.size(), strid);
+        if(s)
         {
+            if(s->referencedHow & SYMREF_DEFERRED)
+            {
+                s->referencedHow &= ~SYMREF_DEFERRED;
+                goto redecl;
+            }
             res.clashing = s;
             return res;
         }
@@ -151,23 +159,27 @@ Symstore::Decl Symstore::decl(unsigned strid, const Lexer::Token& tok, SymbolRef
             break;
     }
 
-    Sym *s = newsym();
+    s = newsym();
     s->tok = tok;
     s->nameStrId = strid;
-    s->firstuse.line = 0;
-    s->referencedHow = referencedHow;
-    s->usage = SYMUSE_UNUSED;
     s->localslot = ff->localids.pick();
     frames.back().symids.push_back(getuid(s));
+redecl:
+    // In case it's re-declared, don't lose the flags that may have accumulated until now
+    s->referencedHow |= referencedHow;
     res.sym = s;
-
     return res;
 }
 
 Symstore::Sym *Symstore::newsym()
 {
     allsyms.push_back(Sym());
-    return &allsyms.back();
+    Sym *s = &allsyms.back();
+    s->referencedHow = SYMREF_STANDARD;
+    s->firstuse.line = 0;
+    s->usage = SYMUSE_UNUSED;
+    s->forgetValue();
+    return s;
 }
 
 Symstore::Sym *Symstore::getsym(unsigned uid)
@@ -195,6 +207,31 @@ void Symstore::Sym::makeUsable()
 void Symstore::Sym::makeMutable()
 {
     referencedHow = (SymbolRefContext)(referencedHow | SYMREF_MUTABLE);
+}
+
+void Symstore::Sym::makeDeferred()
+{
+    referencedHow = (SymbolRefContext)(referencedHow | SYMREF_DEFERRED);
+}
+
+void Symstore::Sym::setValue(const Val& val)
+{
+    assert(!valtype() || valtype()->id == val.type.id);
+    referencedHow = (SymbolRefContext)(referencedHow | SYMREF_KNOWN_VALUE);
+    this->val = val;
+}
+
+void Symstore::Sym::forgetValue()
+{
+    referencedHow = (SymbolRefContext)(referencedHow & ~SYMREF_KNOWN_VALUE);
+    this->val = _Xnil();
+}
+
+void Symstore::Sym::setType(Type t)
+{
+    assert(!value() || value()->type.id == t.id);
+    referencedHow = (SymbolRefContext)(referencedHow | SYMREF_KNOWN_TYPE);
+    this->val.type = t;
 }
 
 u32 SlotDistrib::pick()
