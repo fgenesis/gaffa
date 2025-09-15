@@ -48,7 +48,7 @@ bool HLNode::iscall() const
 }
 
 
-HLNode *HLNode::fold(HLFoldTracker& ft)
+HLFoldResult HLNode::fold(HLFoldTracker& ft)
 {
     if(_nch)
     {
@@ -122,7 +122,7 @@ HLNode *HLNode::fold(HLFoldTracker& ft)
             if(all)
             {
                 clear(ft.gc);
-                return this;
+
             }
         }
 
@@ -162,14 +162,14 @@ HLNode *HLNode::fold(HLFoldTracker& ft)
         }
     }
 
-    return NULL;
+    return FOLD_OK;
 }
 
-HLNode *HLNode::makeconst(GC& gc, const Val& val)
+HLFoldResult HLNode::makeconst(GC& gc, const Val& val)
 {
     HLNode *me = morph<HLConstantValue>(gc);
     me->u.constant.val = val;
-    return me;
+    return FOLD_OK;
 }
 
 void HLNode::clear(GC& gc)
@@ -180,9 +180,20 @@ void HLNode::clear(GC& gc)
     type = HLNODE_NONE;
 }
 
+HLFoldResult HLNode::foldfunc(HLFoldTracker& ft)
+{
+    HLFoldResult fr = _tryfoldfunc(ft);
+    if(fr == FOLD_LATER)
+    {
+        assert(false); // TODO: emit as proto
+        fr = FOLD_OK;
+    }
+
+    return fr;
+}
 
 
-HLNode* HLNode::foldfunc(HLFoldTracker& ft)
+HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
 {
     assert(type == HLNODE_FUNCTION);
 

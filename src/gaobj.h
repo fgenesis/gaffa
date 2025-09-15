@@ -19,6 +19,8 @@ Only need to ensure that we always know if a pointer is headered or not (user po
 
 class DType;
 struct VM;
+struct HLNode;
+
 
 class DObj : public GCobj
 {
@@ -94,9 +96,10 @@ struct FuncInfo
     enum Flags
     {
         FuncTypeMask = 3 << 0, // lowest 2 bits:
-        LFunc = 0,
-        CFunc = 1,
-        Gfunc = 2,
+        LFunc = 0, // light/leaf C function
+        CFunc = 1, // regular/variadic C function
+        Gfunc = 2, // bytecode function
+        Proto = 3, // HLNode, not yet folded
 
         VarArgs = 1 << 2, // set if variadic
         VarRets = 1 << 3,
@@ -120,6 +123,7 @@ struct DFunc : public GCobj
     {
         CFunc cfunc;
         LeafFunc lfunc;
+        HLNode *proto;
         struct
         {
             void *vmcode; // TODO

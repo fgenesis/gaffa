@@ -238,6 +238,13 @@ struct HLExport : HLNodeBase
     HLNode *name; // any expr
 };
 
+enum HLFoldResult
+{
+    FOLD_FAILED, // Folding failed irrecoverably
+    FOLD_OK,     // Fold successful
+    FOLD_LATER,  // Retry folding later; can't finish now
+};
+
 // All of the node types intentionally occupy the same memory.
 // This is so that a node type can be easily mutated into another,
 // while keeping pointers intact.
@@ -323,8 +330,8 @@ struct HLNode
 
     bool isconst() const;
     bool iscall() const;
-    HLNode *fold(HLFoldTracker &ft);
-    HLNode *makeconst(GC& gc, const Val& val);
+    HLFoldResult fold(HLFoldTracker &ft);
+    HLFoldResult makeconst(GC& gc, const Val& val);
     void clear(GC& gc);
 
     template<typename T>
@@ -342,7 +349,8 @@ struct HLNode
         return this->unsafemorph<T>();
     }
 
-    HLNode *foldfunc(HLFoldTracker &ft);
+    HLFoldResult foldfunc(HLFoldTracker &ft);
+    HLFoldResult _tryfoldfunc(HLFoldTracker &ft);
 };
 
 
