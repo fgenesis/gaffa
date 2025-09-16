@@ -445,8 +445,9 @@ static FORCEINLINE void pushret(VMPARAMS, const Imm *imm, const DFunc *func)
 VMFUNC_IMM(dcall, Imm_u32)
 {
     const Val *a = LOCAL(imm->a);
+    GCobj *obj = a->u.obj;
     assert(false);
-    DFunc *d = NULL; // FIXME: get this from a
+    DFunc *d = static_cast<DFunc*>(obj); // FIXME: check that this is actually callable (and castable to DFunc)
 
     if(d->info.flags & FuncInfo::CFunc)
     {

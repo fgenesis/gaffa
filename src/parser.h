@@ -82,11 +82,11 @@ protected:
     HLNode *closurecons(Context ctx);
     HLNode *functionbody();
     void _funcattribs(unsigned *pfuncflags);
-    HLNode *_funcreturns(unsigned *pfuncflags);
+    HLNode *_funcreturns();
 
     HLNode *_assignmentWithPrefix(HLNode *lhs); // = EXPR or := EXPR
     HLNode *_restassign(HLNode *firstLhs, const Lexer::Token& lhsTok); // returns list
-    HLNode *_decllist(SymbolRefContext symref);
+    HLNode *_decllist(SymbolRefContext symref, bool allowVariadic);
 
     HLNode *_fncall(HLNode *callee);
     HLNode *_methodcall(HLNode *obj);

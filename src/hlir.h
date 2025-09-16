@@ -13,22 +13,19 @@ struct HLFoldTracker;
 class Symstore;
 
 
-enum IdentFlags
+enum HLFlags
 {
-    IDENTFLAGS_NONE         = 0x00,
-    IDENTFLAGS_OPTIONALTYPE = 0x01,
-    IDENTFLAGS_DUCKYTYPE    = 0x02,
-    IDENTFLAGS_LHS          = 0x04, // Identifier is being declared or assigned to
-    IDENTFLAGS_RHS          = 0x08, // Identifier is in a context of being evaluated
-    // Neither LHS/RHS set: Identifier without a specific role
-};
+    HLFLAG_NONE             = 0x00,
+    HLFLAG_VARIADIC         = 0x01,
 
-enum FuncFlags
-{
-    FUNCFLAGS_VAR_ARG = 0x01,
-    FUNCFLAGS_VAR_RET = 0x02,
-    FUNCFLAGS_PURE    = 0x04, // calling function has no side effects
-    FUNCFLAGS_METHOD_SUGAR    = 0x08, // implicit first parameter is 'this'
+    IDENTFLAGS_OPTIONALTYPE = 0x02,
+    IDENTFLAGS_DUCKYTYPE    = 0x04,
+    IDENTFLAGS_LHS          = 0x08, // Identifier is being declared or assigned to
+    IDENTFLAGS_RHS          = 0x10, // Identifier is in a context of being evaluated
+    // Neither LHS/RHS set: Identifier without a specific role
+
+    FUNCFLAGS_PURE    = 0x400, // calling function has no side effects
+    FUNCFLAGS_METHOD_SUGAR  = 0x800, // implicit first parameter is 'this'
 };
 
 enum HLNodeType
@@ -75,6 +72,11 @@ struct HLNode;
 struct HLNodeBase {};
 
 // Important: Any children must be the FIRST struct members!
+
+struct HLDummy : HLNodeBase
+{
+    enum { EnumType = HLNODE_NONE, Children = 0 };
+};
 
 struct HLConstantValue : HLNodeBase
 {
@@ -221,6 +223,11 @@ struct HLFunctionHdr : HLNodeBase
     enum { EnumType = HLNODE_FUNCTIONHDR, Children = 2 };
     HLNode *paramlist; // list of HLVarDef // TODO: make this HLVarDeclList in the future when there are function default args?
     HLNode *rettypes; // OPTIONAL list of HLNode
+
+    // # of args / return values
+    // if negative: variadic, and abs()-1 of that is the minimal number
+    int nargs() const;
+    int nrets() const;
 };
 
 struct HLFunction : HLNodeBase
@@ -373,7 +380,7 @@ public:
     inline HLNode *vardef()        { return allocT<HLVarDef>();        }
     inline HLNode *retn()          { return allocT<HLReturnYield>();   }
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
-    inline HLNode *brk()           { return allocT<HLBranchAlways>();  }
+    inline HLNode *brk()           { return allocT<HLBranchAlways>();  } // FIXME: ???
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
     inline HLNode *mthcall()       { return allocT<HLMthCall>();       }
     inline HLNode *ident()         { return allocT<HLIdent>();         }
@@ -383,6 +390,7 @@ public:
     inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();   }
     inline HLNode *sink()          { return allocT<HLSink>();          }
     inline HLNode *exprt()         { return allocT<HLExport>();        }
+    inline HLNode *dummy()         { return allocT<HLDummy>();        }
 
 private:
 

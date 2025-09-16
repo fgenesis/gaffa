@@ -16,7 +16,7 @@ That way write<T> to obj memory can be the same for all objs -> obj+offs (userda
 Only need to ensure that we always know if a pointer is headered or not (user pointers won't be)
 */
 
-
+struct HLNode;
 class DType;
 struct VM;
 struct HLNode;

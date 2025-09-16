@@ -47,6 +47,45 @@ bool HLNode::iscall() const
     return type == HLNODE_CALL || type == HLNODE_MTHCALL;
 }
 
+// Whether a func arg list or return type list is variadic
+static bool isvariadic(const HLList *list)
+{
+    // Check if the last list element has the variadic flag set
+    return list->used && list->list[list->used - 1]->flags & HLFLAG_VARIADIC;
+}
+
+static int variadicsize(const HLList *list)
+{
+    int n = list->used;
+    if(isvariadic(list))
+        n = -n; // Note that the last list element is the variadic indicator element
+    return n;
+}
+
+
+int HLFunctionHdr::nargs() const
+{
+    int n = 0;
+    if(paramlist)
+    {
+        const HLList *list = paramlist->as<HLList>();
+        n = variadicsize(list);
+    }
+    return n;
+}
+
+int HLFunctionHdr::nrets() const
+{
+    int n = 0;
+    if(rettypes)
+    {
+        const HLList *list = rettypes->as<HLList>();
+        n = variadicsize(list);
+    }
+    return n;
+}
+
+
 
 HLFoldResult HLNode::fold(HLFoldTracker& ft)
 {
@@ -285,3 +324,4 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
 
     return makeconst(ft.gc, v);
 }
+

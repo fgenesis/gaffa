@@ -33,6 +33,7 @@ enum SymbolRefContext
     SYMREF_KNOWN_TYPE  = 0x20,  // The symbol's type is known (but not necessarily the value)
     SYMREF_KNOWN_VALUE = 0x40,  // Symbol has a valid value known at compile time
     SYMREF_DEFERRED    = 0x80,  // Symbol was declared deferred, allow re-declaration
+    SYMREF_FUNCARG     = 0x100, // Symbol is part if a function parameter list (for diagnostics only)
 
     SYMREF_NOFLAGS     = 0x00
 };
@@ -65,7 +66,7 @@ public:
         unsigned nameStrId;
         unsigned referencedHow; // SymbolRefContext
         unsigned usage;
-        unsigned localslot; // FIXME remove this
+        int slot; // if local: index of register; if external: -(index in missing + 1)
         Lexer::Token tok, firstuse;
 
         inline unsigned linedefined() const { return tok.line; }

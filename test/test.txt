@@ -101,7 +101,7 @@
 
 int x = 1
 int y = 2
-func addi(int a, int b) { int c = a+b int d = x+y int e = c+d return e }
+func addi(int a, b, ...) -> int... { int c = a+b int d = x+y int e = c+d return e }
 
 
 --int x, y = 0, 1

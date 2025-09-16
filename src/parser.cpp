@@ -158,8 +158,8 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
             if(decl.sym)
             {
                 ident.symid = syms.getuid(decl.sym);
-                printf("DEBUG: Declared symbol '%s' (symid %u, reg %d) in line %u\n",
-                    name.s, ident.symid, decl.sym->localslot, tok.line);
+                printf("DEBUG: Declared symbol '%s' (symid %u, slot %d) in line %u\n",
+                    name.s, ident.symid, decl.sym->slot, tok.line);
             }
             if(decl.clashing)
             {
@@ -177,8 +177,8 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
             Symstore::Lookup f = syms.lookup(strid, tok, symref, true);
             assert(f.sym);
 
-            printf("Referring '%s' (reg %u) in line %u as %s from line %u\n",
-                name.s, f.sym->localslot, node->line, f.namewhere(), f.sym->linedefined());
+            printf("DEBUG: Referring '%s' (slot %u) in line %u as %s from line %u\n",
+                name.s, f.sym->slot, node->line, f.namewhere(), f.sym->linedefined());
 
             ident.symid = syms.getuid(f.sym);
             node->flags |= IDENTFLAGS_RHS;
@@ -568,15 +568,17 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     h->u.fhdr.paramlist = _funcparams();
 
     if(tryeat(Lexer::TOK_RARROW))
-        h->u.fhdr.rettypes = _funcreturns(&flags);
+        h->u.fhdr.rettypes = _funcreturns();
 
-    h->flags = (FuncFlags)flags;
+    h->flags = (HLFlags)flags;
 
     f->u.func.hdr = h;
     f->u.func.body = functionbody();
 
     _endFunction();
 
+    printf("DEBUG: Finalized function '%s', nargs = %d, nrets = %d\n",
+        symbolname(*pname), h->u.fhdr.nargs(), h->u.fhdr.nrets());
 
     return f;
 }
@@ -586,7 +588,9 @@ HLNode* Parser::_funcparams()
     eat(Lexer::TOK_LPAREN);
     const Lexer::Token opening = prevtok;
     // In a function param list, there's no RHS, so symbols should become visible right away
-    HLNode *node = match(Lexer::TOK_RPAREN) ? NULL : _decllist(SYMREF_VISIBLE);
+    HLNode *node = match(Lexer::TOK_RPAREN)
+        ? NULL
+        : _decllist(SymbolRefContext(SYMREF_VISIBLE | SYMREF_FUNCARG), true);
     eatmatching(Lexer::TOK_RPAREN, opening);
     return node;
 }
@@ -647,7 +651,7 @@ void Parser::_funcattribs(unsigned *pfuncflags)
 // -> int, float, blah
 // -> bool, int?, ...
 // (nil or '?' or a list of types)
-HLNode* Parser::_funcreturns(unsigned *pfuncflags)
+HLNode* Parser::_funcreturns()
 {
     // '->' was just eaten
 
@@ -659,13 +663,25 @@ HLNode* Parser::_funcreturns(unsigned *pfuncflags)
     {
         if(match(Lexer::TOK_IDENT))
         {
-            list->u.list.add(typeident(), gc);
+            HLNode *ident = typeident();
+            if(tryeat(Lexer::TOK_TRIDOT))
+            {
+                list->flags |= HLFLAG_VARIADIC;
+                ident->flags |= HLFLAG_VARIADIC;
+            }
+            list->u.list.add(ident, gc);
             if(!tryeat(Lexer::TOK_COMMA))
                 break;
         }
         else if(match(Lexer::TOK_QM) || tryeat(Lexer::TOK_TRIDOT))
         {
-            *pfuncflags |= FUNCFLAGS_VAR_RET;
+            HLNode *dummy = ensure(hlir->dummy());
+            if(dummy)
+            {
+                dummy->flags |= HLFLAG_VARIADIC;
+                list->flags |= HLFLAG_VARIADIC;
+            }
+            list->u.list.add(dummy, gc);
             if(match(Lexer::TOK_COMMA))
                 errorAt(prevtok, "? or ... must be the last entry in a return type list");
             break;
@@ -768,7 +784,10 @@ void Parser::_checkAssignTarget(const HLNode* node, const Lexer::Token& nodetok)
             if(sym->tok.line)
             {
                 panic = false; // HACK
-                errorAt(sym->tok, "(Previously declared here)", "(Use := for declaring as mutable)");
+                const char *diag = (sym->referencedHow & SYMREF_FUNCARG)
+                    ? "(Function parameters are never mutable)"
+                    : "(Use := for declaring as mutable)";
+                errorAt(sym->tok, "(Previously declared here)", diag);
             }
         }
     }
@@ -783,7 +802,7 @@ void Parser::_checkAssignTarget(const HLNode* node, const Lexer::Token& nodetok)
 // Note that in a regular declaration, the symbol becomes visible only when the entire declaration itself is finished.
 // Otherwise we end up with something like 'var x = x' where x would refer to itself.
 // (This statement is actually legal, but the '= x' refers to the next best x in an upper scope, not the x being declared)
-HLNode* Parser::_decllist(SymbolRefContext symref)
+HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
 {
     // curtok is ident or 'var'
     HLNode * const node = ensure(hlir->list());
@@ -797,10 +816,19 @@ HLNode* Parser::_decllist(SymbolRefContext symref)
     {
         HLNode *first = NULL;
 
+        // (int x, float y, ...)
+        bool variadic = allowVariadic && tryeat(Lexer::TOK_TRIDOT);
+
+        if(variadic)
+        {
+            // Keep the type and do nothing else
+        }
         // either 'var' or a type name. This switches context.
         // In 'var' context, types are deduced, in 'C' context, they need to be known.
-        if(tryeat(Lexer::TOK_VAR))
+        else if(tryeat(Lexer::TOK_VAR))
+        {
             lasttype = NULL;
+        }
         else
         {
             lookAhead();
@@ -808,6 +836,12 @@ HLNode* Parser::_decllist(SymbolRefContext symref)
             // If only one, it's parsed below, using the previous type.
             if(lookahead.tt == Lexer::TOK_IDENT)
                 lasttype = first = typeident();
+            else if(allowVariadic && lookahead.tt == Lexer::TOK_TRIDOT)
+            {
+                // (int x, float y, int...)
+                variadic = true; // with known type
+                eat(Lexer::TOK_TRIDOT);
+            }
             else if(!lasttype)
             {
                 // This branch is only hit when we've just entered the for loop
@@ -817,9 +851,10 @@ HLNode* Parser::_decllist(SymbolRefContext symref)
         }
 
         HLNode * const def = hlir->vardef();
+        node->u.list.add(def, gc);
 
-        HLNode * const second = ident("variable", IDENT_USAGE_DECL, symref); // var name
-        def->u.vardef.ident = second; // always var name
+        if(!variadic)
+            def->u.vardef.ident = ident("variable", IDENT_USAGE_DECL, symref); // var name
 
         if(!lasttype) // 'var x'
         {
@@ -840,7 +875,17 @@ HLNode* Parser::_decllist(SymbolRefContext symref)
             def->u.vardef.type = first ? first : lasttype;
         }
 
-        node->u.list.add(def, gc);
+        if(variadic)
+        {
+            // The variadic entry is marked as such and terminates the list
+            // We need that extra entry to optionally carry type information (ie. only int... follows)
+            def->flags |= HLFLAG_VARIADIC; // Mark this as the terminating variadic element
+            node->flags |= HLFLAG_VARIADIC; // The list is marked as variadic too
+
+            if(match(Lexer::TOK_COMMA))
+                errorAt(prevtok, "'...' must be the last entry if used");
+            break;
+        }
     }
     while(tryeat(Lexer::TOK_COMMA));
 
@@ -926,7 +971,7 @@ HLNode* Parser::decl()
     HLNode *node = ensure(hlir->vardecllist());
     if(node)
     {
-        HLNode *decls = _decllist(SYMREF_HIDDEN);
+        HLNode *decls = _decllist(SYMREF_HIDDEN, false);
         const bool mut = tryeat(Lexer::TOK_MASSIGN);
         if(!mut)
             eat(Lexer::TOK_CASSIGN);

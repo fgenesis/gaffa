@@ -72,13 +72,18 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
             printf(" \"%s\"", s);
         }
     }
-    else if(n->type == HLNODE_VARDEF && n->u.vardef.ident->type == HLNODE_IDENT)
+    else if(n->type == HLNODE_VARDEF)
     {
         const HLVarDef& vd = n->u.vardef;
         printf("\n");
         indent(level+1);
-        printf("Name: ");
-        dump(p, vd.ident, 0);
+        if(n->u.vardef.ident && n->u.vardef.ident->type == HLNODE_IDENT)
+        {
+            printf("Name: ");
+            dump(p, vd.ident, 0);
+        }
+        else
+            printf("(No name)\n");
         if(vd.type)
         {
             indent(level+1);

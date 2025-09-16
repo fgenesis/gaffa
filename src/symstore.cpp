@@ -27,7 +27,11 @@ void Symstore::pop(Frame& f)
         // Return locals from this scope to enclosing function
         Frame& ff = funcframe();
         for(size_t i = 0; i < fsz; ++i)
-            ff.localids.putback(getsym(f.symids[i])->localslot);
+        {
+            int slot = getsym(f.symids[i])->slot;
+            assert(slot >= 0);
+            ff.localids.putback(slot);
+        }
     }
 }
 
@@ -113,6 +117,7 @@ Symstore::Lookup Symstore::lookup(unsigned strid, const Lexer::Token& tok, Symbo
         s->referencedHow = referencedHow;
         s->usage = usage;
         missing.push_back(getuid(s));
+        s->slot = -(int)missing.size();
     }
     res.sym = s;
     return res;
@@ -146,7 +151,7 @@ Symstore::Decl Symstore::decl(unsigned strid, const Lexer::Token& tok, SymbolRef
     s = newsym();
     s->tok = tok;
     s->nameStrId = strid;
-    s->localslot = ff->localids.pick();
+    s->slot = ff->localids.pick();
     frames.back().symids.push_back(getuid(s));
 redecl:
     // In case it's re-declared, don't lose the flags that may have accumulated until now
