@@ -28,8 +28,7 @@ enum FuncFlags
     FUNCFLAGS_VAR_ARG = 0x01,
     FUNCFLAGS_VAR_RET = 0x02,
     FUNCFLAGS_PURE    = 0x04, // calling function has no side effects
-    FUNCFLAGS_DEDUCE_RET = 0x08, // must deduce return value of function
-    FUNCFLAGS_METHOD_SUGAR    = 0x10, // implicit first parameter is 'this'
+    FUNCFLAGS_METHOD_SUGAR    = 0x08, // implicit first parameter is 'this'
 };
 
 enum HLNodeType

@@ -199,11 +199,11 @@ int main(int argc, char **argv)
     TypeRegistry tr(gc);
     HLFoldTracker ft = { gc, pp.syms, tr };
 
-    node->fold(ft);
+    /*node->fold(ft);
 
     puts("\n####### AFTER FOLDING #######\n");
 
-    hlirDebugDump(strtab, node);
+    hlirDebugDump(strtab, node);*/
 
     //MLIRContainer mc(gc);
     //mc.import(node, strtab, fn);

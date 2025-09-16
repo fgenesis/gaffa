@@ -86,7 +86,7 @@ protected:
 
     HLNode *_assignmentWithPrefix(HLNode *lhs); // = EXPR or := EXPR
     HLNode *_restassign(HLNode *firstLhs, const Lexer::Token& lhsTok); // returns list
-    HLNode *_decllist();
+    HLNode *_decllist(SymbolRefContext symref);
 
     HLNode *_fncall(HLNode *callee);
     HLNode *_methodcall(HLNode *obj);
@@ -160,6 +160,8 @@ private:
     void _checkAssignTarget(const HLNode *node, const Lexer::Token& nodetok);
     const char *symbolname(const HLNode *node) const;
     const char *symbolname(const Symstore::Sym *sym) const;
+    void _beginFunction(ScopeType scope = SCOPE_FUNCTION);
+    void _endFunction();
 
     Lexer::Token curtok;
     Lexer::Token prevtok;

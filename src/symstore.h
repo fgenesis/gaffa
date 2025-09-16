@@ -11,7 +11,8 @@ enum ScopeType
     SCOPE_NONE = 0,
     SCOPE_BLOCK,
     SCOPE_VALBLOCK,
-    SCOPE_FUNCTION
+    SCOPE_FUNCTION,
+    SCOPE_FILE
 };
 
 enum ScopeReferral
@@ -23,15 +24,17 @@ enum ScopeReferral
 
 enum SymbolRefContext
 {
-    SYMREF_STANDARD    = 0x00,  // Just any symbol (plain old variable, no special properties)
-    SYMREF_MUTABLE     = 0x01,  // Symbol is target of an assignment after declaration
-    SYMREF_TYPE        = 0x02,  // Symbol is used as a type
-    SYMREF_EXPORTED    = 0x04,  // Symbol is exported
-    SYMREF_NOTAVAIL    = 0x08,  // Force symbol lookup to fail
-    SYMREF_EXTERNAL    = 0x10,  // Symbol is external
+    SYMREF_HIDDEN      = 0x00,  // Symbol is not visible (symbol lookup will fail)
+    SYMREF_VISIBLE     = 0x01,  // Symbol is visible and lookup works normally
+    SYMREF_MUTABLE     = 0x02,  // Symbol is target of an assignment after declaration
+    SYMREF_TYPE        = 0x04,  // Symbol is used as a type
+    SYMREF_EXPORTED    = 0x08,  // Symbol is exported
+    SYMREF_EXTERNAL    = 0x10,  // Symbol is imported as external
     SYMREF_KNOWN_TYPE  = 0x20,  // The symbol's type is known (but not necessarily the value)
     SYMREF_KNOWN_VALUE = 0x40,  // Symbol has a valid value known at compile time
     SYMREF_DEFERRED    = 0x80,  // Symbol was declared deferred, allow re-declaration
+
+    SYMREF_NOFLAGS     = 0x00
 };
 
 enum SymbolUsageFlags
@@ -94,7 +97,6 @@ public:
     {
         const Sym *sym;
         ScopeReferral where;
-        int symindex;
         const char *namewhere() const;
     };
     struct Decl
@@ -132,7 +134,6 @@ private:
     Sym *findinframe(const unsigned *uids, size_t n, sref strid);
     unsigned indexinframe(const unsigned *uids, size_t n, const Sym *sym);
 
-    unsigned _indexbase;
     std::vector<Frame> frames;
     std::vector<Sym> allsyms;
 };

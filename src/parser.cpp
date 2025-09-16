@@ -138,6 +138,7 @@ bool Parser::_checkname(const Lexer::Token& tok, const char *whatfor)
     return false;
 }
 
+// Establish how a symbol is used (LHS or RHS) and do the necessary symbol management
 void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage, SymbolRefContext symref)
 {
     if(usage == IDENT_USAGE_UNTRACKED)
@@ -151,13 +152,14 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
     {
         case IDENT_USAGE_DECL:
         {
-            assert(symref == SYMREF_STANDARD); // not used
+            //assert(symref == SYMREF_HIDDEN || symref == SYMREF_VISIBLE);
             node->flags |= IDENTFLAGS_LHS;
-            Symstore::Decl decl = syms.decl(strid, tok, SYMREF_NOTAVAIL);
+            Symstore::Decl decl = syms.decl(strid, tok, symref);
             if(decl.sym)
             {
                 ident.symid = syms.getuid(decl.sym);
-                printf("DEBUG: Declared symbol '%s' (symid %u) in line %u\n", name.s, ident.symid, tok.line);
+                printf("DEBUG: Declared symbol '%s' (symid %u, reg %d) in line %u\n",
+                    name.s, ident.symid, decl.sym->localslot, tok.line);
             }
             if(decl.clashing)
             {
@@ -175,8 +177,8 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
             Symstore::Lookup f = syms.lookup(strid, tok, symref, true);
             assert(f.sym);
 
-            printf("Referring '%s' in line %u as %s from line %u (symindex %d)\n",
-                name.s, node->line, f.namewhere(), f.sym->linedefined(), f.symindex);
+            printf("Referring '%s' (reg %u) in line %u as %s from line %u\n",
+                name.s, f.sym->localslot, node->line, f.namewhere(), f.sym->linedefined());
 
             ident.symid = syms.getuid(f.sym);
             node->flags |= IDENTFLAGS_RHS;
@@ -263,7 +265,7 @@ Parser::Parser(Lexer* lex, const char *fn, GC& gc, StringPool& strpool)
 HLNode *Parser::parse()
 {
     advance();
-    syms.push(SCOPE_FUNCTION);
+    _beginFunction();
 
     HLNode *root = stmtlist(Lexer::TOK_E_EOF);
     if(hadError)
@@ -272,8 +274,7 @@ HLNode *Parser::parse()
         return NULL;
     }
 
-    Symstore::Frame top;
-    syms.pop(top);
+    _endFunction();
 
     return root;
 }
@@ -462,6 +463,65 @@ HLNode* Parser::whileloop()
     return node;
 }
 
+void Parser::_beginFunction(ScopeType scope /* = SCOPE_FILE */)
+{
+    syms.push(scope);
+}
+
+void Parser::_endFunction()
+{
+    Symstore::Frame f;
+    syms.pop(f);
+
+    assert(f.boundary >= SCOPE_FUNCTION);
+
+    const size_t N = f.symids.size();
+    for(size_t i = 0; i < N; ++i)
+    {
+        const Symstore::Sym *sym = syms.getsym(f.symids[i]);
+
+        if(!(sym->referencedHow & SYMREF_VISIBLE))
+        {
+            const char *name = symbolname(sym);
+            std::ostringstream os;
+            os << "'" << name << "': INTERNAL ERROR: Identifier is not visible while closing function scope";
+            errorAt(sym->tok, os.str().c_str());
+        }
+
+        // Any symbol that's still marked as deferred was not re-declared -> this is bad
+        if(sym->referencedHow & SYMREF_DEFERRED)
+        {
+            const char *name = symbolname(sym);
+            if(sym->lineused())
+            {
+                std::ostringstream os;
+                os << "'" << name << "': Deferred constant is used but was never re-declared";
+                errorAt(sym->firstuse, os.str().c_str());
+                panic = false;
+                errorAt(sym->tok, "(Originally introduced here)");
+            }
+            else
+            {
+                printf("WARNING: '%s': Deferred symbol unused\n", name); // TODO: proper warnings
+            }
+        }
+
+        if(f.boundary < SCOPE_FILE)
+        {
+            if(sym->referencedHow & SYMREF_EXPORTED)
+            {
+                const char *name = symbolname(sym);
+                std::ostringstream os;
+                os << "'" << name << "': Can't export locals declared inside functions";
+                errorAt(sym->firstuse, os.str().c_str(), "Move this to file scope");
+                panic = false;
+                errorAt(sym->tok, "(Originally declared here)");
+            }
+        }
+    }
+}
+
+
 // named:
 //   func [optional, attribs] hello(funcparams) -> returns
 // closure:
@@ -482,19 +542,19 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     if(pname) // Named functions can be declared in a namespace
     {
         const Lexer::Token tok = curtok; // used in case fo error
-        HLNode *nname = ident("function or namespace", IDENT_USAGE_UNTRACKED, SYMREF_STANDARD); // namespace or function name
+        HLNode *nname = ident("function or namespace", IDENT_USAGE_UNTRACKED, SYMREF_VISIBLE); // namespace or function name
         HLNode *ns = NULL;
-        SymbolRefContext nameref = SYMREF_STANDARD;
+        SymbolRefContext nameref = SYMREF_VISIBLE;
 
         if(tryeat(Lexer::TOK_DOT)) // . follows -> it's a namespaced function (namespace can be a type or table)
         {
             ns = nname;
-            nname = ident("functionName", IDENT_USAGE_DECL, SYMREF_STANDARD);
+            nname = ident("functionName", IDENT_USAGE_DECL, SYMREF_VISIBLE);
         }
         else if(tryeat(Lexer::TOK_COLON)) // : follows -> it's a method (syntax sugar only; Lua style)
         {
             ns = nname;
-            nname = ident("methodName", IDENT_USAGE_DECL, SYMREF_STANDARD);
+            nname = ident("methodName", IDENT_USAGE_DECL, SYMREF_VISIBLE);
             flags |= FUNCFLAGS_METHOD_SUGAR;
         }
         *pname = nname;
@@ -503,17 +563,21 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
         _applyUsage(tok, nname, ns ? IDENT_USAGE_USE : IDENT_USAGE_DECL, nameref);
     }
 
+    _beginFunction();
+
     h->u.fhdr.paramlist = _funcparams();
 
     if(tryeat(Lexer::TOK_RARROW))
         h->u.fhdr.rettypes = _funcreturns(&flags);
-    else
-        flags |= FUNCFLAGS_DEDUCE_RET;
 
     h->flags = (FuncFlags)flags;
 
     f->u.func.hdr = h;
     f->u.func.body = functionbody();
+
+    _endFunction();
+
+
     return f;
 }
 
@@ -521,7 +585,8 @@ HLNode* Parser::_funcparams()
 {
     eat(Lexer::TOK_LPAREN);
     const Lexer::Token opening = prevtok;
-    HLNode *node = match(Lexer::TOK_RPAREN) ? NULL : _decllist();
+    // In a function param list, there's no RHS, so symbols should become visible right away
+    HLNode *node = match(Lexer::TOK_RPAREN) ? NULL : _decllist(SYMREF_VISIBLE);
     eatmatching(Lexer::TOK_RPAREN, opening);
     return node;
 }
@@ -693,7 +758,7 @@ void Parser::_checkAssignTarget(const HLNode* node, const Lexer::Token& nodetok)
         else if(!(sym->referencedHow & SYMREF_MUTABLE))
         {
             const char *sn = symbolname(sym);
-            Symstore::Lookup lookup = syms.lookup(sym->nameStrId, nodetok, SYMREF_STANDARD, false);
+            Symstore::Lookup lookup = syms.lookup(sym->nameStrId, nodetok, SYMREF_NOFLAGS, false);
             assert(lookup.sym == sym);
             {
                 std::ostringstream os;
@@ -715,7 +780,10 @@ void Parser::_checkAssignTarget(const HLNode* node, const Lexer::Token& nodetok)
 // int a, float z
 // T a, b, Q c, d, e
 // int x, y, var z,q
-HLNode* Parser::_decllist()
+// Note that in a regular declaration, the symbol becomes visible only when the entire declaration itself is finished.
+// Otherwise we end up with something like 'var x = x' where x would refer to itself.
+// (This statement is actually legal, but the '= x' refers to the next best x in an upper scope, not the x being declared)
+HLNode* Parser::_decllist(SymbolRefContext symref)
 {
     // curtok is ident or 'var'
     HLNode * const node = ensure(hlir->list());
@@ -723,6 +791,7 @@ HLNode* Parser::_decllist()
         return NULL;
 
     HLNode *lasttype = NULL;
+
 
     do
     {
@@ -749,12 +818,13 @@ HLNode* Parser::_decllist()
 
         HLNode * const def = hlir->vardef();
 
-        HLNode * const second = ident("variable", IDENT_USAGE_DECL, SYMREF_STANDARD); // var name
+        HLNode * const second = ident("variable", IDENT_USAGE_DECL, symref); // var name
+        def->u.vardef.ident = second; // always var name
 
         if(!lasttype) // 'var x'
         {
             assert(!first);
-            def->u.vardef.ident = second; // always var name
+
             if(tryeat(Lexer::TOK_COLON))
             {
                 unsigned flags = 0;
@@ -768,7 +838,6 @@ HLNode* Parser::_decllist()
         else // C-style decl
         {
             def->u.vardef.type = first ? first : lasttype;
-            def->u.vardef.ident = second;
         }
 
         node->u.list.add(def, gc);
@@ -857,7 +926,7 @@ HLNode* Parser::decl()
     HLNode *node = ensure(hlir->vardecllist());
     if(node)
     {
-        HLNode *decls = _decllist();
+        HLNode *decls = _decllist(SYMREF_HIDDEN);
         const bool mut = tryeat(Lexer::TOK_MASSIGN);
         if(!mut)
             eat(Lexer::TOK_CASSIGN);
@@ -933,7 +1002,7 @@ HLNode* Parser::primaryexpr()
 {
     return tryeat(Lexer::TOK_LPAREN)
         ? grouping(CTX_DEFAULT)
-        : ident("identifier", IDENT_USAGE_USE, SYMREF_STANDARD);
+        : ident("identifier", IDENT_USAGE_USE, SYMREF_NOFLAGS);
 }
 
 HLNode* Parser::suffixedexpr()
@@ -1047,7 +1116,7 @@ HLNode* Parser::typeident()
 
 HLNode* Parser::_identInExpr(Context ctx)
 {
-    return _suffixed(_ident(prevtok, "identifier", IDENT_USAGE_USE, SYMREF_STANDARD));
+    return _suffixed(_ident(prevtok, "identifier", IDENT_USAGE_USE, SYMREF_NOFLAGS));
 }
 
 HLNode *Parser::grouping(Context ctx)
@@ -1288,7 +1357,7 @@ HLNode* Parser::tablecons(Context ctx)
 
             if(lookahead.tt == Lexer::TOK_CASSIGN)
             {
-                key = ident("key", IDENT_USAGE_UNTRACKED, SYMREF_STANDARD); // key=...
+                key = name("key"); // key=...
                 eat(Lexer::TOK_CASSIGN);
             }
             // else it's a single var lookup; handle as expr
