@@ -42,6 +42,8 @@ public:
     void dealloc(GC& gc);
     void clear();
     Val get(Val k) const;
+    Val *getp(Val k);
+    const Val *getp(Val k) const;
     Val set(GC& gc, Val k, Val v);
     Val pop(Val k);
     KV index(tsize idx) const;

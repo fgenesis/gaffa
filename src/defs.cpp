@@ -70,15 +70,17 @@ static const unsigned char TypeElementSizes[] =
 {
     /* PRIMTYPE_NIL    */ sizeof(u32),
     /* PRIMTYPE_ERROR  */ sizeof(sref),
+    /* PRIMTYPE_OPAQUE */ sizeof(uintptr_t),
     /* PRIMTYPE_BOOL   */ sizeof(u32), // FIXME: do we need an extra bool type for compact array storage?
     /* PRIMTYPE_UINT   */ sizeof(uint),
     /* PRIMTYPE_SINT   */ sizeof(sint),
     /* PRIMTYPE_FLOAT  */ sizeof(real),
     /* PRIMTYPE_STRING */ sizeof(sref),
     /* PRIMTYPE_TYPE   */ sizeof(Type),
-    /* PRIMTYPE_FUNC   */ sizeof(void*), // TODO
+    /* PRIMTYPE_FUNC   */ sizeof(DFunc*), // TODO
     /* PRIMTYPE_TABLE  */ sizeof(GCobj*), // table/array/object are always dynamically allocated
     /* PRIMTYPE_ARRAY  */ sizeof(GCobj*),
+    /* PRIMTYPE_SYMTAB */ sizeof(SymTable*),
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
     /* PRIMTYPE_ANY    */ sizeof(ValU)
 };

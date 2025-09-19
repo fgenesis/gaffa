@@ -177,7 +177,7 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
             Symstore::Lookup f = syms.lookup(strid, tok, symref, true);
             assert(f.sym);
 
-            printf("DEBUG: Referring '%s' (slot %u) in line %u as %s from line %u\n",
+            printf("DEBUG: Referring '%s' (slot %d) in line %u as %s from line %u\n",
                 name.s, f.sym->slot, node->line, f.namewhere(), f.sym->linedefined());
 
             ident.symid = syms.getuid(f.sym);
@@ -259,22 +259,32 @@ Parser::Parser(Lexer* lex, const char *fn, GC& gc, StringPool& strpool)
     curtok.tt = Lexer::TOK_E_ERROR;
     prevtok.tt = Lexer::TOK_E_ERROR;
     lookahead.tt = Lexer::TOK_E_UNDEF;
-
 }
 
 HLNode *Parser::parse()
 {
     advance();
-    _beginFunction();
 
-    HLNode *root = stmtlist(Lexer::TOK_E_EOF);
+    // The file's statements are parsed as a single block.
+    // Wrap that into a function that takes no parameters and has no speficied return values.
+    HLNode *root = ensure(hlir->func());
+    HLNode *hdr = ensure(hlir->fhdr());
+    if(root && hdr)
+    {
+        hdr->u.fhdr.paramlist = NULL;
+        hdr->u.fhdr.rettypes = NULL; // FIXME: Should probably make this a void return?
+        root->u.func.hdr = hdr;
+
+        _beginFunction();
+        root->u.func.body = stmtlist(Lexer::TOK_E_EOF);
+        _endFunction();
+    }
+
     if(hadError)
     {
         syms.dealloc(gc);
         return NULL;
     }
-
-    _endFunction();
 
     return root;
 }

@@ -218,6 +218,25 @@ Val Table::get(Val k) const
     return vals.dynamicLookup(idx);
 }
 
+Val* Table::getp(Val k)
+{
+    if(!keys)
+        return NULL;
+    const TKey *tk = _getkey(k, idxmask);
+    const size_t idx = tk->validx;
+    return (Val*)&vals.storage.vals[idx];
+}
+
+
+const Val* Table::getp(Val k) const
+{
+    if(!keys)
+        return NULL;
+    const TKey *tk = _getkey(k, idxmask);
+    const size_t idx = tk->validx;
+    return (const Val*)&vals.storage.vals[idx];
+}
+
 // set new value, return old
 Val Table::set(GC& gc, Val k, Val v)
 {

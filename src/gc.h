@@ -58,6 +58,18 @@ inline static T *gc_alloc_unmanaged_T(GC& gc, T *p, size_t oldnum, size_t newnum
     return (T*)gc_alloc_unmanaged(gc, p, sizeof(T) * oldnum, sizeof(T) * newnum);
 }
 
+template<typename T>
+inline static T *gc_new_unmanaged_T(GC& gc)
+{
+    return (T*)gc_alloc_unmanaged(gc, NULL, 0, sizeof(T));
+}
+
+template<typename T>
+inline static T *gc_free_unmanaged_T(GC& gc, T *p)
+{
+    return (T*)gc_alloc_unmanaged(gc, p, sizeof(T), 0);
+}
+
 void *gc_alloc_unmanaged_zero(GC& gc, size_t size);
 
 template<typename T>

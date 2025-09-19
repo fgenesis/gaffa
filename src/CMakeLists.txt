@@ -48,6 +48,10 @@ set(src
     serialio.h
     llir.cpp
     llir.h
+    symtable.cpp
+    symtable.h
+    compiler.cpp
+    compiler.h
 )
 
 add_library(gaffa ${src})

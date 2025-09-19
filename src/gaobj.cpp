@@ -45,3 +45,8 @@ DType::DType(Type tid, TDesc* desc, DType* typeType)
 {
     assert(typeType->tid.id == PRIMTYPE_TYPE);
 }
+
+DFunc* DFunc::GCNew(GC& gc)
+{
+    return (DFunc*)gc_new(gc, sizeof(DFunc), PRIMTYPE_FUNC);
+}

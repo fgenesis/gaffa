@@ -105,6 +105,8 @@ struct FuncInfo
         VarRets = 1 << 3,
     };
     u32 flags;
+    u32 nlocals; // # of local slots that are needed to run the function
+    u32 nupvals;
 };
 
 struct DebugInfo
@@ -117,19 +119,25 @@ struct DebugInfo
 
 struct DFunc : public GCobj
 {
+    static DFunc *GCNew(GC& gc);
+
     FuncInfo info;
     // TODO: (DType: Func(Args, Ret))
     union
     {
         CFunc cfunc;
         LeafFunc lfunc;
-        HLNode *proto;
         struct
         {
-            void *vmcode; // TODO
-            DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
-        }
-        gfunc;
+            HLNode *node; // Cloned from original parse tree as a single block of memory
+            size_t bytesToFree;
+        } proto;
+        struct
+        {
+            void *vmcode;
+        } gfunc;
     } u;
+
+    DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
 };
 

@@ -67,6 +67,7 @@ enum PrimType
     // g     - value is garbage-collected indirectly only
     PRIMTYPE_NIL,    // F  i         // enum value must be 0
     PRIMTYPE_ERROR,  // F     S  g   //
+    PRIMTYPE_OPAQUE, //    ?         //
     PRIMTYPE_BOOL,   // ?  i         //
     PRIMTYPE_UINT,   // T  i         //
     PRIMTYPE_SINT,   // T  i         //
@@ -76,6 +77,7 @@ enum PrimType
     PRIMTYPE_FUNC,   // T     S  G   //
     PRIMTYPE_TABLE,  // T  o  S  G   //
     PRIMTYPE_ARRAY,  // T  o  S  G   //
+    PRIMTYPE_SYMTAB, // T  o     G   //
     PRIMTYPE_OBJECT, // T  o     G   //
 
     PRIMTYPE_ANY,    // can hold any value. must be last in the enum.
@@ -117,7 +119,8 @@ struct _Str
 };
 
 struct DType;
-
+struct DFunc;
+struct SymTable;
 
 // This is the base of every GC collectible object.
 // Most likely (but not necessarily!) preceded in memory by a GCprefix, see gc.h
@@ -145,6 +148,8 @@ union _AnyValU
     sref str;
     GCobj *obj;
     DType *t;
+    DFunc *func;
+    SymTable *symt;
     uintptr_t opaque; // this must be large enough to contain all bits of the union
 };
 
@@ -176,6 +181,7 @@ struct Val : public ValU
     inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
     inline Val(_Str s)                  { _init(PRIMTYPE_STRING); u.str = s.ref; }
     inline Val(DType *t)                { _init(PRIMTYPE_TYPE);  u.t = t; }
+    inline Val(SymTable *symt)          { _init(PRIMTYPE_SYMTAB);  u.symt = symt; }
 };
 
 enum UnOpType
@@ -227,12 +233,6 @@ UnOpType UnOp_TokenToOp(unsigned tok);
 // Size of an element of type t, when multiple elements of this type are stored in an array
 size_t GetPrimTypeStorageSize(unsigned t);
 
-
-inline static bool isTrueish(const ValU v)
-{
-    static_assert(PRIMTYPE_BOOL == 2, "ey");
-    return v.type.id > PRIMTYPE_BOOL || (v.type.id == PRIMTYPE_BOOL && v.u.ui);
-}
 
 // Small-size memcpy() that's wired specifially to copy any values a ValU may contain.
 // Assumes both pointers are aligned to 4 bytes.

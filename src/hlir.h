@@ -26,6 +26,8 @@ enum HLFlags
 
     FUNCFLAGS_PURE    = 0x400, // calling function has no side effects
     FUNCFLAGS_METHOD_SUGAR  = 0x800, // implicit first parameter is 'this'
+
+    HLFLAG_NOEXTMEM         = 0x10000, // Node doesn't use any external memory, don't try to free on deletion
 };
 
 enum HLNodeType
@@ -59,7 +61,10 @@ enum HLNodeType
     HLNODE_FUNCTION,
     HLNODE_FUNCTIONHDR,
     HLNODE_SINK,
-    HLNODE_EXPORT
+    HLNODE_EXPORT,
+
+    // Intermediates; not produced by the parser
+    HLNODE_FUNC_PROTO
 };
 
 enum HLTypeFlags
@@ -226,6 +231,7 @@ struct HLFunctionHdr : HLNodeBase
 
     // # of args / return values
     // if negative: variadic, and abs()-1 of that is the minimal number
+    // The get the number of non-variadic elements, compute abs(n) - (n < 0)
     int nargs() const;
     int nrets() const;
 };
@@ -235,6 +241,7 @@ struct HLFunction : HLNodeBase
     enum { EnumType = HLNODE_FUNCTION, Children = 2 };
     HLNode *hdr; // HLFunctionHdr
     HLNode *body;
+    size_t clonedMemSize;
 };
 
 struct HLExport : HLNodeBase
@@ -242,6 +249,13 @@ struct HLExport : HLNodeBase
     enum { EnumType = HLNODE_EXPORT, Children = 1 };
     HLNode *what;
     HLNode *name; // any expr
+};
+
+struct HLFuncProto : HLNodeBase
+{
+    enum { EnumType = HLNODE_FUNC_PROTO, Children = 1 };
+    HLNode *func; // HLFunction
+    DFunc *meta;
 };
 
 enum HLFoldResult
@@ -336,7 +350,7 @@ struct HLNode
 
     bool isconst() const;
     bool iscall() const;
-    HLFoldResult fold(HLFoldTracker &ft);
+
     HLFoldResult makeconst(GC& gc, const Val& val);
     void clear(GC& gc);
 
@@ -355,8 +369,18 @@ struct HLNode
         return this->unsafemorph<T>();
     }
 
-    HLFoldResult foldfunc(HLFoldTracker &ft);
+    HLNode *fold(HLFoldTracker &ft) const;
+
+    size_t memoryNeeded() const;
+    HLNode *clone(GC& gc) const;
+
+private:
+    HLFoldResult _foldfunc(HLFoldTracker &ft);
     HLFoldResult _tryfoldfunc(HLFoldTracker &ft);
+    HLFoldResult _foldRec(HLFoldTracker &ft);
+
+    HLNode *_clone(void *mem, size_t bytes, GC& gc) const;
+    byte *_cloneRec(byte *m, HLNode *target, GC& gc) const;
 };
 
 
@@ -399,7 +423,7 @@ private:
     template<typename T> inline HLNode *allocT()
     {
         HLNode *node = (HLNode*)bla.alloc(sizeof(HLNode));
-        return node ? node->unsafemorph<T>() : node;
+        return node ? node->unsafemorph<T>() : NULL;
     }
 };
 

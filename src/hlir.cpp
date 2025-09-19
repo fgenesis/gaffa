@@ -56,10 +56,10 @@ static bool isvariadic(const HLList *list)
 
 static int variadicsize(const HLList *list)
 {
-    int n = list->used;
+    int n = (int)list->used;
     if(isvariadic(list))
-        n = -n; // Note that the last list element is the variadic indicator element
-    return n;
+        n = -n; // Note that the last list element is the variadic indicator element;
+    return n;   // to get the size without it, use abs(n) - (n < 0)
 }
 
 
@@ -86,8 +86,35 @@ int HLFunctionHdr::nrets() const
 }
 
 
+// This is the entry point of the tree folding. MUST start at a function node.
+// THis folds recursively until hitting another function.
+// This function is then packaged as a prototype and not further folded.
+HLNode *HLNode::fold(HLFoldTracker& ft) const
+{
+    assert(type == HLNODE_FUNCTION);
 
-HLFoldResult HLNode::fold(HLFoldTracker& ft)
+    HLNode *cp = clone(ft.gc);
+
+
+    HLFunctionHdr *h = u.func.hdr->as<HLFunctionHdr>();
+
+    Type t = { PRIMTYPE_ANY };
+    Table params(t, t);
+
+    // These are NULL if there are no parameters or return values specified
+    HLList *paramlist = h->paramlist ? h->paramlist->aslist(HLNODE_LIST) : NULL;
+    HLList *retlist = h->rettypes ? h->rettypes->aslist(HLNODE_LIST) : NULL;
+
+    HLList *body = u.func.body->aslist(HLNODE_BLOCK);
+
+
+    assert(false); // TODO
+
+    return NULL;
+}
+
+
+HLFoldResult HLNode::_foldRec(HLFoldTracker& ft)
 {
     if(_nch)
     {
@@ -166,7 +193,7 @@ HLFoldResult HLNode::fold(HLFoldTracker& ft)
         }
 
         case HLNODE_FUNCTION:
-            return foldfunc(ft);
+            return _foldfunc(ft);
 
         case HLNODE_FUNCDECL:
         {
@@ -213,13 +240,24 @@ HLFoldResult HLNode::makeconst(GC& gc, const Val& val)
 
 void HLNode::clear(GC& gc)
 {
-    if(_nch == HLList::Children)
-        gc_alloc_unmanaged_T<HLNode*>(gc, u.list.list, u.list.cap, 0);
+    if(const size_t nch = numchildren())
+    {
+        HLNode **ch = children();
+        for(size_t i = 0; i < nch; ++i)
+            ch[i]->clear(gc);
+    }
+
+    if(!(flags & HLFLAG_NOEXTMEM))
+    {
+        if(_nch == HLList::Children)
+            gc_alloc_unmanaged_T<HLNode*>(gc, u.list.list, u.list.cap, 0);
+    }
+
     _nch = 0;
     type = HLNODE_NONE;
 }
 
-HLFoldResult HLNode::foldfunc(HLFoldTracker& ft)
+HLFoldResult HLNode::_foldfunc(HLFoldTracker& ft)
 {
     HLFoldResult fr = _tryfoldfunc(ft);
     if(fr == FOLD_LATER)
@@ -323,5 +361,97 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
     assert(v.u.t);
 
     return makeconst(ft.gc, v);
+}
+
+size_t HLNode::memoryNeeded() const
+{
+    size_t bytes = sizeof(*this);
+
+    size_t nch = _nch;
+    const HLNode * const *ch = &u.aslist[0];
+    if(nch == HLList::Children)
+    {
+        nch = u.list.used;
+        bytes += nch * sizeof(HLNode*);
+        ch = u.list.list;
+    }
+
+    for(size_t i = 0; i < nch; ++i)
+        if(const HLNode *c = ch[i])
+            if(c->type != HLNODE_FUNCTION) // Don't cross function boundary
+                bytes += c->memoryNeeded();
+
+    return bytes;
+}
+
+// Clone one function into its own
+HLNode * HLNode::clone(GC & gc) const
+{
+    assert(type == HLNODE_FUNCTION); // There's little reason to call this for anything else
+    const size_t bytes = memoryNeeded();
+    printf("DEBUG: Cloning function in line %u using %u bytes\n", this->line, (unsigned)bytes);
+    void *mem = gc_alloc_unmanaged(gc, NULL, 0, bytes);
+    HLNode *cp = _clone(mem, bytes, gc);
+    cp->as<HLFunction>()->clonedMemSize = bytes;
+    return cp;
+}
+
+HLNode* HLNode::_clone(void* mem, size_t bytes, GC& gc) const
+{
+    assert(_nch <= Countof(u.aslist)); // This is only called on functions, which are no lists
+    byte * const begin = (byte*)mem;
+    HLNode * const target = (HLNode*)begin;
+    byte *end = this->_cloneRec(begin + sizeof(*this), target, gc);
+    assert(end - begin == bytes);
+    return target;
+}
+
+byte *HLNode::_cloneRec(byte *m, HLNode *target, GC& gc) const
+{
+    memcpy(target, this, sizeof(*this));
+
+    size_t nch = _nch;
+    HLNode **dst = &target->u.aslist[0];
+    const HLNode * const *src = &u.aslist[0];
+    if(nch == HLList::Children)
+    {
+        src = u.list.list;
+        nch = u.list.used;
+        dst = (HLNode**)m; m += nch * sizeof(HLNode*); // Allocate space for the child pointer list
+        target->u.list.list = dst;
+        target->u.list.used = nch;
+        target->u.list.cap = nch;
+        target->flags |= HLFLAG_NOEXTMEM;
+    }
+
+    // Check how many children we'll actually own. Functions allocate on their own and are not part of our memory block.
+    size_t ownch = 0;
+    for(size_t i = 0; i < nch; ++i)
+        if(const HLNode *s = src[i])
+            ownch += s->type != HLNODE_FUNCTION;
+
+    // Allocate space for child nodes
+    HLNode *ch = (HLNode*)m; m += ownch * sizeof(HLNode);
+
+    for(size_t i = 0; i < nch; ++i)
+    {
+        const HLNode *s = src[i];
+        HLNode *d = NULL;
+        if(s)
+        {
+            if(s->type != HLNODE_FUNCTION)
+            {
+                d = &ch[i];
+                m = s->_cloneRec(m, d, gc); // Advances in our block
+            }
+            else
+            {
+                d = s->clone(gc); // Allocates its own memory
+            }
+        }
+        dst[i] = d;
+    }
+
+    return m;
 }
 
