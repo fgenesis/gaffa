@@ -241,7 +241,6 @@ struct HLFunction : HLNodeBase
     enum { EnumType = HLNODE_FUNCTION, Children = 2 };
     HLNode *hdr; // HLFunctionHdr
     HLNode *body;
-    size_t clonedMemSize;
 };
 
 struct HLExport : HLNodeBase
@@ -251,11 +250,28 @@ struct HLExport : HLNodeBase
     HLNode *name; // any expr
 };
 
+struct FuncProto
+{
+    FuncProto *New(GC& gc, size_t nodemem);
+    HLNode *node; // points to the AST behind the struct
+    size_t refcount;
+    size_t memsize;
+
+    // cloned AST follows after the struct
+};
+
+// This intentionally has no automatic children, and serves as a recursion breaker.
+// The FuncProto is heap-allocated and potentially shared between multiple nodes when cloning.
 struct HLFuncProto : HLNodeBase
 {
-    enum { EnumType = HLNODE_FUNC_PROTO, Children = 1 };
-    HLNode *func; // HLFunction
-    DFunc *meta;
+    enum { EnumType = HLNODE_FUNC_PROTO, Children = 0 };
+    FuncProto *proto;
+};
+
+enum HLFoldStep
+{
+    FOLD_INITIAL,    // Initial folding step that cloned the AST and does some initial optimization
+    FOLD_SPECIALIZE, // At this point, all external symbols need to be defined
 };
 
 enum HLFoldResult
@@ -298,6 +314,7 @@ struct HLNode
         HLFunctionHdr fhdr;
         HLSink sink;
         HLExport exprt;
+        HLFuncProto funcproto;
 
         HLNode *aslist[3];
     } u;
@@ -369,7 +386,7 @@ struct HLNode
         return this->unsafemorph<T>();
     }
 
-    HLNode *fold(HLFoldTracker &ft) const;
+    HLNode *fold(HLFoldTracker &ft, HLFoldStep step);
 
     size_t memoryNeeded() const;
     HLNode *clone(GC& gc) const;
@@ -377,7 +394,7 @@ struct HLNode
 private:
     HLFoldResult _foldfunc(HLFoldTracker &ft);
     HLFoldResult _tryfoldfunc(HLFoldTracker &ft);
-    HLFoldResult _foldRec(HLFoldTracker &ft);
+    HLFoldResult _foldRec(HLFoldTracker &ft, HLFoldStep step);
 
     HLNode *_clone(void *mem, size_t bytes, GC& gc) const;
     byte *_cloneRec(byte *m, HLNode *target, GC& gc) const;
@@ -414,7 +431,8 @@ public:
     inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();   }
     inline HLNode *sink()          { return allocT<HLSink>();          }
     inline HLNode *exprt()         { return allocT<HLExport>();        }
-    inline HLNode *dummy()         { return allocT<HLDummy>();        }
+    inline HLNode *dummy()         { return allocT<HLDummy>();         }
+    inline HLNode *funcproto()     { return allocT<HLFuncProto>();     }
 
 private:
 

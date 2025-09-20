@@ -89,32 +89,22 @@ int HLFunctionHdr::nrets() const
 // This is the entry point of the tree folding. MUST start at a function node.
 // THis folds recursively until hitting another function.
 // This function is then packaged as a prototype and not further folded.
-HLNode *HLNode::fold(HLFoldTracker& ft) const
+HLNode *HLNode::fold(HLFoldTracker& ft, HLFoldStep step)
 {
     assert(type == HLNODE_FUNCTION);
 
+    // Recursively fold everything as a first step so that anything that can be eliminated
+    // is already  eliminated before the next steps start
+    _foldRec(ft, step);
+
+    // Chop functions into separate memory blocks so that they can be specialized individually
     HLNode *cp = clone(ft.gc);
 
-
-    HLFunctionHdr *h = u.func.hdr->as<HLFunctionHdr>();
-
-    Type t = { PRIMTYPE_ANY };
-    Table params(t, t);
-
-    // These are NULL if there are no parameters or return values specified
-    HLList *paramlist = h->paramlist ? h->paramlist->aslist(HLNODE_LIST) : NULL;
-    HLList *retlist = h->rettypes ? h->rettypes->aslist(HLNODE_LIST) : NULL;
-
-    HLList *body = u.func.body->aslist(HLNODE_BLOCK);
-
-
-    assert(false); // TODO
-
-    return NULL;
+    return cp;
 }
 
 
-HLFoldResult HLNode::_foldRec(HLFoldTracker& ft)
+HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
 {
     if(_nch)
     {
@@ -122,7 +112,7 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft)
         HLNode **ch = children();
         for(size_t i = 0; i < N; ++i)
             if(ch[i])
-                ch[i]->fold(ft);
+                ch[i]->_foldRec(ft, step);
     }
 
     switch(type)
@@ -388,12 +378,25 @@ size_t HLNode::memoryNeeded() const
 HLNode * HLNode::clone(GC & gc) const
 {
     assert(type == HLNODE_FUNCTION); // There's little reason to call this for anything else
-    const size_t bytes = memoryNeeded();
+    const size_t bytes = memoryNeeded() + sizeof(FuncProto) + sizeof(HLNode);
     printf("DEBUG: Cloning function in line %u using %u bytes\n", this->line, (unsigned)bytes);
-    void *mem = gc_alloc_unmanaged(gc, NULL, 0, bytes);
-    HLNode *cp = _clone(mem, bytes, gc);
-    cp->as<HLFunction>()->clonedMemSize = bytes;
-    return cp;
+    byte *mem = (byte*)gc_alloc_unmanaged(gc, NULL, 0, bytes);
+
+    HLNode *funcroot = (HLNode*)mem;
+    memcpy(funcroot, this, sizeof(HLNode)); // Copy metadata like line number; this copies some more but whatev
+    mem += sizeof(*funcroot);
+
+    FuncProto *proto = (FuncProto*)mem;
+    mem += sizeof(*proto);
+
+    funcroot->type = HLNODE_FUNC_PROTO;
+    funcroot->u.funcproto.proto = proto;
+
+    proto->refcount = 1;
+    proto->memsize = bytes;
+    proto->node = _clone(mem, bytes, gc);
+    
+    return funcroot;
 }
 
 HLNode* HLNode::_clone(void* mem, size_t bytes, GC& gc) const
