@@ -36,6 +36,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_FUNCTIONHDR:    return "functionhdr";
         case HLNODE_SINK:           return "sink";
         case HLNODE_EXPORT:         return "export";
+        case HLNODE_FUNC_PROTO:     return "funcproto";
     }
     return NULL;
 }
@@ -51,6 +52,8 @@ static void indent(size_t n)
     for(size_t i = 0; i < n; ++i)
         printf("  ");
 }
+
+static void dumprec(const StringPool& p, const HLNode *n, unsigned level);
 
 static bool dump(const StringPool& p, const HLNode *n, unsigned level)
 {
@@ -72,31 +75,6 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
             printf(" \"%s\"", s);
         }
     }
-    else if(n->type == HLNODE_VARDEF)
-    {
-        const HLVarDef& vd = n->u.vardef;
-        printf("\n");
-        indent(level+1);
-        if(n->u.vardef.ident && n->u.vardef.ident->type == HLNODE_IDENT)
-        {
-            printf("Name: ");
-            dump(p, vd.ident, 0);
-        }
-        else
-            printf("(No name)\n");
-        if(vd.type)
-        {
-            indent(level+1);
-            printf("Type: ");
-            dump(p, vd.type, 0);
-        }
-        else
-        {
-            indent(level+1);
-            printf("(type is inferred)\n");
-        }
-        return true;
-    }
     else if(n->type == HLNODE_RETURNYIELD)
     {
         if(n->tok == Lexer::TOK_RETURN)
@@ -110,6 +88,11 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
             printf("yield/return/emit/???");
             assert(false);
         }
+    }
+    else if(n->type == HLNODE_FUNC_PROTO)
+    {
+        printf(" -> Packaged function:\n");
+        dumprec(p, n->u.funcproto.proto->node, level+1);
     }
     else
     {

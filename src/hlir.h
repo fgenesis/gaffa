@@ -13,21 +13,20 @@ struct HLFoldTracker;
 class Symstore;
 
 
+// FIXME: These must fit in a byte! Make per-type flags again?
 enum HLFlags
 {
     HLFLAG_NONE             = 0x00,
     HLFLAG_VARIADIC         = 0x01,
 
     IDENTFLAGS_OPTIONALTYPE = 0x02,
-    IDENTFLAGS_DUCKYTYPE    = 0x04,
+    //IDENTFLAGS_DUCKYTYPE    = 0x04,
     IDENTFLAGS_LHS          = 0x08, // Identifier is being declared or assigned to
     IDENTFLAGS_RHS          = 0x10, // Identifier is in a context of being evaluated
     // Neither LHS/RHS set: Identifier without a specific role
 
-    FUNCFLAGS_PURE    = 0x400, // calling function has no side effects
-    FUNCFLAGS_METHOD_SUGAR  = 0x800, // implicit first parameter is 'this'
-
-    HLFLAG_NOEXTMEM         = 0x10000, // Node doesn't use any external memory, don't try to free on deletion
+    HLFLAG_KNOWNTYPE        = 0x40, // Runtyime type has been deducted or is known somehow
+    HLFLAG_NOEXTMEM         = 0x80, // Node doesn't use any external memory, don't try to free on deletion
 };
 
 enum HLNodeType
@@ -74,7 +73,11 @@ enum HLTypeFlags
 };
 
 struct HLNode;
-struct HLNodeBase {};
+struct HLNodeBase
+{
+    // Since there is nothing that can only result in nil, use that to indicate "no actual value type"
+    enum { DefaultValType = PRIMTYPE_NIL };
+};
 
 // Important: Any children must be the FIRST struct members!
 
@@ -85,26 +88,26 @@ struct HLDummy : HLNodeBase
 
 struct HLConstantValue : HLNodeBase
 {
-    enum { EnumType = HLNODE_CONSTANT_VALUE, Children = 0 };
+    enum { EnumType = HLNODE_CONSTANT_VALUE, Children = 0, DefaultValType = PRIMTYPE_ANY };
     ValU val;
 };
 
 struct HLUnary : HLNodeBase
 {
-    enum { EnumType = HLNODE_UNARY, Children = 1 };
-    HLNode *rhs;
+    enum { EnumType = HLNODE_UNARY, Children = 1, DefaultValType = PRIMTYPE_ANY };
+    HLNode *a;
 };
 
 struct HLBinary : HLNodeBase
 {
-    enum { EnumType = HLNODE_BINARY, Children = 2 };
-    HLNode *lhs;
-    HLNode *rhs;
+    enum { EnumType = HLNODE_BINARY, Children = 2, DefaultValType = PRIMTYPE_ANY };
+    HLNode *a;
+    HLNode *b;
 };
 
 struct HLTernary : HLNodeBase
 {
-    enum { EnumType = HLNODE_TERNARY, Children = 3 };
+    enum { EnumType = HLNODE_TERNARY, Children = 3, DefaultValType = PRIMTYPE_ANY };
     HLNode *a;
     HLNode *b;
     HLNode *c;
@@ -173,7 +176,7 @@ struct HLAssignment : HLNodeBase
 
 struct HLReturnYield : HLNodeBase
 {
-    enum { EnumType = HLNODE_RETURNYIELD, Children = 1 };
+    enum { EnumType = HLNODE_RETURNYIELD, Children = 1, DefaultValType = PRIMTYPE_ANY };
     HLNode *what;
 };
 
@@ -185,14 +188,14 @@ struct HLBranchAlways : HLNodeBase
 
 struct HLFnCall : HLNodeBase
 {
-    enum { EnumType = HLNODE_CALL, Children = 2 };
+    enum { EnumType = HLNODE_CALL, Children = 2, DefaultValType = PRIMTYPE_ANY };
     HLNode *callee;
     HLNode *paramlist;
 };
 
 struct HLMthCall : HLNodeBase
 {
-    enum { EnumType = HLNODE_MTHCALL, Children = 3 };
+    enum { EnumType = HLNODE_MTHCALL, Children = 3, DefaultValType = PRIMTYPE_ANY };
     HLNode *obj;
     HLNode *mth; // name or expr
     HLNode *paramlist; // HLList
@@ -200,7 +203,7 @@ struct HLMthCall : HLNodeBase
 
 struct HLIdent : HLNodeBase
 {
-    enum { EnumType = HLNODE_IDENT, Children = 0 };
+    enum { EnumType = HLNODE_IDENT, Children = 0, DefaultValType = PRIMTYPE_ANY };
     sref nameStrId;
     sref symid;
 };
@@ -218,7 +221,7 @@ struct HLSink : HLNodeBase
 
 struct HLIndex : HLNodeBase
 {
-    enum { EnumType = HLNODE_INDEX, Children = 2 };
+    enum { EnumType = HLNODE_INDEX, Children = 2, DefaultValType = PRIMTYPE_ANY };
     HLNode *lhs;
     HLNode *idx; // name or expr
 };
@@ -238,7 +241,7 @@ struct HLFunctionHdr : HLNodeBase
 
 struct HLFunction : HLNodeBase
 {
-    enum { EnumType = HLNODE_FUNCTION, Children = 2 };
+    enum { EnumType = HLNODE_FUNCTION, Children = 2, DefaultValType = PRIMTYPE_FUNC };
     HLNode *hdr; // HLFunctionHdr
     HLNode *body;
 };
@@ -264,7 +267,7 @@ struct FuncProto
 // The FuncProto is heap-allocated and potentially shared between multiple nodes when cloning.
 struct HLFuncProto : HLNodeBase
 {
-    enum { EnumType = HLNODE_FUNC_PROTO, Children = 0 };
+    enum { EnumType = HLNODE_FUNC_PROTO, Children = 0, DefaultValType = PRIMTYPE_FUNC };
     FuncProto *proto;
 };
 
@@ -318,12 +321,13 @@ struct HLNode
 
         HLNode *aslist[3];
     } u;
-    unsigned line;
-    HLNodeType type;
-    Lexer::TokenType tok;
-    unsigned char flags; // any of the flags above, depends on type
-    unsigned char _nch; // number of child nodes
+    u16 line;
     u16 column;
+    byte type; // HLNodeType
+    byte tok; // Lexer::TokenType
+    byte flags; // any of the flags above, depends on type
+    byte _nch; // number of child nodes
+    sref mytype; // derived type (PRIMTYPE_* or custom),
 
     template<typename T> T *as()
     {
@@ -368,6 +372,9 @@ struct HLNode
     bool isconst() const;
     bool iscall() const;
 
+    bool isknowntype() const { return flags & HLFLAG_KNOWNTYPE; }
+    void setknowntype(sref tid);
+
     HLFoldResult makeconst(GC& gc, const Val& val);
     void clear(GC& gc);
 
@@ -376,6 +383,7 @@ struct HLNode
     {
         type = HLNodeType(T::EnumType);
         _nch = T::Children;
+        mytpe = T::DefaultValType;
         return this;
     }
 
@@ -395,6 +403,9 @@ private:
     HLFoldResult _foldfunc(HLFoldTracker &ft);
     HLFoldResult _tryfoldfunc(HLFoldTracker &ft);
     HLFoldResult _foldRec(HLFoldTracker &ft, HLFoldStep step);
+    HLFoldResult _foldUnop(HLFoldTracker &ft);
+    HLFoldResult _foldBinop(HLFoldTracker &ft);
+    HLFoldResult propagateMyType(HLFoldTracker &ft, const HLNode *typesrc);
 
     HLNode *_clone(void *mem, size_t bytes, GC& gc) const;
     byte *_cloneRec(byte *m, HLNode *target, GC& gc) const;
@@ -450,4 +461,5 @@ struct HLFoldTracker
     GC& gc;
     Symstore& syms;
     TypeRegistry& tr;
+    std::vector<std::string> errors;
 };

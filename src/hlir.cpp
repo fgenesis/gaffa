@@ -1,5 +1,6 @@
 #include "hlir.h"
 #include <string.h>
+#include <sstream>
 
 #include "symstore.h"
 #include "gaobj.h"
@@ -87,8 +88,6 @@ int HLFunctionHdr::nrets() const
 
 
 // This is the entry point of the tree folding. MUST start at a function node.
-// THis folds recursively until hitting another function.
-// This function is then packaged as a prototype and not further folded.
 HLNode *HLNode::fold(HLFoldTracker& ft, HLFoldStep step)
 {
     assert(type == HLNODE_FUNCTION);
@@ -143,6 +142,7 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             // FIXME: this might be incorrect for functions with variadic returns, check this later
             // HMM: might have to introduce a HLConstantValueList to store multiple values
             // for example if a function can be entirely evaluated at compile time
+            // -> no, HLList of HLConstantValue is fine
             size_t i = 0;
             bool all = true;
             for( ; i < N; ++i)
@@ -182,7 +182,7 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             }
         }
 
-        case HLNODE_FUNCTION:
+        /*case HLNODE_FUNCTION:
             return _foldfunc(ft);
 
         case HLNODE_FUNCDECL:
@@ -191,7 +191,7 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             HLIdent *ns = u.funcdecl.namespac->as<HLIdent>();
             // This was already folded from HLFunction
             HLConstantValue *func = u.funcdecl.value->as<HLConstantValue>();
-        }
+        }*/
     }
 
     // Compact children if we have any
@@ -221,10 +221,18 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
     return FOLD_OK;
 }
 
+void HLNode::setknowntype(sref tid)
+{
+    assert(!(flags & HLFLAG_KNOWNTYPE));
+    flags |= HLFLAG_KNOWNTYPE;
+    mytype = tid;
+}
+
 HLFoldResult HLNode::makeconst(GC& gc, const Val& val)
 {
     HLNode *me = morph<HLConstantValue>(gc);
     me->u.constant.val = val;
+    me->setknowntype(val.type.id);
     return FOLD_OK;
 }
 
@@ -368,19 +376,20 @@ size_t HLNode::memoryNeeded() const
 
     for(size_t i = 0; i < nch; ++i)
         if(const HLNode *c = ch[i])
-            if(c->type != HLNODE_FUNCTION) // Don't cross function boundary
+            if(c->type != HLNODE_FUNCTION && c->type != HLNODE_FUNC_PROTO) // Don't cross function boundary
                 bytes += c->memoryNeeded();
 
     return bytes;
 }
 
-// Clone one function into its own
+// Clone one function into its own memory block.
 HLNode * HLNode::clone(GC & gc) const
 {
     assert(type == HLNODE_FUNCTION); // There's little reason to call this for anything else
-    const size_t bytes = memoryNeeded() + sizeof(FuncProto) + sizeof(HLNode);
-    printf("DEBUG: Cloning function in line %u using %u bytes\n", this->line, (unsigned)bytes);
-    byte *mem = (byte*)gc_alloc_unmanaged(gc, NULL, 0, bytes);
+    const size_t sizeForSubtree = memoryNeeded();
+    const size_t totalbytes = sizeForSubtree + sizeof(FuncProto) + sizeof(HLNode);
+    printf("DEBUG: Cloning function in line %u using %u bytes\n", this->line, (unsigned)totalbytes);
+    byte *mem = (byte*)gc_alloc_unmanaged(gc, NULL, 0, totalbytes);
 
     HLNode *funcroot = (HLNode*)mem;
     memcpy(funcroot, this, sizeof(HLNode)); // Copy metadata like line number; this copies some more but whatev
@@ -389,13 +398,13 @@ HLNode * HLNode::clone(GC & gc) const
     FuncProto *proto = (FuncProto*)mem;
     mem += sizeof(*proto);
 
-    funcroot->type = HLNODE_FUNC_PROTO;
+    funcroot->unsafemorph<HLFuncProto>();
     funcroot->u.funcproto.proto = proto;
 
     proto->refcount = 1;
-    proto->memsize = bytes;
-    proto->node = _clone(mem, bytes, gc);
-    
+    proto->memsize = totalbytes;
+    proto->node = _clone(mem, sizeForSubtree, gc);
+
     return funcroot;
 }
 
@@ -442,14 +451,19 @@ byte *HLNode::_cloneRec(byte *m, HLNode *target, GC& gc) const
         HLNode *d = NULL;
         if(s)
         {
-            if(s->type != HLNODE_FUNCTION)
+            switch(s->type)
             {
-                d = &ch[i];
-                m = s->_cloneRec(m, d, gc); // Advances in our block
-            }
-            else
-            {
-                d = s->clone(gc); // Allocates its own memory
+                case HLNODE_FUNC_PROTO:
+                    s->u.funcproto.proto->refcount++; // Don't clone already packaged functions
+                    // fall through
+                default:
+                    d = &ch[i];
+                    m = s->_cloneRec(m, d, gc); // Advances in our block
+                    break;
+
+                case HLNODE_FUNCTION:
+                    d = s->clone(gc); // Allocates its own memory
+                    break;
             }
         }
         dst[i] = d;
@@ -458,3 +472,207 @@ byte *HLNode::_cloneRec(byte *m, HLNode *target, GC& gc) const
     return m;
 }
 
+template<typename T>
+struct FoldOpsBase
+{
+    enum { Bitsize = sizeof(T) * CHAR_BIT };
+
+    /*typedef bool (*Binary)(T& r, T a, T b);
+    typedef bool (*Unary)(T& r, T a);
+    typedef bool (*Compare)(T a, T& b);*/
+
+    static bool Add(T& r, T a, T b) { r = a + b; return true; }
+    static bool Sub(T& r, T a, T b) { r = a - b; return true; }
+    static bool Mul(T& r, T a, T b) { r = a * b; return true; }
+    static bool Div(T& r, T a, T b) { if(!b) return false; r = a / b; return true; }
+    static bool Mod(T& r, T a, T b) { if(!b) return false; r = a % b; return true; }
+    static bool Shl(T& r, T a, T b) { if(b >= Bitsize) return false; r = a << b; return true; }
+    static bool Shr(T& r, T a, T b) { if(b >= Bitsize) return false; r = a >> b; return true; }
+    static bool Rol(T& r, T a, T b) { if(b >= Bitsize) return false; r = (a << b) | (a >> (Bitsize-b)); return true; }
+    static bool Ror(T& r, T a, T b) { if(b >= Bitsize) return false; r = (a >> b) | (a << (Bitsize-b)); return true; }
+
+    static bool BAnd(T& r, T a, T b) { r = a & b; return true; }
+    static bool BOr (T& r, T a, T b) { r = a | b; return true; }
+    static bool BXor(T& r, T a, T b) { r = a ^ b; return true; }
+
+    static bool UPos(T& r, T a) { r = +a; return true; }
+    static bool UNeg(T& r, T a) { r = -a; return true; }
+    static bool UNot(T& r, T a) { r = !a; return true; }
+    static bool UCpl(T& r, T a) { r = ~a; return true; }
+
+    // Alternative representations of relations so that only < and == are enough to handle everything
+    static bool C_Eq (T a, T b) { return  (a == b); }
+    static bool C_Neq(T a, T b) { return !(a == b); }
+    static bool C_Lt (T a, T b) { return  (a <  b); }
+    static bool C_Gt (T a, T b) { return  (b <  a); }
+    static bool C_Lte(T a, T b) { return !(b <  a); }
+    static bool C_Gte(T a, T b) { return !(a <  b); }
+};
+
+template<typename T>
+struct FoldOps : FoldOpsBase<T>
+{
+};
+
+template<>
+struct FoldOps<real> : FoldOpsBase<real>
+{
+    static bool Rol(real& r, real a, real b) { return false; }
+    static bool Ror(real& r, real a, real b) { return false; }
+    static bool BAnd(real& r, real a, real b) { return false; }
+    static bool BOr (real& r, real a, real b) { return false; }
+    static bool BXor(real& r, real a, real b) { return false; }
+
+    static bool UCpl(real& r, real a) { return false; }
+};
+
+
+
+
+HLFoldResult HLNode::_foldUnop(HLFoldTracker& ft)
+{
+    return HLFoldResult();
+}
+
+
+template<typename T>
+bool foldBinaryT(Val& r, Lexer::TokenType tt, T a, T b)
+{
+    switch(tok)
+    {
+#define BINOP(Func) { T t; ok = Func(t, a, b); r = t; return ok; }
+        case Lexer::TOK_PLUS: BINOP(Add);
+        case Lexer::TOK_PLUS: BINOP(Add);
+        case Lexer::TOK_PLUS: BINOP(Add);
+        case Lexer::TOK_PLUS: BINOP(Add);
+        case Lexer::TOK_PLUS: BINOP(Add);
+        case Lexer::TOK_PLUS: BINOP(Add);
+        case Lexer::TOK_PLUS: BINOP(Add);
+    }
+}
+
+static bool commutative(Lexer::TokenType tt)
+{
+    switch(tt)
+    {
+        case Lexer::TOK_PLUS:
+        case Lexer::TOK_STAR:
+        case Lexer::TOK_BITAND:
+        case Lexer::TOK_BITOR:
+        case Lexer::TOK_HAT:
+            return true;
+        default: ;
+    }
+    return false;
+}
+
+// Sets my own type and propagates to children
+HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
+{
+    assert(typesrc->isknowntype());
+
+    if(this->isknowntype())
+    {
+        // FIXME: This needs to be a proper subtype check
+        if(typesrc->mytype == mytype)
+        {
+            return;
+        }
+        else
+        {
+            std::ostringstream os;
+            // TODO: get source location if possible, and show it
+            const char *toktxt = Lexer::GetTokenText(Lexer::TokenType(this->tok));
+            os << "(" << line << ":" << column << ") '" << toktxt << "': mismatched types, found " << mytype << ", expected " << typesrc->mytype;
+            ft.errors.push_back(os.str());
+            puts(os.str().c_str());
+            return;
+        }
+    }
+
+    this->setknowntype(typesrc->mytype);
+
+    size_t numch = 0;
+
+    // Propagate to children
+    switch(type)
+    {
+        case HLNODE_UNARY:
+        case HLNODE_BINARY:
+            numch = _nch;
+            break;
+
+
+    }
+
+    for(size_t i = 0; i < numch; ++i)
+        u.aslist[i]->propagateMyType(ft, typesrc);
+}
+
+HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
+{
+    assert(type == HLNODE_BINARY);
+
+    HLNode *L = u.binary.a;
+    HLNode *R = u.binary.b;
+    const Lexer::TokenType tt = Lexer::TokenType(tok);
+
+    HLNode *typesrc = L->isknowntype() ? L : R;
+    if(typesrc->isknowntype())
+        setknowntype(typesrc->mytype);
+
+#if 0
+    if(L->isconst() && R->isconst())
+    {
+        // TODO: This is all temporary until pure functions are supported,
+        // and the primitive types (with operator definitions) exist in the runtime.
+        // once that is done, forward to the existing operator functions (which should all be pure)
+        bool ok = false;
+        Val r;
+        Val a = L->u.constant.val;
+        Val b = R->u.constant.val;
+
+        switch(a.type.id)
+        {
+            case PRIMTYPE_SINT:
+                foldBinaryT<sint>(r, tt, a.u.si, a.u.si);
+                break;
+
+            case PRIMTYPE_UINT:
+                foldBinaryT<uint>(r, tt, a.u.ui, a.u.ui);
+                break;
+
+            case PRIMTYPE_FLOAT:
+                foldBinaryT<real>(r, tt, a.u.f, a.u.f);
+                break;
+
+            case PRIMTYPE_STRING:
+                // TODO: string concats -- and for optimization purposes, turn them into a (flat) concat list
+                break;
+
+            default:
+        }
+    }
+    else if(R->isconst() && commutative(tt))
+    {
+        HLNode *tmp = L;
+        L = R;
+        R = tmp;
+        goto Lconst;
+    }
+    else if(L->isconst())
+    {
+        Lconst:
+        // TODO: Specialized rules for 0+x, 0*x, 1*x and such ops that can be simplified
+    }
+#endif
+
+    // When we're here, this node wasn't folded and remains a binop. Propagate types.
+
+    if(isknowntype())
+    {
+        propagateMyType(ft, typesrc);
+    }
+
+    return FOLD_OK;
+}
