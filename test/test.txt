@@ -101,7 +101,9 @@
 
 int x = 1
 int y = 2
-func tiny() { return x+y+z }
+return x+y
+
+--func tiny() { return x+y+z }
 
 --func addi(int a, b, ...) -> int... { int c = a+b int d = x+y int e = c+d return e }
 
@@ -127,3 +129,13 @@ func tiny() { return x+y+z }
 
 --func identity(int a)
 --    return a
+
+
+--func makeding(type T, int x)
+--{
+--  type A = { first=T, second=int }
+--  return func(int y)
+--  {
+--    return A(T(y), x)
+--  }
+--}

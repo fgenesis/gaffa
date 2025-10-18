@@ -70,7 +70,7 @@ static Val makenum(const char *s, const char *end)
 
 const char *Parser::symbolname(const HLNode *node) const
 {
-    switch(node->type)
+    if(node) switch(node->type)
     {
         case HLNODE_IDENT:
             return symbolname(syms.getsym(node->u.ident.symid));
@@ -565,7 +565,8 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
         {
             ns = nname;
             nname = ident("methodName", IDENT_USAGE_DECL, SYMREF_VISIBLE);
-            flags |= FUNCFLAGS_METHOD_SUGAR;
+            assert(false);
+            //flags |= FUNCFLAGS_METHOD_SUGAR;
         }
         *pname = nname;
         *pnamespac = ns;
@@ -588,7 +589,7 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     _endFunction();
 
     printf("DEBUG: Finalized function '%s', nargs = %d, nrets = %d\n",
-        symbolname(*pname), h->u.fhdr.nargs(), h->u.fhdr.nrets());
+        pname ? symbolname(*pname) : NULL, h->u.fhdr.nargs(), h->u.fhdr.nrets());
 
     return f;
 }
@@ -644,7 +645,10 @@ void Parser::_funcattribs(unsigned *pfuncflags)
     {
         Str s = _identStr(curtok);
         if(pure.id && s.id == pure.id)
-            *pfuncflags |= FUNCFLAGS_PURE;
+        {
+            //*pfuncflags |= FUNCFLAGS_PURE;
+            assert(false);
+        }
         else
             errorAtCurrent("Expected function attrib: pure");
 
@@ -1160,7 +1164,10 @@ HLNode* Parser::typeident()
 {
     unsigned flags = 0;
     if(tryeat(Lexer::TOK_LIKE))
-        flags |= IDENTFLAGS_DUCKYTYPE;
+    {
+        //flags |= IDENTFLAGS_DUCKYTYPE;
+        assert(false);
+    }
     HLNode *node = ident("type", IDENT_USAGE_USE, SYMREF_TYPE);
     if(tryeat(Lexer::TOK_QM))
         flags |= IDENTFLAGS_OPTIONALTYPE;
@@ -1220,7 +1227,7 @@ HLNode *Parser::unary(Context ctx)
     {
         // Initially, we're a uniary operator node.
         node->tok = rule->tok;
-        node->u.unary.rhs = rhs;
+        node->u.unary.a = rhs;
     }
 
     return node;
@@ -1237,8 +1244,8 @@ HLNode * Parser::binary(Context ctx, const Parser::ParseRule *rule, HLNode *lhs)
     if(node)
     {
         node->tok = rule->tok;
-        node->u.binary.rhs = rhs;
-        node->u.binary.lhs = lhs;
+        node->u.binary.a = rhs;
+        node->u.binary.b = lhs;
     }
     return node;
 }
@@ -1481,7 +1488,7 @@ HLNode* Parser::unaryRange(Context ctx)
     if(node)
     {
         assert(node->type == HLNODE_UNARY);
-        node->u.ternary.b = node->u.unary.rhs;
+        node->u.ternary.b = node->u.unary.a;
         node->u.ternary.a = NULL;
         node->u.ternary.c = _rangeStep();
     }

@@ -45,7 +45,11 @@ struct _FieldDefault
 // multiple created types with the same members and properties are actually the same type.
 struct TDesc
 {
-    DType *dtype; // This is ignored for deduplication
+    struct // This is ignored for deduplication
+    {
+        DType *dtype;
+        Type tid;
+    } h;
 
     tsize n; // n > 0, it's a struct
     tsize allocsize; // for the GC, but also adds some entropy for hashing/deduplication
@@ -118,9 +122,11 @@ public:
     Type mkstruct(const StructMember *m, size_t n, size_t numdefaults);
     Type mkstruct(const Table& t); // makes a struct from t (named)
     Type mkstruct(const DArray& t);
+    Type mklist(const sref *ts, size_t n);
+    TDesc *mkprim(PrimType t);
 
     // Helper to create a function type
-    //Type mkfunc(const Type *arglist, size_t nargs, const Type *retlist, size_t nrets);
+    Type mkfunc(Type argt, Type rett);
 
     // Create a subtype of an existing internal type (eg. Table<string, Any>)
     Type mksub(PrimType prim, const Type *sub, size_t n);
@@ -134,5 +140,5 @@ public:
 private:
     Type _store(TDesc *);
     Dedup _tt;
-    Type _builtins[PRIMTYPE_MAX];
+    TDesc *_builtins[PRIMTYPE_MAX];
 };

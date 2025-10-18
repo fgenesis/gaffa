@@ -52,6 +52,8 @@ set(src
     symtable.h
     compiler.cpp
     compiler.h
+    rttypes.cpp
+    rttypes.h
 )
 
 add_library(gaffa ${src})

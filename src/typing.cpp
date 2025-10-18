@@ -24,7 +24,8 @@ TDesc *TDesc_New(GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize)
     TDesc *td = (TDesc*)gc_alloc_unmanaged(gc, NULL, 0, sz);
     if(td)
     {
-        td->dtype = NULL;
+        td->h.dtype = NULL;
+        td->h.tid.id = PRIMTYPE_NIL;
         td->n = n;
         td->bits = bits;
         td->allocsize = (tsize)sz;
@@ -41,7 +42,7 @@ void TDesc_Delete(GC& gc, TDesc *td)
 
 enum
 {
-    PrefixBytes = sizeof(((TDesc*)NULL)->dtype)
+    PrefixBytes = sizeof(((TDesc*)NULL)->h)
 };
 
 TypeRegistry::TypeRegistry(GC& gc)
@@ -65,10 +66,10 @@ bool TypeRegistry::init()
     const Type str = {PRIMTYPE_STRING};
     const Type anysub[] = { any, any };
 
-    _builtins[PRIMTYPE_ARRAY]  = mksub(PRIMTYPE_ARRAY, anysub, 1); // array = Array(any)
-    _builtins[PRIMTYPE_TABLE]  = mksub(PRIMTYPE_TABLE, anysub, 2); // table = Table(any, any)
+    //_builtins[PRIMTYPE_ARRAY]  = mksub(PRIMTYPE_ARRAY, anysub, 1); // array = Array(any)
+    //_builtins[PRIMTYPE_TABLE]  = mksub(PRIMTYPE_TABLE, anysub, 2); // table = Table(any, any)
     //_builtins[PRIMTYPE_VARARG] = mksub(PRIMTYPE_VARARG, anysub, 1); // ... = VarArg(any)
-    _builtins[PRIMTYPE_ERROR]  = mksub(PRIMTYPE_ERROR, &str, 1);
+    //_builtins[PRIMTYPE_ERROR]  = mksub(PRIMTYPE_ERROR, &str, 1);
 
     return true;
 }
@@ -167,6 +168,35 @@ Type TypeRegistry::mkstruct(const DArray& t)
     return _store(td);
 }
 
+Type TypeRegistry::mklist(const sref* ts, size_t n)
+{
+    TDesc *td = TDesc_New(_tt.gc, n, TDESC_BITS_NO_NAMES, 0, 0);
+    for(size_t i = 0; i < n; ++i)
+    {
+        td->names()[i] = 0;
+        td->types()[i].id = ts[i];
+    }
+    return _store(td);
+}
+
+TDesc* TypeRegistry::mkprim(PrimType t)
+{
+    assert(t < Countof(_builtins));
+    TDesc *td = _builtins[t];
+    if(!td)
+    {
+        td = TDesc_New(_tt.gc, 0, 0, 0, 0);
+        _builtins[t] = td;
+    }
+    return td;
+}
+
+Type TypeRegistry::mkfunc(Type argt, Type rett)
+{
+    Type ts[] = { argt, rett };
+    return mksub(PRIMTYPE_FUNC, &ts[0], Countof(ts));
+}
+
 /*
 Type TypeRegistry::mkfunc(const Type* arglist, size_t nargs, const Type* retlist, size_t nrets)
 {
@@ -183,7 +213,10 @@ Type TypeRegistry::mkfunc(const Type* arglist, size_t nargs, const Type* retlist
 
 const TDesc *TypeRegistry::lookup(Type t) const
 {
-    sref idx = t.id < PRIMTYPE_MAX ? _builtins[t.id].id : t.id - PRIMTYPE_MAX;
+    if(t.id < PRIMTYPE_MAX)
+        return _builtins[t.id];
+
+    sref idx = t.id - PRIMTYPE_MAX;
     MemBlock mb = _tt.get(idx);
     return (TDesc*)mb.p;
 }

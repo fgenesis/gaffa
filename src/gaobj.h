@@ -49,8 +49,10 @@ public:
 // generated from TDesc
 class DType : public DObj
 {
+protected:
+    DType(TDesc *desc, DType *typeType);
 public:
-    DType(Type tid, TDesc *desc, DType *typeType);
+    static DType *GCNew(GC& gc, TDesc *desc, DType *typeType);
     const Type tid;
     TDesc *tdesc;
     Table fieldIndices;

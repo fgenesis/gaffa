@@ -82,7 +82,8 @@ static const unsigned char TypeElementSizes[] =
     /* PRIMTYPE_ARRAY  */ sizeof(GCobj*),
     /* PRIMTYPE_SYMTAB */ sizeof(SymTable*),
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
-    /* PRIMTYPE_ANY    */ sizeof(ValU)
+    /* PRIMTYPE_ANY    */ sizeof(ValU),
+    /* PRIMTYPE_AUTO   */ sizeof(ValU)
 };
 
 size_t GetPrimTypeStorageSize(unsigned t)

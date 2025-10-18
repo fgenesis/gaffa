@@ -119,6 +119,11 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
         default:
             break;
 
+        case HLNODE_CONSTANT_VALUE:
+            setknowntype(u.constant.val.type.id);
+            break;
+            
+
         case HLNODE_IDENT:
             if(flags & IDENTFLAGS_RHS)
             {
@@ -178,9 +183,22 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             if(all)
             {
                 clear(ft.gc);
-
             }
         }
+        break;
+
+        case HLNODE_BINARY:
+            _foldBinop(ft);
+            break;
+
+        case HLNODE_UNARY:
+            _foldUnop(ft);
+            break;
+
+        case HLNODE_RETURNYIELD:
+            _applyTypeFromList(ft, u.retn.what);
+            break;
+
 
         /*case HLNODE_FUNCTION:
             return _foldfunc(ft);
@@ -355,7 +373,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
 
     ValU v;
     v.u.obj = f;
-    v.u.t = ft.tr.lookup(info.t)->dtype;
+    v.u.t = ft.tr.lookup(info.t)->h.dtype;
     assert(v.u.t);
 
     return makeconst(ft.gc, v);
@@ -534,6 +552,39 @@ HLFoldResult HLNode::_foldUnop(HLFoldTracker& ft)
     return HLFoldResult();
 }
 
+#if 0
+DType* HLNode::getDType(HLFoldTracker& ft)
+{
+    if(_nch == HLList::Children)
+    {
+        StructMember sm[256];
+        assert(used < Countof(sm));
+        const size_t n = used;
+        for(size_t i = 0; i < n; ++i)
+        {
+            StructMember& m = sm[i];
+            m.defaultval = _Xnil();
+            m.name = 0;
+            const Val& thetype = u.list[i]->as<HLConstantValue>()->val;
+            m.t = thetype.u.t->tid;
+            assert(m.t.id == PRIMTYPE_TYPE);
+        }
+
+        // TODO: variadic?
+
+        info.nrets = n;
+        rett = ft.tr.mkstruct(&sm[0], n, 0);
+    }
+    else
+    {
+        Type t = { mytype };
+        TDesc *desc = ft.tr.lookup(t);
+        return desc->dtype;
+    }
+
+}
+#endif
+
 
 template<typename T>
 bool foldBinaryT(Val& r, Lexer::TokenType tt, T a, T b)
@@ -566,6 +617,21 @@ static bool commutative(Lexer::TokenType tt)
     return false;
 }
 
+void HLNode::_applyTypeFrom(HLFoldTracker& ft, HLNode* from)
+{
+    if(from->isknowntype())
+        propagateMyType(ft, from);
+}
+
+void HLNode::_applyTypeFromList(HLFoldTracker& ft, HLNode* from)
+{
+    assert(_nch == HLList::Children);
+    if(from->isknowntype())
+    {
+        propagateMyType(ft, from);
+    }
+}
+
 // Sets my own type and propagates to children
 HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
 {
@@ -576,7 +642,7 @@ HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
         // FIXME: This needs to be a proper subtype check
         if(typesrc->mytype == mytype)
         {
-            return;
+            return FOLD_OK;
         }
         else
         {
@@ -586,11 +652,28 @@ HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
             os << "(" << line << ":" << column << ") '" << toktxt << "': mismatched types, found " << mytype << ", expected " << typesrc->mytype;
             ft.errors.push_back(os.str());
             puts(os.str().c_str());
-            return;
+            return FOLD_FAILED;
         }
     }
 
     this->setknowntype(typesrc->mytype);
+
+    HLFoldResult res = FOLD_OK;
+
+    switch(type)
+    {
+        case HLNODE_UNARY:
+            _foldUnop(ft);
+            break;
+
+        case HLNODE_BINARY:
+            _foldBinop(ft);
+            break;
+
+        default:
+            assert(false);
+
+    }
 
     size_t numch = 0;
 
@@ -602,11 +685,19 @@ HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
             numch = _nch;
             break;
 
+        default:
+            assert(false);
 
     }
 
     for(size_t i = 0; i < numch; ++i)
-        u.aslist[i]->propagateMyType(ft, typesrc);
+    {
+        res = u.aslist[i]->propagateMyType(ft, typesrc);
+        if(res != FOLD_OK)
+            return res;
+    }
+
+    return FOLD_OK;
 }
 
 HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)

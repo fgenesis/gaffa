@@ -59,7 +59,7 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
 {
     const char *label = getLabel((HLNodeType)n->type);
     indent(level);
-    printf("%s", label);
+    printf("%s [T:%d]", label, n->mytype);
 
     if(n->_nch == HLList::Children)
     {

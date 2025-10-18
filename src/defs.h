@@ -47,14 +47,6 @@ struct Type
     tsize id;
 };
 
-// The highest 2 bits of the type id are used as tags
-enum TypeBits
-{
-    TB_OPTION  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 1u), // is option type
-    TB_VARARG  = size_t(1u) << size_t(sizeof(Type) * CHAR_BIT - 2u), // is option type
-    TB_TYPEMASK = ~(TB_OPTION | TB_VARARG)
-};
-
 // TODO: userdata; types are actually objects
 enum PrimType
 {
@@ -74,13 +66,14 @@ enum PrimType
     PRIMTYPE_FLOAT,  // T  i         //
     PRIMTYPE_STRING, // T  R     g   //
     PRIMTYPE_TYPE,   // T  R     g   //
-    PRIMTYPE_FUNC,   // T     S  G   //
+    PRIMTYPE_FUNC,   // T  o  S  G   //
     PRIMTYPE_TABLE,  // T  o  S  G   //
     PRIMTYPE_ARRAY,  // T  o  S  G   //
     PRIMTYPE_SYMTAB, // T  o     G   //
     PRIMTYPE_OBJECT, // T  o     G   //
 
-    PRIMTYPE_ANY,    // can hold any value. must be last in the enum.
+    PRIMTYPE_ANY,    // can hold any value. must be after specific types.
+    PRIMTYPE_AUTO,   // special marker for type analysis
     // These are the engine-level types. Runtime-created types are any IDs after this.
     PRIMTYPE_MAX,
 
@@ -180,8 +173,9 @@ struct Val : public ValU
     inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
     inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
     inline Val(_Str s)                  { _init(PRIMTYPE_STRING); u.str = s.ref; }
-    inline Val(DType *t)                { _init(PRIMTYPE_TYPE);  u.t = t; }
-    inline Val(SymTable *symt)          { _init(PRIMTYPE_SYMTAB);  u.symt = symt; }
+    inline Val(DType *t)                { _init(PRIMTYPE_TYPE);   u.t = t; }
+    inline Val(SymTable *symt)          { _init(PRIMTYPE_SYMTAB); u.symt = symt; }
+    inline Val(DFunc *func)             { _init(PRIMTYPE_FUNC);   u.func = func; }
 };
 
 enum UnOpType

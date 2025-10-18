@@ -7,6 +7,7 @@
 #include "gainternal.h"
 #include "lex.h"
 #include "gaalloc.h"
+#include <vector>
 
 struct GC;
 struct HLFoldTracker;
@@ -257,6 +258,8 @@ struct FuncProto
 {
     FuncProto *New(GC& gc, size_t nodemem);
     HLNode *node; // points to the AST behind the struct
+    DType *paramtype;
+    DType *rettype;
     size_t refcount;
     size_t memsize;
 
@@ -383,7 +386,7 @@ struct HLNode
     {
         type = HLNodeType(T::EnumType);
         _nch = T::Children;
-        mytpe = T::DefaultValType;
+        mytype = T::DefaultValType;
         return this;
     }
 
@@ -400,11 +403,14 @@ struct HLNode
     HLNode *clone(GC& gc) const;
 
 private:
+    DType *getDType();
     HLFoldResult _foldfunc(HLFoldTracker &ft);
     HLFoldResult _tryfoldfunc(HLFoldTracker &ft);
     HLFoldResult _foldRec(HLFoldTracker &ft, HLFoldStep step);
     HLFoldResult _foldUnop(HLFoldTracker &ft);
     HLFoldResult _foldBinop(HLFoldTracker &ft);
+    void _applyTypeFrom(HLFoldTracker& ft, HLNode *from);
+    void _applyTypeFromList(HLFoldTracker& ft, HLNode *from);
     HLFoldResult propagateMyType(HLFoldTracker &ft, const HLNode *typesrc);
 
     HLNode *_clone(void *mem, size_t bytes, GC& gc) const;
