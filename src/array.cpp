@@ -36,7 +36,7 @@ NOINLINE void* PodArrayBase::_resize(GC& gc, tsize n, tsize elementSize)
 // ------------------------
 
 DArray::DArray(Type t)
-    : sz(0), cap(0), t(t), elementSize(GetPrimTypeStorageSize(t.id))
+    : sz(0), cap(0), t(t), elementSize(GetPrimTypeStorageSize(t))
 {
     storage.p = NULL;
 }
@@ -97,7 +97,7 @@ void *DArray::_resize(GC& gc, tsize n)
 
 void* DArray::AllocStorage(GC& gc, void* p, Type t, tsize oldelems, tsize newelems)
 {
-    const size_t elemSize = GetPrimTypeStorageSize(t.id);
+    const size_t elemSize = GetPrimTypeStorageSize(t);
     const size_t oldbytes = oldelems * elemSize;
     const size_t newbytes = newelems * elemSize;
     return gc_alloc_unmanaged(gc, p, oldbytes, newbytes);
@@ -108,7 +108,7 @@ Val DArray::dynamicLookup(tsize idx) const
     if(idx >= sz)
         return _Nil();
 
-    if(t.id >= PRIMTYPE_ANY)
+    if(t >= PRIMTYPE_ANY)
         return storage.vals[idx];
 
     ValU v;
@@ -127,7 +127,7 @@ void DArray::dynamicAppend(GC& gc, ValU v)
 
     ++sz;
 
-    if(t.id >= PRIMTYPE_ANY)
+    if(t >= PRIMTYPE_ANY)
     {
         storage.vals[idx] = v;
         return;
@@ -141,7 +141,7 @@ Val DArray::dynamicSet(tsize idx, ValU v)
 {
     assert(idx < sz); // TODO: error
     ValU ret;
-    if(t.id >= PRIMTYPE_ANY)
+    if(t >= PRIMTYPE_ANY)
     {
         ret = storage.vals[idx];
         storage.vals[idx] = v;
@@ -163,7 +163,7 @@ Val DArray::removeAtAndMoveLast_Unsafe(tsize idx)
 
     ValU v;
     const size_t lastidx = --sz;
-    if(t.id >= PRIMTYPE_ANY)
+    if(t >= PRIMTYPE_ANY)
     {
         v = storage.vals[idx];
         storage.vals[idx] = storage.vals[lastidx];

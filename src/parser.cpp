@@ -1201,12 +1201,12 @@ HLNode *Parser::unary(Context ctx)
         if(rhs->type == HLNODE_CONSTANT_VALUE)
         {
             ValU &v = rhs->u.constant.val;
-            switch(v.type.id)
+            switch(v.type)
             {
                 case PRIMTYPE_UINT: // Change type from uint to sint when explicitly prefixed with sign.
                     // This is important for automatic type deduction. C/C++ uses '42u' to denote unsigned;
                     // we use unsigned-by-default and make it signed by explicitly stating +42 or -42.
-                    v.type.id = PRIMTYPE_SINT;
+                    v.type = PRIMTYPE_SINT;
                     if(rule->tok == Lexer::TOK_MINUS)
                         v.u.si = -v.u.si; // FIXME: limit, MAX_INT handling
                     return rhs;

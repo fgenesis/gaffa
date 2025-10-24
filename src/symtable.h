@@ -28,7 +28,7 @@ class SymTable : public GCobj, public SimpleSymTable
 {
 public:
 
-    SymTable* SymTable::GCNew(GC& gc);
+    static SymTable* SymTable::GCNew(GC& gc);
 
     ~SymTable();
     void dealloc(GC& gc);

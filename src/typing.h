@@ -123,7 +123,8 @@ public:
     Type mkstruct(const Table& t); // makes a struct from t (named)
     Type mkstruct(const DArray& t);
     Type mklist(const sref *ts, size_t n);
-    TDesc *mkprim(PrimType t);
+    TDesc *mkprimDesc(PrimType t);
+    DType *mkprim(PrimType t);
 
     // Helper to create a function type
     Type mkfunc(Type argt, Type rett);
@@ -133,9 +134,10 @@ public:
 
     // TODO: function to make union
 
-    const TDesc *lookup(Type t) const; // get type descriptor
+    const TDesc *lookupDesc(Type t) const; // get type descriptor
+    DType *lookup(Type t);
 
-    FORCEINLINE void mark(Type t) { if(t.id > PRIMTYPE_MAX) _tt.mark(t.id - PRIMTYPE_MAX); }
+    FORCEINLINE void mark(Type t) { if(t > PRIMTYPE_MAX) _tt.mark(t - PRIMTYPE_MAX); }
 
 private:
     Type _store(TDesc *);

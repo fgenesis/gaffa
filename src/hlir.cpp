@@ -120,9 +120,9 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             break;
 
         case HLNODE_CONSTANT_VALUE:
-            setknowntype(u.constant.val.type.id);
+            setknowntype(u.constant.val.type);
             break;
-            
+
 
         case HLNODE_IDENT:
             if(flags & IDENTFLAGS_RHS)
@@ -250,7 +250,7 @@ HLFoldResult HLNode::makeconst(GC& gc, const Val& val)
 {
     HLNode *me = morph<HLConstantValue>(gc);
     me->u.constant.val = val;
-    me->setknowntype(val.type.id);
+    me->setknowntype(val.type);
     return FOLD_OK;
 }
 
@@ -324,7 +324,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
             m.name = vd->ident->as<HLIdent>()->nameStrId;
             const Val& thetype = vd->type->as<HLConstantValue>()->val;
             m.t = thetype.u.t->tid;
-            assert(m.t.id == PRIMTYPE_TYPE);
+            assert(m.t == PRIMTYPE_TYPE);
         }
 
         // TODO: variadic?
@@ -350,7 +350,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
             m.name = 0;
             const Val& thetype = retlist->list[i]->as<HLConstantValue>()->val;
             m.t = thetype.u.t->tid;
-            assert(m.t.id == PRIMTYPE_TYPE);
+            assert(m.t == PRIMTYPE_TYPE);
         }
 
         // TODO: variadic?
@@ -373,7 +373,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
 
     ValU v;
     v.u.obj = f;
-    v.u.t = ft.tr.lookup(info.t)->h.dtype;
+    v.u.t = ft.tr.lookup(info.t);
     assert(v.u.t);
 
     return makeconst(ft.gc, v);

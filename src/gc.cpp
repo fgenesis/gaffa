@@ -68,13 +68,13 @@ static void makegrey(GC& gc, GCobj *o)
 
 static int markval(ga_RT& rt, ValU v, int steps)
 {
-    assert(v.type.id < PRIMTYPE_ANY);
+    assert(v.type < PRIMTYPE_ANY);
 
-    if(v.type.id >= _PRIMTYPE_FIRST_OBJ)
+    if(v.type >= _PRIMTYPE_FIRST_OBJ)
     {
         makegrey(rt.gc, v.u.obj);
     }
-    else switch(v.type.id)
+    else switch(v.type)
     {
         case PRIMTYPE_ERROR:
             assert(false); // ??? FIXME
@@ -118,10 +118,10 @@ static int traverse_array(ga_RT& rt, const DArray *a, int steps)
         return steps;
     }*/
 
-    if(a->t.id >= PRIMTYPE_ANY)
+    if(a->t >= PRIMTYPE_ANY)
         traverse_valarray_any(rt, a->storage.vals, N, steps);
     else
-    switch(a->t.id)
+    switch(a->t)
     {
         case PRIMTYPE_TYPE:
         if(const Type *ts = a->storage.ts)

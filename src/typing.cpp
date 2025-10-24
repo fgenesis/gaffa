@@ -6,26 +6,25 @@
 
 #include <string.h>
 
-static const Type NilType = {PRIMTYPE_NIL};
 static const Val XNil = _Xnil();
-
 
 TDesc *TDesc_New(GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize)
 {
     size_t minsz = sizeof(TDesc)
         + n * sizeof(Type)
         + n * sizeof(sref);
-    size_t defaultsOffset = numdefaults
-        ? alignTo(minsz, sizeof(Val::u.opaque)) // FIXME: this should be fine but find a better way to figure out alignment
-        : 0;
-    size_t dsz =  numdefaults * sizeof(_FieldDefault);
+
+    // FIXME: this should be fine but find a better way to figure out alignment
+    size_t defaultsOffset = alignTo(minsz, sizeof(Val::u.opaque));
+
+    size_t dsz = numdefaults * sizeof(_FieldDefault);
 
     size_t sz = defaultsOffset + dsz + extrasize;
     TDesc *td = (TDesc*)gc_alloc_unmanaged(gc, NULL, 0, sz);
     if(td)
     {
         td->h.dtype = NULL;
-        td->h.tid.id = PRIMTYPE_NIL;
+        td->h.tid = PRIMTYPE_NIL;
         td->n = n;
         td->bits = bits;
         td->allocsize = (tsize)sz;
@@ -62,9 +61,7 @@ bool TypeRegistry::init()
     if(!_tt.init())
         return false;
 
-    const Type any = {PRIMTYPE_ANY};
-    const Type str = {PRIMTYPE_STRING};
-    const Type anysub[] = { any, any };
+    //const Type anysub[] = { PRIMTYPE_ANY, PRIMTYPE_ANY };
 
     //_builtins[PRIMTYPE_ARRAY]  = mksub(PRIMTYPE_ARRAY, anysub, 1); // array = Array(any)
     //_builtins[PRIMTYPE_TABLE]  = mksub(PRIMTYPE_TABLE, anysub, 2); // table = Table(any, any)
@@ -115,15 +112,15 @@ Type TypeRegistry::mkstruct(const Table& t)
     const tsize N = t.size();
     PodArray<StructMember> tn;
     if(!tn.resize(_tt.gc, N))
-        return NilType;
+        return PRIMTYPE_NIL;
 
     tsize numdefaults = 0;
     for(tsize i = 0; i < N; ++i)
     {
         const KV e = t.index(i);
-        if(e.k.type.id != PRIMTYPE_STRING)
-            return NilType;
-        if(e.v.type.id == PRIMTYPE_TYPE)
+        if(e.k.type != PRIMTYPE_STRING)
+            return PRIMTYPE_NIL;
+        if(e.v.type == PRIMTYPE_TYPE)
         {
             tn[i].defaultval = XNil;
             tn[i].t = e.v.u.t->tid;
@@ -146,7 +143,7 @@ Type TypeRegistry::mkstruct(const DArray& t)
 {
     const tsize N = t.size();
     TDesc *td = TDesc_New(_tt.gc, N, TDESC_BITS_NO_NAMES, 0, 0);
-    if(t.t.id == PRIMTYPE_TYPE)
+    if(t.t == PRIMTYPE_TYPE)
         for(size_t i = 0; i < N; ++i)
         {
             td->names()[i] = 0;
@@ -156,10 +153,10 @@ Type TypeRegistry::mkstruct(const DArray& t)
         for(size_t i = 0; i < N; ++i)
         {
             Val e = t.dynamicLookup(i);
-            if(e.type.id != PRIMTYPE_TYPE)
+            if(e.type != PRIMTYPE_TYPE)
             {
                 TDesc_Delete(_tt.gc, td);
-                return NilType;
+                return PRIMTYPE_NIL;
             }
             td->names()[i] = 0;
             td->types()[i] = e.u.t->tid;
@@ -174,21 +171,35 @@ Type TypeRegistry::mklist(const sref* ts, size_t n)
     for(size_t i = 0; i < n; ++i)
     {
         td->names()[i] = 0;
-        td->types()[i].id = ts[i];
+        td->types()[i] = ts[i];
     }
     return _store(td);
 }
 
-TDesc* TypeRegistry::mkprim(PrimType t)
+TDesc* TypeRegistry::mkprimDesc(PrimType t)
 {
     assert(t < Countof(_builtins));
     TDesc *td = _builtins[t];
     if(!td)
     {
         td = TDesc_New(_tt.gc, 0, 0, 0, 0);
+        td->primtype = t;
+        td->h.tid = t;
         _builtins[t] = td;
     }
     return td;
+}
+
+DType* TypeRegistry::mkprim(PrimType t)
+{
+    DType *tt = lookup(PRIMTYPE_TYPE);
+    assert(tt && tt->tid == PRIMTYPE_TYPE);
+    TDesc *desc = mkprimDesc(t);
+    assert(!desc->h.dtype);
+    DType *d = DType::GCNew(_tt.gc, desc, tt);
+    d->dtype = d;
+    desc->h.dtype = d;
+    return d;
 }
 
 Type TypeRegistry::mkfunc(Type argt, Type rett)
@@ -211,14 +222,21 @@ Type TypeRegistry::mkfunc(const Type* arglist, size_t nargs, const Type* retlist
 }
 */
 
-const TDesc *TypeRegistry::lookup(Type t) const
+const TDesc *TypeRegistry::lookupDesc(Type t) const
 {
-    if(t.id < PRIMTYPE_MAX)
-        return _builtins[t.id];
+    if(t < PRIMTYPE_MAX)
+        return _builtins[t];
 
-    sref idx = t.id - PRIMTYPE_MAX;
+    sref idx = t - PRIMTYPE_MAX;
     MemBlock mb = _tt.get(idx);
     return (TDesc*)mb.p;
+}
+
+DType* TypeRegistry::lookup(Type t)
+{
+    const TDesc *td = lookupDesc(t);
+    assert(td);
+    return td->h.dtype;
 }
 
 Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
@@ -226,13 +244,13 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
     assert(prim < PRIMTYPE_ANY);
 
     TDesc *a = TDesc_New(_tt.gc, n, TDESC_BITS_NO_NAMES, 0, 0);
-    a->primtype.id = prim;
+    a->primtype = prim;
     for(size_t i = 0; i < n; ++i)
         a->types()[i] = sub[i];
 
-    Type ret = { _tt.putCopy(&a, a->allocsize) };
-    assert(ret.id); // TODO: handle OOM
-    ret.id += PRIMTYPE_MAX;
+    Type ret = _tt.putCopy(&a, a->allocsize);
+    assert(ret); // TODO: handle OOM
+    ret += PRIMTYPE_MAX;
     return ret;
 }
 
@@ -240,8 +258,8 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
 Type TypeRegistry::_store(TDesc *td)
 {
     size_t sz = td->allocsize;
-    Type ret = { _tt.putTakeOver(td, sz, sz) };
-    assert(ret.id); // TODO: handle OOM
-    ret.id += PRIMTYPE_MAX;
+    Type ret = _tt.putTakeOver(td, sz, sz);
+    assert(ret); // TODO: handle OOM
+    ret += PRIMTYPE_MAX;
     return ret;
 }

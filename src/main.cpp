@@ -8,6 +8,8 @@
 #include "gc.h"
 #include "dedupset.h"
 #include "typing.h"
+#include "rttypes.h"
+#include "symtable.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -168,6 +170,15 @@ int main(int argc, char **argv)
     GC gc = {0};
     gc.alloc = myalloc;
 
+    StringPool strtab(gc);
+    strtab.init();
+
+    TypeRegistry tr(gc);
+    tr.init();
+
+    SymTable *syms = SymTable::GCNew(gc);
+    rtinit(*syms, gc, strtab, tr);
+
     //testdedup();
     //vmtest(gc);
     //return 0;
@@ -184,8 +195,7 @@ int main(int argc, char **argv)
     if(!code)
         return 1;
 
-    StringPool strtab(gc);
-    strtab.init();
+
     Lexer lex(code);
     Parser pp(&lex, fn, gc, strtab);
     HLIRBuilder hb(gc);
@@ -196,14 +206,15 @@ int main(int argc, char **argv)
 
     hlirDebugDump(strtab, node);
 
-    TypeRegistry tr(gc);
+
     HLFoldTracker ft = { gc, pp.syms, tr };
 
-    HLNode *folded = node->fold(ft, FOLD_INITIAL);
+    /*HLNode *folded = node->fold(ft, FOLD_INITIAL);
 
     puts("\n####### AFTER FOLDING #######\n");
 
-    hlirDebugDump(strtab, folded);
+    hlirDebugDump(strtab, folded);*/
+
 
     //MLIRContainer mc(gc);
     //mc.import(node, strtab, fn);

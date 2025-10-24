@@ -113,10 +113,10 @@ void ValU::_init(tsize tyid)
 {
     static_assert(sizeof(_AnyValU) == sizeof(((_AnyValU*)NULL)->opaque), "opaque member must fill the entire struct");
     u.opaque = 0;
-    type.id = tyid;
+    type = tyid;
 }
 
 bool ValU::operator==(const ValU& o) const
 {
-    return type.id == o.type.id && u.opaque == o.u.opaque;
+    return type == o.type && u.opaque == o.u.opaque;
 }

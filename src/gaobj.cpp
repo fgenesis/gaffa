@@ -24,7 +24,7 @@ DObj* DObj::GCNew(GC& gc, DType* dty)
 Val* DObj::member(const Val& key)
 {
     Val idxv = dtype->fieldIndices.get(key);
-    assert(idxv.type.id == PRIMTYPE_UINT);
+    assert(idxv.type == PRIMTYPE_UINT);
     return memberArray() + idxv.u.ui;
 }
 
@@ -44,7 +44,7 @@ DType::DType(TDesc* desc, DType* typeType)
     , fieldIndices(StrType, UintType)
     , tid(desc->h.tid), tdesc(desc)
 {
-    assert(typeType->tid.id == PRIMTYPE_TYPE);
+    assert(typeType->tid == PRIMTYPE_TYPE);
 }
 
 DType* DType::GCNew(GC& gc, TDesc *desc, DType* typeType)

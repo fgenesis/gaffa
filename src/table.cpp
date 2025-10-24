@@ -17,31 +17,31 @@ enum { KEY_ALIGNMENT = sizeof(((ValU*)NULL)->u) };
 
 static inline bool isdead(const TKey& k)
 {
-    return k.type.id == PRIMTYPE_NIL && k.u.ui;
+    return k.type == PRIMTYPE_NIL && k.u.ui;
 }
 static inline bool reallyempty(const TKey& k)
 {
-    return k.type.id == PRIMTYPE_NIL && !k.u.ui;
+    return k.type == PRIMTYPE_NIL && !k.u.ui;
 }
 static inline bool isfree(ValU k)
 {
-    return k.type.id == PRIMTYPE_NIL;
+    return k.type == PRIMTYPE_NIL;
 }
 
 static inline bool issame(const TKey& k, ValU v)
 {
-    return k.type.id == v.type.id && k.u.opaque == v.u.opaque;
+    return k.type == v.type && k.u.opaque == v.u.opaque;
 }
 
 static inline void maketombstone(TKey& k)
 {
-    k.type.id = PRIMTYPE_NIL;
+    k.type = PRIMTYPE_NIL;
     k.u.ui = 1;
 }
 
 static inline void makempty(TKey& k)
 {
-    k.type.id = PRIMTYPE_NIL;
+    k.type = PRIMTYPE_NIL;
     k.u.ui = 0;
 }
 
@@ -73,7 +73,7 @@ TKey *Table::_getkey(ValU findkey, tsize mask) const
         TKey& k = keys[kidx];
         if(issame(k, findkey))
             return &k; // found matching key; end iteration
-        if(k.type.id == PRIMTYPE_NIL) // empty or tombstone?
+        if(k.type == PRIMTYPE_NIL) // empty or tombstone?
         {
             if(!k.u.opaque) // empty?
                 return tombstone ? tombstone : &k; // empty entry ends the iteration, but prefer tombstone if we saw one
@@ -139,7 +139,7 @@ void Table::_cleanupforward(tsize idx)
         idx &= mask;
 
         TKey& k = keys[idx];
-        if(k.type.id != PRIMTYPE_NIL)
+        if(k.type != PRIMTYPE_NIL)
             return; // definitely not a tombstone, get out
 
         if(!k.u.opaque) // empty?
@@ -152,7 +152,7 @@ void Table::_cleanupforward(tsize idx)
         idx &= mask;
 
         TKey& k = keys[idx];
-        if(!(k.type.id == PRIMTYPE_NIL && k.u.opaque))
+        if(!(k.type == PRIMTYPE_NIL && k.u.opaque))
             break; // not a tombstone, get out
 
         k.u.opaque = 0; // was a tombstone, clear it
@@ -198,7 +198,7 @@ void Table::_rehash(tsize oldsize, tsize newmask)
     {
         const TKey kcopy = keys[i];
         makempty(keys[i]); // always clear; including tombstones
-        if(kcopy.type.id == PRIMTYPE_NIL)
+        if(kcopy.type == PRIMTYPE_NIL)
             continue;
 
         TKey *tk = _getkey(*(const ValU*)&kcopy, newmask); // HACK: dirty cast: is fine because the memory layout is the same
@@ -240,8 +240,8 @@ const Val* Table::getp(Val k) const
 // set new value, return old
 Val Table::set(GC& gc, Val k, Val v)
 {
-    assert(keytype.id == PRIMTYPE_ANY || k.type.id == keytype.id);
-    assert(vals.t.id == PRIMTYPE_ANY || v.type.id == vals.t.id);
+    assert(keytype == PRIMTYPE_ANY || k.type == keytype);
+    assert(vals.t == PRIMTYPE_ANY || v.type == vals.t);
 
     tsize newsize;
     TKey *tk;
@@ -251,7 +251,7 @@ Val Table::set(GC& gc, Val k, Val v)
         goto doresize;
     }
     tk = _getkey(k, idxmask);
-    if(tk->type.id != PRIMTYPE_NIL)
+    if(tk->type != PRIMTYPE_NIL)
     {
         // The same key is already present -> just replace value
         return vals.dynamicSet(tk->validx, v); // returns old value
@@ -277,7 +277,7 @@ Val Table::set(GC& gc, Val k, Val v)
             assert(newsize); // TODO: handle OOM
             tk = _getkey(k, newsize - 1);
             // Key didn't exist, tombstones get cleared on resize, so the new key must be empty
-            assert(tk->type.id == PRIMTYPE_NIL);
+            assert(tk->type == PRIMTYPE_NIL);
             assert(tk->u.ui == 0);
         }
     }
@@ -300,7 +300,7 @@ Val Table::pop(Val k)
         return _Nil(); // table is empty
 
     TKey *tk = _getkey(k, idxmask);
-    if(tk->type.id == PRIMTYPE_NIL) // tombstone or empty
+    if(tk->type == PRIMTYPE_NIL) // tombstone or empty
         return _Nil(); // key is not in table
 
     // key exists, clear it

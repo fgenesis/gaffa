@@ -58,11 +58,11 @@ void ValStore::serialize(BufSink* sk, const StringPool& sp) const
     {
         const ValU& v = vals[i];
 
-        switch(v.type.id)
+        switch(v.type)
         {
             case PRIMTYPE_UINT:
             case PRIMTYPE_SINT:
-                buf[0] = v.type.id - PRIMTYPE_UINT;
+                buf[0] = v.type - PRIMTYPE_UINT;
                 n = 1 + vu128enc(&buf[1], zigzagenc(v.u.ui));
                 break;
             case PRIMTYPE_FLOAT:

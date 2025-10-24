@@ -42,10 +42,9 @@ enum Constants
     INT_BITS =  sizeof(uint) * CHAR_BIT,
 };
 
-struct Type
-{
-    tsize id;
-};
+
+typedef tsize Type;
+
 
 // TODO: userdata; types are actually objects
 enum PrimType
@@ -140,7 +139,7 @@ union _AnyValU
     void *p;
     sref str;
     GCobj *obj;
-    DType *t;
+    const DType *t;
     DFunc *func;
     SymTable *symt;
     uintptr_t opaque; // this must be large enough to contain all bits of the union

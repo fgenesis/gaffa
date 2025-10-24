@@ -322,7 +322,9 @@ Dedup::HKey* Dedup::_kresize(tsize newsize)
     if(!newks && newsize)
         return oldsize > newsize ? keys : NULL; // Shrinking but can't alloc smaller buffer? keep old.
 
-    gc_alloc_unmanaged_T(gc, keys, oldsize, 0);
+    if(oldsize)
+        gc_alloc_unmanaged_T(gc, keys, oldsize, 0);
+
     keys = newks;
     mask = newmask;
 
