@@ -113,6 +113,12 @@ struct _Str
 struct DType;
 struct DFunc;
 struct SymTable;
+struct DObj;
+
+enum
+{
+    GCOBJ_MASK_PRIMTYPE = 0xff
+};
 
 // This is the base of every GC collectible object.
 // Most likely (but not necessarily!) preceded in memory by a GCprefix, see gc.h
@@ -138,10 +144,7 @@ union _AnyValU
     realui f_as_u; // same size as real
     void *p;
     sref str;
-    GCobj *obj;
-    const DType *t;
-    DFunc *func;
-    SymTable *symt;
+    GCobj *obj; // potentially DType, DObj, DFunc, ...
     uintptr_t opaque; // this must be large enough to contain all bits of the union
 };
 
@@ -151,30 +154,46 @@ struct ValU
     _AnyValU u;
 
     // This must not be PRIMTYPE_ANY.
-    Type type; // Runtime type of this value (PrimType | TypeBits)
+    PrimType type; // Runtime type of this value
 
-    void _init(tsize tyid);
+    void _init(PrimType tyid);
     bool operator==(const ValU& o) const;
 };
 
 struct Val : public ValU
 {
-    inline Val(const _AnyValU u, Type t) { this->type = t; this->u = u; }
+    inline Val(const _AnyValU u, PrimType t) { this->type = t; this->u = u; }
     inline Val(const ValU& v)           { this->u = v.u; this->type = v.type; }
     inline Val()                        { _init(PRIMTYPE_NIL); }
     inline Val(_Nil)                    { _init(PRIMTYPE_NIL); }
     inline Val(_Xnil)                   { _init(PRIMTYPE_NIL);    u.opaque = 1; }
-    inline Val(bool b)                  { _init(PRIMTYPE_BOOL);   u.ui = b; }
-    inline Val(unsigned int i)          { _init(PRIMTYPE_UINT);   u.ui = i; }
-    inline Val(int i)                   { _init(PRIMTYPE_SINT);   u.si = i; }
-    inline Val(uint i, _Nil _ = _Nil()) { _init(PRIMTYPE_UINT);   u.ui = i; }
-    inline Val(sint i, _Nil _ = _Nil()) { _init(PRIMTYPE_SINT);   u.si = i; }
-    inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
-    inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
-    inline Val(_Str s)                  { _init(PRIMTYPE_STRING); u.str = s.ref; }
-    inline Val(DType *t)                { _init(PRIMTYPE_TYPE);   u.t = t; }
-    inline Val(SymTable *symt)          { _init(PRIMTYPE_SYMTAB); u.symt = symt; }
-    inline Val(DFunc *func)             { _init(PRIMTYPE_FUNC);   u.func = func; }
+    explicit inline Val(bool b)                  { _init(PRIMTYPE_BOOL);   u.ui = b; }
+    explicit inline Val(unsigned int i)          { _init(PRIMTYPE_UINT);   u.ui = i; }
+    explicit inline Val(int i)                   { _init(PRIMTYPE_SINT);   u.si = i; }
+    explicit inline Val(uint i, _Nil _ = _Nil()) { _init(PRIMTYPE_UINT);   u.ui = i; }
+    explicit inline Val(sint i, _Nil _ = _Nil()) { _init(PRIMTYPE_SINT);   u.si = i; }
+    explicit inline Val(real f)                  { _init(PRIMTYPE_FLOAT);  u.f = f; }
+    explicit inline Val(Str s)                   { _init(PRIMTYPE_STRING); u.str = s.id; }
+    explicit inline Val(_Str s)                  { _init(PRIMTYPE_STRING); u.str = s.ref; }
+    explicit Val(DType *t);
+    explicit Val(SymTable *symt);
+    explicit Val(DFunc *func);
+    explicit Val(DObj *o);
+
+
+    Val(const void *func); // Not implemented, catch-all
+
+    inline GCobj *asAnyObj(PrimType prim);
+    DFunc    *asFunc();
+    SymTable *asSymTab();
+    DObj     *asDObj();
+    DType    *asDType();
+
+    inline const GCobj *asAnyObj(PrimType prim) const;
+    const DFunc    *asFunc() const;
+    const SymTable *asSymTab() const;
+    const DObj     *asDObj() const;
+    const DType    *asDType() const;
 };
 
 enum UnOpType

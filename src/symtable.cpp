@@ -2,11 +2,9 @@
 #include "gaobj.h"
 #include "gc.h"
 
-static const Type _Any = { PRIMTYPE_ANY };
-
 
 SimpleSymTable::SimpleSymTable()
-    : regular(_Any, _Any)
+    : regular(PRIMTYPE_ANY, PRIMTYPE_ANY)
 {
 }
 
@@ -29,7 +27,7 @@ void SimpleSymTable::add(GC& gc, sref key, const Val& val)
     // With this property established, we can mis-use a Val key to store 2 integers instead of a regular "Val".
 
     ValU k;
-    k.type = key;
+    k.type = (PrimType)key; // dirty cast, to make the compiler shut up
 
     // Basic symbols are stored under a string key and nothing else.
     // The good news is that a valid Type for ending a parameter type list is subject to deduplication,
@@ -41,7 +39,8 @@ void SimpleSymTable::add(GC& gc, sref key, const Val& val)
     if(val.type == PRIMTYPE_FUNC)
     {
         // However, functions are also registered under their arg types to allow overloading.
-        k.u.opaque = val.u.func->dtype->tid;
+        const DFunc *f = val.asFunc();
+        k.u.opaque = f->info.t;
         assert(k.u.opaque);
     }
 
@@ -53,7 +52,7 @@ void SimpleSymTable::add(GC& gc, sref key, const Val& val)
 const Val* SimpleSymTable::lookupIdent(sref key) const
 {
     ValU k;
-    k.type = key;
+    k.type = (PrimType)key;
     k.u.opaque = 0;
     return regular.getp(k);
 }
@@ -62,7 +61,7 @@ const Val* SimpleSymTable::lookupFunc(sref key, Type argt) const
 {
     assert(argt);
     ValU k;
-    k.type = key;
+    k.type = (PrimType)key;
     k.u.opaque = argt;
     const Val *p = regular.getp(k);
     if(!p)
@@ -78,7 +77,7 @@ const Val* SimpleSymTable::lookupFunc(sref key, Type argt) const
 
 
 SymTable::SymTable()
-    : namespaced(_Any, _Any)
+    : namespaced(PRIMTYPE_ANY, PRIMTYPE_ANY)
 {
 }
 
@@ -123,7 +122,7 @@ void SymTable::addToNamespace(GC& gc, const Val& ns, sref key, const Val& val)
         ValU v;
         v.u.p = t;
         v.type = PRIMTYPE_OPAQUE;
-        namespaced.set(gc, ns, t);
+        namespaced.set(gc, ns, v);
     }
     t->add(gc, key, val);
 }

@@ -7,6 +7,7 @@
 struct VmIter;
 struct DType;
 struct VM;
+struct Runtime;
 
 enum
 {
@@ -37,5 +38,7 @@ struct VmIter
     } u;
 };
 
-
-
+struct VM
+{
+    Runtime *rt;
+};

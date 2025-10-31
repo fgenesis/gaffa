@@ -22,9 +22,11 @@ struct VM;
 struct HLNode;
 
 
+// Base for any object instance.
+// Beware, variable sized! Do NOT derive from this class!
 class DObj : public GCobj
 {
-protected:
+private:
     DObj(DType *dty);
 public:
     static DObj *GCNew(GC& gc, DType *dty);
@@ -47,9 +49,9 @@ public:
 };
 
 // generated from TDesc
-class DType : public DObj
+class DType : public GCobj
 {
-protected:
+private:
     DType(TDesc *desc, DType *typeType);
 public:
     static DType *GCNew(GC& gc, TDesc *desc, DType *typeType);

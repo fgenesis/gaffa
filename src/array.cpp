@@ -112,7 +112,7 @@ Val DArray::dynamicLookup(tsize idx) const
         return storage.vals[idx];
 
     ValU v;
-    v.type = t;
+    v.type = (PrimType)t;
 
     const void *p = storage.b + (idx * elementSize);
     valcpy(&v.u, p, elementSize);
@@ -148,7 +148,7 @@ Val DArray::dynamicSet(tsize idx, ValU v)
     }
     else
     {
-        ret.type = t;
+        ret.type = (PrimType)t;
         const tsize esz = elementSize;
         void *p = storage.b + (idx * esz);
         valcpy(&ret.u, p, esz);
@@ -170,7 +170,7 @@ Val DArray::removeAtAndMoveLast_Unsafe(tsize idx)
     }
     else
     {
-        v.type = t;
+        v.type = (PrimType)t;
         const void *last = storage.b + (lastidx * elementSize);
         void *p = storage.b + (size_t(idx) * elementSize);
         valcpy(&v.u, p, elementSize);

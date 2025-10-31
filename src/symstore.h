@@ -78,11 +78,11 @@ public:
         void makeMutable();
         void makeDeferred();
 
-        void setType(Type t);
+        void setType(PrimType t);
         void setValue(const Val& val);
         void forgetValue();
         inline const Val *value() const { return (referencedHow & SYMREF_KNOWN_VALUE) ? &val : NULL; }
-        inline const Type *valtype() const { return (referencedHow & SYMREF_KNOWN_TYPE) ? &val.type : NULL; }
+        inline const Type valtype() const { return (referencedHow & SYMREF_KNOWN_TYPE) ? val.type : PRIMTYPE_AUTO; }
         inline bool isMutable() const { return !!(referencedHow & SYMREF_MUTABLE); }
     private:
         Val val;

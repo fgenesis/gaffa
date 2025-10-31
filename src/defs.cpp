@@ -5,6 +5,36 @@
 
 #include <string.h>
 
+#include "symtable.h"
+#include "gaobj.h"
+
+      GCobj *Val::asAnyObj(PrimType prim)       { assert(prim == type); return u.obj; }
+const GCobj *Val::asAnyObj(PrimType prim) const { assert(prim == type); return u.obj; }
+
+Val::Val(DType *t)       { _init(PRIMTYPE_TYPE);   u.obj = t; }
+Val::Val(SymTable *symt) { _init(PRIMTYPE_SYMTAB); u.obj = symt; }
+Val::Val(DFunc *func)    { _init(PRIMTYPE_FUNC);   u.obj = func; }
+
+Val::Val(DObj *o)
+{
+    PrimType pt = (PrimType)(o->gcTypeAndFlags & GCOBJ_MASK_PRIMTYPE);
+    assert(pt == o->dtype->tdesc->primtype);
+    _init(pt);
+    u.obj = o;
+}
+
+
+DFunc      *Val::asFunc()     { return static_cast<DFunc*   >(asAnyObj(PRIMTYPE_FUNC)); }
+SymTable   *Val::asSymTab()   { return static_cast<SymTable*>(asAnyObj(PRIMTYPE_SYMTAB)); }
+DObj       *Val::asDObj()     { return static_cast<DObj*    >(asAnyObj(PRIMTYPE_OBJECT)); }
+DType      *Val::asDType()    { return static_cast<DType*   >(asAnyObj(PRIMTYPE_TYPE)); }
+
+const DFunc      *Val::asFunc()    const { return static_cast<const DFunc*   >(asAnyObj(PRIMTYPE_FUNC)); }
+const SymTable   *Val::asSymTab()  const { return static_cast<const SymTable*>(asAnyObj(PRIMTYPE_SYMTAB)); }
+const DObj       *Val::asDObj()    const { return static_cast<const DObj*    >(asAnyObj(PRIMTYPE_OBJECT)); }
+const DType      *Val::asDType()   const { return static_cast<const DType*   >(asAnyObj(PRIMTYPE_TYPE)); }
+
+
 struct UintPair
 {
     unsigned from, to;
@@ -109,8 +139,9 @@ void* valcpy(void* dst, const void* src, tsize bytes)
     return w;
 }
 
-void ValU::_init(tsize tyid)
+void ValU::_init(PrimType tyid)
 {
+    assert(tyid < PRIMTYPE_ANY);
     static_assert(sizeof(_AnyValU) == sizeof(((_AnyValU*)NULL)->opaque), "opaque member must fill the entire struct");
     u.opaque = 0;
     type = tyid;

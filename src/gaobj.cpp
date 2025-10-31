@@ -35,22 +35,19 @@ tsize DObj::memberOffset(const Val* pmember) const
     return (const char*)pmember - (const char*)this;
 }
 
-static const Type StrType = { PRIMTYPE_STRING };
-static const Type UintType = { PRIMTYPE_UINT };
-
 // A type is an object of the type 'type'
 DType::DType(TDesc* desc, DType* typeType)
-    : DObj(typeType)
-    , fieldIndices(StrType, UintType)
-    , tid(desc->h.tid), tdesc(desc)
+    : tid(desc->h.tid), tdesc(desc)
+    , fieldIndices(PRIMTYPE_STRING, PRIMTYPE_UINT)
 {
+    this->dtype = typeType;
     assert(typeType->tid == PRIMTYPE_TYPE);
 }
 
 DType* DType::GCNew(GC& gc, TDesc *desc, DType* typeType)
 {
     const tsize nfields = typeType->numfields();
-    const size_t sz = sizeof(DObj) + nfields * sizeof(Val);
+    const size_t sz = sizeof(DType);
     void *mem = gc_new(gc, sz, PRIMTYPE_TYPE);
     return mem ? GA_PLACEMENT_NEW(mem) DType(desc, typeType) : NULL;
 }

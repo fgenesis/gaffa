@@ -61,13 +61,6 @@ bool TypeRegistry::init()
     if(!_tt.init())
         return false;
 
-    //const Type anysub[] = { PRIMTYPE_ANY, PRIMTYPE_ANY };
-
-    //_builtins[PRIMTYPE_ARRAY]  = mksub(PRIMTYPE_ARRAY, anysub, 1); // array = Array(any)
-    //_builtins[PRIMTYPE_TABLE]  = mksub(PRIMTYPE_TABLE, anysub, 2); // table = Table(any, any)
-    //_builtins[PRIMTYPE_VARARG] = mksub(PRIMTYPE_VARARG, anysub, 1); // ... = VarArg(any)
-    //_builtins[PRIMTYPE_ERROR]  = mksub(PRIMTYPE_ERROR, &str, 1);
-
     return true;
 }
 
@@ -123,7 +116,7 @@ Type TypeRegistry::mkstruct(const Table& t)
         if(e.v.type == PRIMTYPE_TYPE)
         {
             tn[i].defaultval = XNil;
-            tn[i].t = e.v.u.t->tid;
+            tn[i].t = e.v.asDType()->tid;
         }
         else
         {
@@ -159,7 +152,7 @@ Type TypeRegistry::mkstruct(const DArray& t)
                 return PRIMTYPE_NIL;
             }
             td->names()[i] = 0;
-            td->types()[i] = e.u.t->tid;
+            td->types()[i] = e.asDType()->tid;
         }
 
     return _store(td);
@@ -197,7 +190,7 @@ DType* TypeRegistry::mkprim(PrimType t)
     TDesc *desc = mkprimDesc(t);
     assert(!desc->h.dtype);
     DType *d = DType::GCNew(_tt.gc, desc, tt);
-    d->dtype = d;
+    d->dtype = tt;
     desc->h.dtype = d;
     return d;
 }
@@ -207,20 +200,6 @@ Type TypeRegistry::mkfunc(Type argt, Type rett)
     Type ts[] = { argt, rett };
     return mksub(PRIMTYPE_FUNC, &ts[0], Countof(ts));
 }
-
-/*
-Type TypeRegistry::mkfunc(const Type* arglist, size_t nargs, const Type* retlist, size_t nrets)
-{
-    // Both of these are just placeholders to store subtypes. Nil has no special properties so just use that.
-    const Type t[] =
-    {
-        mksub(PRIMTYPE_NIL, arglist, nargs),
-        mksub(PRIMTYPE_NIL, retlist, nrets)
-    };
-
-    return mksub(PRIMTYPE_FUNC, t, Countof(t));
-}
-*/
 
 const TDesc *TypeRegistry::lookupDesc(Type t) const
 {
@@ -248,7 +227,7 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
     for(size_t i = 0; i < n; ++i)
         a->types()[i] = sub[i];
 
-    Type ret = _tt.putCopy(&a, a->allocsize);
+    Type ret = _tt.putCopy(a, a->allocsize);
     assert(ret); // TODO: handle OOM
     ret += PRIMTYPE_MAX;
     return ret;

@@ -3,7 +3,37 @@
 #include "gaobj.h"
 #include "symtable.h"
 #include "strings.h"
+#include "gavm.h"
+#include "runtime.h"
 #include <assert.h>
+#include <limits>
+
+
+struct RTReg;
+
+struct ClassReg
+{
+    ClassReg(RTReg& r, DType *cls) : r(r), cls(cls) {}
+
+    template<typename T>
+    void symbol(const char *name, const T& obj)
+    {
+        sref s = r.sp.put(name).id;
+        r.syms.addToNamespace(r.gc, cls, s, Val(obj));
+    }
+
+    template<size_t NP, size_t NR>
+    inline void method(const char *name, LeafFunc lfunc, const Type (&params)[NP], const Type (&rets)[NR])
+    {
+        this->method(name, lfunc, params, NP, rets, NR);
+    }
+
+    void method(const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets);
+
+private:
+    RTReg& r;
+    Val cls;
+};
 
 
 struct RTReg
@@ -12,48 +42,91 @@ struct RTReg
     StringPool& sp;
     TypeRegistry& tr;
     SymTable& syms;
+
+    struct
+    {
+        DType *type;
+        DType *func;
+        DType *sint;
+        DType *uint;
+        DType *flt;
+        DType *str;
+    } types;
+
+    sref str(const char *s)
+    {
+       return sp.put(s).id;
+    }
+
+    template<typename T>
+    inline void symbol(const char *name, const T& obj)
+    {
+        syms.add(gc, str(name), Val(obj));
+    }
+
+    ClassReg regclass(const char *name, DType *t)
+    {
+        symbol(name, t);
+        return ClassReg(*this, t);
+    }
+
+
+    void regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
+    {
+        Type tp = tr.mklist(params, nparams);
+        Type tret = tr.mklist(rets, nrets);
+        Type tf = tr.mkfunc(tp, tret);
+        sref sname = str(name);
+
+        DFunc *df = mkfunc(lfunc, tf, nparams, nrets);
+        if(ns)
+            syms.addToNamespace(gc, Val(ns), sname, Val(df));
+        else
+            syms.add(gc, sname, Val(df));
+    }
+
+
+    template<size_t NP, size_t NR>
+    inline void regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type (&params)[NP], const Type (&rets)[NR])
+    {
+        regfunc(ns, name, lfunc, params, NP, rets, NR);
+    }
+
+    DFunc *mkfunc(LeafFunc lfunc, Type ty, size_t nargs, size_t nrets)
+    {
+        DFunc *f = DFunc::GCNew(gc);
+        f->info.t = ty;
+        f->info.nargs = nargs;
+        f->info.nrets = nrets;
+        f->info.flags = FuncInfo::LFunc;
+        f->info.nlocals = 0;
+        f->info.nupvals = 0;
+        f->u.lfunc = lfunc;
+        f->dbg = NULL;
+        f->dtype = types.func;
+        return f;
+    }
 };
 
 
-static sref strref(RTReg& r, const char *s)
+void ClassReg::method(const char * name, LeafFunc lfunc, const Type * params, size_t nparams, const Type * rets, size_t nrets)
 {
-   return r.sp.put(s).id;
-}
-#define S(x) strref(r, x)
-
-DFunc *func(RTReg& r, LeafFunc lfunc, Type ty, size_t nargs, size_t nrets)
-{
-    DFunc *f = DFunc::GCNew(r.gc);
-    f->info.t = ty;
-    f->info.nargs = nargs;
-    f->info.nrets = nrets;
-    f->info.flags = FuncInfo::LFunc;
-    f->info.nlocals = 0;
-    f->info.nupvals = 0;
-    f->u.lfunc = lfunc;
-    f->dbg = NULL;
-    f->dtype = r.tr.lookup(ty);
-    assert(f->dtype); // FIXME: ??!
-    return f;
+    r.regfunc(cls.asDType(), name, lfunc, params, nparams, rets, nrets);
 }
 
-void regfunc(RTReg& r, DType *ns, const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const sref *rets, size_t nrets)
+template<typename T>
+static void _reg_numeric(ClassReg& xr)
 {
-    Type tp = r.tr.mklist(params, nparams);
-    Type tret = r.tr.mklist(rets, nrets);
-    Type tf = r.tr.mkfunc(tp, tret);
-    sref sname = S(name);
-
-    DFunc *df = func(r, lfunc, tf, nparams, nrets);
-    if(ns)
-        r.syms.addToNamespace(r.gc, Val(ns), sname, Val(df));
-    else
-        r.syms.add(r.gc, sname, Val(df));
+    xr.symbol("zero", T(0));
+    xr.symbol("minval", std::numeric_limits<T>::min());
+    xr.symbol("maxval", std::numeric_limits<T>::max());
 }
+
+
 
 // This functions solves the hen-and-egg problem:
 // The type 'type' has itself as the underlying type. This is normally not possible to create.
-static DType *reg_type_type(RTReg& r)
+void reg_type_type(RTReg& r)
 {
     TDesc *desc = r.tr.mkprimDesc(PRIMTYPE_TYPE);
 
@@ -75,49 +148,110 @@ static DType *reg_type_type(RTReg& r)
     d->dtype = d;
     desc->h.dtype = d;
 
-    return d;
+    r.types.type = d;
+
+    ClassReg xtype = r.regclass("type", d);
 }
 
-static void reg_type_uint(RTReg& r, DType *ttype)
+static void reg_type_func(RTReg& r)
+{
+    DType *d = r.tr.mkprim(PRIMTYPE_FUNC);
+    r.types.func = d;
+    ClassReg xfunc = r.regclass("anyfunc", d);
+}
+
+static void reg_type_uint(RTReg& r)
 {
     DType *d = r.tr.mkprim(PRIMTYPE_UINT);
-
-    r.syms.add(r.gc, S("uint"), Val(d));
-
-    r.syms.addToNamespace(r.gc, Val(d), S("zero"), Val(0u));
-
+    r.types.uint = d;
+    ClassReg xuint = r.regclass("uint", d);
+    _reg_numeric<uint>(xuint);
 }
 
 
-static void si_abs(VM *, Val *v)
+static void mth_int_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_SINT);
-    v->u.si = v->u.si;
+    const int i = v->u.si;
+    v->u.si = i < 0 ? -i : i; // TODO degenerate cases
 }
 
 
 
-static void reg_type_sint(RTReg& r, DType *ttype)
+static void reg_type_sint(RTReg& r)
 {
-    DType *d = r.tr.mkprim(PRIMTYPE_UINT);
-
-    r.syms.add(r.gc, S("int"), Val(d));
-
-    r.syms.addToNamespace(r.gc, Val(d), S("zero"), Val(0));
+    DType *d = r.tr.mkprim(PRIMTYPE_SINT);
+    r.types.sint = d;
+    ClassReg xint = r.regclass("int", d);
+    _reg_numeric<sint>(xint);
 
     {
-        const Type params[] = { PRIMTYPE_SINT };
-        const Type rets[] = { PRIMTYPE_UINT };
-        regfunc(r, d, "abs", si_abs, params, 1, rets, 1);
+        const Type sint1[] = { PRIMTYPE_SINT };
+        const Type uint1[] = { PRIMTYPE_UINT };
+        xint.method("abs", mth_int_abs, sint1, uint1);
+        xint.method("iabs", mth_int_abs, sint1, sint1);
     }
+}
 
+
+static void mth_float_abs(VM *, Val *v)
+{
+    assert(v->type == PRIMTYPE_FLOAT);
+    float f = v->u.f;
+    v->u.f = f < 0 ? -f : f;
+}
+
+static void reg_type_float(RTReg& r)
+{
+    DType *d = r.tr.mkprim(PRIMTYPE_FLOAT);
+    r.types.flt = d;
+    ClassReg xfloat = r.regclass("float", d);
+    _reg_numeric<real>(xfloat);
+
+    {
+        const Type float1[] = { PRIMTYPE_FLOAT };
+        xfloat.method("abs", mth_float_abs, float1, float1);
+    }
+}
+
+
+static void mth_string_len(VM *vm, Val *v)
+{
+    assert(v->type == PRIMTYPE_STRING);
+    const sref s = v->u.str;
+    v->u.str = vm->rt->sp.lookup(s).len;
+    v->type = PRIMTYPE_UINT;
+}
+
+static void reg_type_string(RTReg& r)
+{
+    DType *d = r.tr.mkprim(PRIMTYPE_STRING);
+    r.types.str = d;
+    ClassReg xstr = r.regclass("string", d);
+
+    {
+        const Type str1[] = { PRIMTYPE_STRING };
+        const Type uint1[] = { PRIMTYPE_UINT };
+        xstr.method("len", mth_string_len, str1, uint1);
+    }
+}
+
+
+static void reg_constants(RTReg& r)
+{
+    r.symbol("nil", _Nil());
+    r.symbol("true", true);
+    r.symbol("false", false);
 }
 
 void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
 {
     RTReg r = { gc, sp, tr, syms };
-    DType *tt = reg_type_type(r);
-
-    reg_type_sint(r, tt);
-    reg_type_uint(r, tt);
+    reg_type_type(r);
+    reg_type_func(r);
+    reg_type_sint(r);
+    reg_type_uint(r);
+    reg_type_float(r);
+    reg_type_string(r);
+    reg_constants(r);
 }

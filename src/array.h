@@ -104,9 +104,6 @@ public:
         void *p;
         Type *ts;
         GCobj *objs;
-        /*Range<uint> *ru;
-        Range<sint> *ri;
-        Range<real> *rf;*/
     } storage;
     tsize sz; // used size in elements
     tsize cap; // capacity in elements

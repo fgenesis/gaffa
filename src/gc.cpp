@@ -444,7 +444,7 @@ GCobj *gc_new(GC& gc, size_t bytes, PrimType gctype)
 
     assert(gctype < PRIMTYPE_ANY);
 
-    bytes += sizeof(GCprefix::HDR_SIZE);
+    bytes += GCprefix::HDR_SIZE;
     GCprefix *p = (GCprefix*)gc.alloc(gc.gcud, NULL, 0, bytes);
     if(!p)
         return NULL;

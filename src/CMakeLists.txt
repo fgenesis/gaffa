@@ -54,6 +54,8 @@ set(src
     compiler.h
     rttypes.cpp
     rttypes.h
+    runtime.cpp
+    runtime.h
 )
 
 add_library(gaffa ${src})

@@ -31,7 +31,7 @@ struct KV
 struct TKey
 {
     _AnyValU u; // corresponds to ValU::u
-    Type type;  // corresponds to ValU::type
+    PrimType type;  // corresponds to ValU::type
     tsize validx; // index of value
 };
 

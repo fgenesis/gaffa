@@ -4,6 +4,9 @@
 #include "util.h"
 #include <string.h>
 
+#include <stdio.h>
+
+
 /* Deduplicating hash set for arbitrary memory blocks. Notes:
 - Open addressing hash set for the keys + an extra array for the values.
 - The values array can have holes (unlike the way class Table is implemented)
@@ -127,11 +130,12 @@ tsize Dedup::_indexof(const HBlock& hb) const
 
 sref Dedup::_finishset(HBlock& hb, HKey& k)
 {
-    if(!(hb.x & LONG_BIT))
+    if(hb.x & LONG_BIT)
         hb.h = k.h;
     const sref ref = _indexof(hb);
     assert(ref >= 2);
     k.ref = ref;
+    if(!_skipAtStart) printf("Strings[%u] = '%s'\n", ref, get(ref).p);
     return ref;
 }
 
@@ -318,6 +322,7 @@ Dedup::HKey* Dedup::_kresize(tsize newsize)
     // TODO: make sure that newsize is power of 2
     const tsize oldsize = mask + 1;
     const tsize newmask = newsize - 1;
+    if(!_skipAtStart) printf("Dedup resize old = %u, new = %u\n", (unsigned)oldsize, (unsigned)newsize);
     HKey * const newks = gc_alloc_unmanaged_zero_T<HKey>(gc, newsize);
     if(!newks && newsize)
         return oldsize > newsize ? keys : NULL; // Shrinking but can't alloc smaller buffer? keep old.
@@ -353,6 +358,8 @@ bool Dedup::_acopy(HBlock& hb, const void* mem, size_t bytes)
             return false;
         hb.x = LONG_BIT | MARK_BIT; // new strings start as marked as to not get GC'd immediately
         hb.extraBytesToFree = _extrabyte;
+        hb.mb.p = p;
+        hb.mb.n = bytes;
     }
     p[total - 1] = 0; // may get overwritten by the memcpy()
     memcpy(p, mem, bytes);

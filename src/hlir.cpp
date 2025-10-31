@@ -323,7 +323,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
             m.defaultval = _Xnil();
             m.name = vd->ident->as<HLIdent>()->nameStrId;
             const Val& thetype = vd->type->as<HLConstantValue>()->val;
-            m.t = thetype.u.t->tid;
+            m.t = thetype.asDType()->tid;
             assert(m.t == PRIMTYPE_TYPE);
         }
 
@@ -349,7 +349,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
             m.defaultval = _Xnil();
             m.name = 0;
             const Val& thetype = retlist->list[i]->as<HLConstantValue>()->val;
-            m.t = thetype.u.t->tid;
+            m.t = thetype.asDType()->tid;
             assert(m.t == PRIMTYPE_TYPE);
         }
 
@@ -371,12 +371,8 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
     //f->u.gfunc.vmcode = ...
     // TODO: populate func body
 
-    ValU v;
-    v.u.obj = f;
-    v.u.t = ft.tr.lookup(info.t);
-    assert(v.u.t);
 
-    return makeconst(ft.gc, v);
+    return makeconst(ft.gc, Val(f));
 }
 
 size_t HLNode::memoryNeeded() const

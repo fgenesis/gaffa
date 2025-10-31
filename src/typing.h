@@ -35,7 +35,7 @@ struct TDescAlias
 struct _FieldDefault
 {
     _AnyValU u; // This is NOT ValU and instead is split into two to make sure that there's
-    Type t;     // no unused padding in TDesc that could interfere with deduplication.
+    PrimType t;     // no unused padding in TDesc that could interfere with deduplication.
     tsize idx;
 };
 
@@ -61,7 +61,7 @@ struct TDesc
     // - if PRIMTYPE_OBJECT, n >= 0 and the types that follow are struct members
     // - if PRIMTYPE_FUNC, n == 2. first type is the func params as an ordered struct,
     //                               second is the same for the return values
-    Type primtype;
+    PrimType primtype;
     u32 bits;
 
     //Type members[n] follows behind the struct

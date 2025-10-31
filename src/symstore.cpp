@@ -205,7 +205,7 @@ void Symstore::Sym::makeDeferred()
 
 void Symstore::Sym::setValue(const Val& val)
 {
-    assert(!valtype() || *valtype() == val.type);
+    assert(valtype() == PRIMTYPE_AUTO || valtype() == val.type);
     referencedHow = (SymbolRefContext)(referencedHow | SYMREF_KNOWN_VALUE);
     this->val = val;
 }
@@ -216,7 +216,7 @@ void Symstore::Sym::forgetValue()
     this->val = _Xnil();
 }
 
-void Symstore::Sym::setType(Type t)
+void Symstore::Sym::setType(PrimType t)
 {
     assert(!value() || value()->type == t);
     referencedHow = (SymbolRefContext)(referencedHow | SYMREF_KNOWN_TYPE);

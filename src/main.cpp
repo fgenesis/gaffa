@@ -34,11 +34,11 @@ static void *myalloc(void *ud, void *ptr, size_t osz, size_t nsz)
 {
     if(ptr && !nsz)
     {
-        //printf("free  %u bytes\n", (unsigned)osz);
+        printf("%p | free %u bytes\n", ptr, (unsigned)osz);
         free(ptr);
         return NULL;
     }
-    //printf("alloc %u bytes\n", (unsigned)nsz);
+    printf("alloc %u -> %u bytes\n", (unsigned)osz, (unsigned)nsz);
     return realloc(ptr, nsz);
 }
 
@@ -66,7 +66,7 @@ void testtable()
     Table *t = Table::GCNew(gc, tt, tt);
 
     for(uint i = 1; i < 6; ++i)
-        t->set(gc, i, i*10);
+        t->set(gc, Val(i), Val(i*10));
 
     int a = 0;
 }

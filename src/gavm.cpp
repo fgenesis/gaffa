@@ -9,6 +9,7 @@
 
 struct Inst;
 struct DFunc;
+struct Runtime;
 
 struct VMCallFrame
 {
@@ -47,9 +48,9 @@ public:
     }
 };
 
-struct VM
+struct VMP : VM
 {
-    VM(GC& gc) : stk(gc), cur({}) {}
+    VMP(GC& gc) : stk(gc), cur({}) {}
     Stack stk;
     VMCallFrame cur;
     int err;
@@ -193,7 +194,7 @@ template<typename T> static FORCEINLINE const T *_imm(const Inst *ins)
 // Invariant: Each Inst array ends with an entry that has func=NULL,
 // and gfunc holds the object that contains this instruction array.
 
-#define VMPARAMS const Inst *ins, VM * const vm, Val *sbase, Val *sp
+#define VMPARAMS const Inst *ins, VMP * const vm, Val *sbase, Val *sp
 #define VMARGS ins, vm, sbase, sp
 
 // Inst and OpFunc are kinda the same, but a C function typedef can't use
@@ -480,31 +481,31 @@ VMFUNC(ret0)
 
 VMFUNC_IMM(ret1, Imm_u32)
 {
-    sbase[0] = LOCAL(imm->a);
+    sbase[0] = *LOCAL(imm->a);
     return doreturn(VMARGS, 1);
 }
 
 VMFUNC_IMM(ret2, Imm_2xu32)
 {
-    sbase[0] = LOCAL(imm->a);
-    sbase[1] = LOCAL(imm->b);
+    sbase[0] = *LOCAL(imm->a);
+    sbase[1] = *LOCAL(imm->b);
     return doreturn(VMARGS, 2);
 }
 
 VMFUNC_IMM(ret3, Imm_3xu32)
 {
-    sbase[0] = LOCAL(imm->a);
-    sbase[1] = LOCAL(imm->b);
-    sbase[2] = LOCAL(imm->c);
+    sbase[0] = *LOCAL(imm->a);
+    sbase[1] = *LOCAL(imm->b);
+    sbase[2] = *LOCAL(imm->c);
     return doreturn(VMARGS, 3);
 }
 
 VMFUNC_IMM(ret4, Imm_4xu32)
 {
-    sbase[0] = LOCAL(imm->a);
-    sbase[1] = LOCAL(imm->b);
-    sbase[2] = LOCAL(imm->c);
-    sbase[3] = LOCAL(imm->d);
+    sbase[0] = *LOCAL(imm->a);
+    sbase[1] = *LOCAL(imm->b);
+    sbase[2] = *LOCAL(imm->c);
+    sbase[3] = *LOCAL(imm->d);
     return doreturn(VMARGS, 4);
 }
 
@@ -517,7 +518,7 @@ VMFUNC_IMM(retn, Imm_u32)
     const u32 n = imm->a; // how many return slots to fill
     const u32 * const p = &imm->a + 1; // locals indices array start
     for(u32 i = 0; i < n; ++i)
-        sp[i] = LOCAL(p[i]);
+        sp[i] = *LOCAL(p[i]);
 
     return doreturn(VMARGS, n);
 }
@@ -550,7 +551,7 @@ VMFUNC_IMM(retv, Imm_2xu32)
 
     // Put locals into return slots
     for(u32 i = 0; i < n; ++i)
-        sp[i] = LOCAL(p[i]);
+        sp[i] = *LOCAL(p[i]);
 
     return vreturn(VMARGS, n, imm->b);
 }
@@ -560,11 +561,11 @@ VMFUNC_IMM(retv, Imm_2xu32)
 VMFUNC_IMM(loadkui32, Imm_2xu32)
 {
     Val *slot = LOCAL(imm->a);
-    *slot = imm->b;
+    *slot = Val(imm->b);
     NEXT();
 }
 
-static VmIter *newiter(VM *vm)
+static VmIter *newiter(VMP *vm)
 {
     vm->iterstack.emplace_back();
     return &vm->iterstack.back();
@@ -622,7 +623,7 @@ static uint iter_init_f(ValU& v, VmIter& it)
 }
 
 // This is for when we know all values have the correct type
-static VmIter *setupiter(VM *vm, const Val *sp, const Imm_3xu32 *imm)
+static VmIter *setupiter(VMP *vm, const Val *sp, const Imm_3xu32 *imm)
 {
     VmIter *it = newiter(vm);
     it->u.numeric.start = sp[imm->a];
@@ -792,7 +793,7 @@ struct Testcode
     Inst halt;
 };
 
-static void runloop(VM *vm)
+static void runloop(VMP *vm)
 {
     if(const Inst *ins = vm->cur.ins)
     {
@@ -845,7 +846,7 @@ void vmtest(GC& gc)
     //tc.iterpopp = { 1 };
     tc.halt = { op_halt };
 
-    VM vm(gc);
+    VMP vm(gc);
     vm.stk.alloc(16);
     vm.err = 0;
     vm.stk[10] = Val(uint(500) * uint(1000000) + 1);

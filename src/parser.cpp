@@ -17,7 +17,7 @@ static Val parsefloat(uint intpart, const char *s, const char *end)
     if(pend != end)
         return Val();
     f += real(intpart);
-    return f;
+    return Val(f);
 }
 
 static Val parsehex(const char *s, const char *end)
@@ -35,7 +35,7 @@ static Val parsehex(const char *s, const char *end)
         else
             return Val();
     }
-    return u;
+    return Val(u);
 }
 
 static Val makenum(const char *s, const char *end)
@@ -65,7 +65,7 @@ static Val makenum(const char *s, const char *end)
     }
     while(s < end);
 
-    return u;
+    return Val(u);
 }
 
 const char *Parser::symbolname(const HLNode *node) const
@@ -1129,12 +1129,12 @@ HLNode* Parser::litstr(Context ctx)
 
 HLNode* Parser::btrue(Context ctx)
 {
-    return emitConstant(true);
+    return emitConstant(Val(true));
 }
 
 HLNode* Parser::bfalse(Context ctx)
 {
-    return emitConstant(false);
+    return emitConstant(Val(false));
 }
 
 HLNode* Parser::name(const char *whatfor)
