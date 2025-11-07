@@ -97,7 +97,7 @@
 --int y = x
 --return y
 
---func i2f(int i) -> float { return i }
+func i2f(int i) -> float { return i }
 
 int x = 1
 int y = 2
@@ -139,3 +139,5 @@ return x+y
 --    return A(T(y), x)
 --  }
 --}
+
+--func @"+"(int a, int b) -> int {}

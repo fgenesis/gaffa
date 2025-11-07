@@ -486,61 +486,6 @@ byte *HLNode::_cloneRec(byte *m, HLNode *target, GC& gc) const
     return m;
 }
 
-template<typename T>
-struct FoldOpsBase
-{
-    enum { Bitsize = sizeof(T) * CHAR_BIT };
-
-    /*typedef bool (*Binary)(T& r, T a, T b);
-    typedef bool (*Unary)(T& r, T a);
-    typedef bool (*Compare)(T a, T& b);*/
-
-    static bool Add(T& r, T a, T b) { r = a + b; return true; }
-    static bool Sub(T& r, T a, T b) { r = a - b; return true; }
-    static bool Mul(T& r, T a, T b) { r = a * b; return true; }
-    static bool Div(T& r, T a, T b) { if(!b) return false; r = a / b; return true; }
-    static bool Mod(T& r, T a, T b) { if(!b) return false; r = a % b; return true; }
-    static bool Shl(T& r, T a, T b) { if(b >= Bitsize) return false; r = a << b; return true; }
-    static bool Shr(T& r, T a, T b) { if(b >= Bitsize) return false; r = a >> b; return true; }
-    static bool Rol(T& r, T a, T b) { if(b >= Bitsize) return false; r = (a << b) | (a >> (Bitsize-b)); return true; }
-    static bool Ror(T& r, T a, T b) { if(b >= Bitsize) return false; r = (a >> b) | (a << (Bitsize-b)); return true; }
-
-    static bool BAnd(T& r, T a, T b) { r = a & b; return true; }
-    static bool BOr (T& r, T a, T b) { r = a | b; return true; }
-    static bool BXor(T& r, T a, T b) { r = a ^ b; return true; }
-
-    static bool UPos(T& r, T a) { r = +a; return true; }
-    static bool UNeg(T& r, T a) { r = -a; return true; }
-    static bool UNot(T& r, T a) { r = !a; return true; }
-    static bool UCpl(T& r, T a) { r = ~a; return true; }
-
-    // Alternative representations of relations so that only < and == are enough to handle everything
-    static bool C_Eq (T a, T b) { return  (a == b); }
-    static bool C_Neq(T a, T b) { return !(a == b); }
-    static bool C_Lt (T a, T b) { return  (a <  b); }
-    static bool C_Gt (T a, T b) { return  (b <  a); }
-    static bool C_Lte(T a, T b) { return !(b <  a); }
-    static bool C_Gte(T a, T b) { return !(a <  b); }
-};
-
-template<typename T>
-struct FoldOps : FoldOpsBase<T>
-{
-};
-
-template<>
-struct FoldOps<real> : FoldOpsBase<real>
-{
-    static bool Rol(real& r, real a, real b) { return false; }
-    static bool Ror(real& r, real a, real b) { return false; }
-    static bool BAnd(real& r, real a, real b) { return false; }
-    static bool BOr (real& r, real a, real b) { return false; }
-    static bool BXor(real& r, real a, real b) { return false; }
-
-    static bool UCpl(real& r, real a) { return false; }
-};
-
-
 
 
 HLFoldResult HLNode::_foldUnop(HLFoldTracker& ft)
@@ -580,38 +525,6 @@ DType* HLNode::getDType(HLFoldTracker& ft)
 
 }
 #endif
-
-
-template<typename T>
-bool foldBinaryT(Val& r, Lexer::TokenType tt, T a, T b)
-{
-    switch(tok)
-    {
-#define BINOP(Func) { T t; ok = Func(t, a, b); r = t; return ok; }
-        case Lexer::TOK_PLUS: BINOP(Add);
-        case Lexer::TOK_PLUS: BINOP(Add);
-        case Lexer::TOK_PLUS: BINOP(Add);
-        case Lexer::TOK_PLUS: BINOP(Add);
-        case Lexer::TOK_PLUS: BINOP(Add);
-        case Lexer::TOK_PLUS: BINOP(Add);
-        case Lexer::TOK_PLUS: BINOP(Add);
-    }
-}
-
-static bool commutative(Lexer::TokenType tt)
-{
-    switch(tt)
-    {
-        case Lexer::TOK_PLUS:
-        case Lexer::TOK_STAR:
-        case Lexer::TOK_BITAND:
-        case Lexer::TOK_BITOR:
-        case Lexer::TOK_HAT:
-            return true;
-        default: ;
-    }
-    return false;
-}
 
 void HLNode::_applyTypeFrom(HLFoldTracker& ft, HLNode* from)
 {
@@ -703,10 +616,17 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
     HLNode *L = u.binary.a;
     HLNode *R = u.binary.b;
     const Lexer::TokenType tt = Lexer::TokenType(tok);
+    const char *opname = Lexer::GetTokenText(tt);
+    Str name = ft.sp.put(opname);
 
-    HLNode *typesrc = L->isknowntype() ? L : R;
-    if(typesrc->isknowntype())
-        setknowntype(typesrc->mytype);
+    if(L->isknowntype() && R->isknowntype())
+    {
+        //Val f = ft.syms.lookup(
+        assert(false);
+    }
+
+    //if(typesrc->isknowntype())
+    //    setknowntype(typesrc->mytype);
 
 #if 0
     if(L->isconst() && R->isconst())
@@ -756,10 +676,10 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
 
     // When we're here, this node wasn't folded and remains a binop. Propagate types.
 
-    if(isknowntype())
+    /*if(isknowntype())
     {
         propagateMyType(ft, typesrc);
-    }
+    }*/
 
     return FOLD_OK;
 }

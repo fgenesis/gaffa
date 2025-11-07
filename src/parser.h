@@ -116,8 +116,6 @@ protected:
     // literal values
     HLNode *litnum(Context ctx);
     HLNode *litstr(Context ctx);
-    HLNode *btrue(Context ctx);
-    HLNode *bfalse(Context ctx);
     HLNode *name(const char *whatfor);
     HLNode *ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref);
     HLNode *typeident();

@@ -5,6 +5,7 @@
 #include "table.h"
 #include "typing.h"
 #include "gaobj.h"
+#include "lex.h"
 
 class SimpleSymTable
 {
@@ -18,6 +19,8 @@ public:
     const Val *lookupIdent(sref key) const;
     // When looking up functions, pass the arg list type so we can figure out which overload to select
     const Val *lookupFunc(sref key, Type argt) const;
+
+
 
 protected:
     Table regular;

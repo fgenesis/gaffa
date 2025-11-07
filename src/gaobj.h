@@ -3,6 +3,7 @@
 #include "defs.h"
 #include "table.h"
 #include "typing.h"
+#include "gavm.h"
 
 
 
@@ -141,6 +142,8 @@ struct DFunc : public GCobj
             void *vmcode;
         } gfunc;
     } u;
+    //VMFunc vmfunc;
+    // TODO: forward to VMFunc descriptor with codegen helper
 
     DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
 };

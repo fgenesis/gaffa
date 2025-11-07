@@ -207,13 +207,13 @@ int main(int argc, char **argv)
     hlirDebugDump(strtab, node);
 
 
-    HLFoldTracker ft = { gc, pp.syms, tr };
+    HLFoldTracker ft = { gc, pp.syms, tr, strtab };
 
-    /*HLNode *folded = node->fold(ft, FOLD_INITIAL);
+    HLNode *folded = node->fold(ft, FOLD_INITIAL);
 
     puts("\n####### AFTER FOLDING #######\n");
 
-    hlirDebugDump(strtab, folded);*/
+    hlirDebugDump(strtab, folded);
 
 
     //MLIRContainer mc(gc);

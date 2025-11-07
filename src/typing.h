@@ -8,6 +8,7 @@ class Table;
 
 class DType;
 
+
 // Structs have no defined field order.
 // But for the sake of making types comparable, the order of member types is sorted by ID.
 /*
@@ -111,6 +112,12 @@ struct StructMember
     Val defaultval; // xnil if no default
 };
 
+struct TypeIdList
+{
+    const Type *ptr;
+    tsize n;
+};
+
 class TypeRegistry
 {
 public:
@@ -119,10 +126,21 @@ public:
     bool init();
     void dealloc();
 
+    // Turn a list of type IDs into an ID, and register for later lookup. This does not create a DType.
+    Type mklist(const Type *ts, size_t n);
+
+    // Get the type id of a previously stored list of type IDs. Returns 0 when not.
+    Type lookuplist(const Type *ts, size_t n) const;
+
+    // Use this if you need the type list back. if .ptr is NULL, the ID was not registered.
+    TypeIdList getlist(Type t);
+
+
+
     Type mkstruct(const StructMember *m, size_t n, size_t numdefaults);
     Type mkstruct(const Table& t); // makes a struct from t (named)
     Type mkstruct(const DArray& t);
-    Type mklist(const sref *ts, size_t n);
+
     TDesc *mkprimDesc(PrimType t);
     DType *mkprim(PrimType t);
 
@@ -141,6 +159,7 @@ public:
 
 private:
     Type _store(TDesc *);
-    Dedup _tt;
+    Dedup _tl; // for simple type lists (Type[] arrays only)
+    Dedup _tt; // for structs and such (TDesc based)
     TDesc *_builtins[PRIMTYPE_MAX];
 };

@@ -234,8 +234,6 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_IDENT,  &Parser::_identInExpr,NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_NIL,    &Parser::nil,      NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_TRUE ,  &Parser::btrue,    NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_FALSE , &Parser::bfalse,   NULL,            NULL,             Parser::PREC_NONE  },
     //{ Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_LCUR,   &Parser::tablecons,NULL,            NULL,             Parser::PREC_NONE  },
     { Lexer::TOK_LSQ,    &Parser::arraycons,NULL,            NULL,             Parser::PREC_NONE  },
@@ -530,7 +528,6 @@ void Parser::_endFunction()
         }
     }
 }
-
 
 // named:
 //   func [optional, attribs] hello(funcparams) -> returns
@@ -1125,16 +1122,6 @@ HLNode* Parser::litnum(Context ctx)
 HLNode* Parser::litstr(Context ctx)
 {
     return emitConstant(makestr(prevtok.begin, prevtok.begin + prevtok.u.len));
-}
-
-HLNode* Parser::btrue(Context ctx)
-{
-    return emitConstant(Val(true));
-}
-
-HLNode* Parser::bfalse(Context ctx)
-{
-    return emitConstant(Val(false));
 }
 
 HLNode* Parser::name(const char *whatfor)

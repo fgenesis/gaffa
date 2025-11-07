@@ -467,5 +467,6 @@ struct HLFoldTracker
     GC& gc;
     Symstore& syms;
     TypeRegistry& tr;
+    StringPool& sp;
     std::vector<std::string> errors;
 };

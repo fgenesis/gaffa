@@ -6,6 +6,12 @@
 
 #include <string.h>
 
+enum
+{
+    _TLIST_BIT = 1u << (sizeof(Type) * 8 - 1)
+};
+
+
 static const Val XNil = _Xnil();
 
 TDesc *TDesc_New(GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize)
@@ -45,7 +51,8 @@ enum
 };
 
 TypeRegistry::TypeRegistry(GC& gc)
-    : _tt(gc, false, PrefixBytes)
+    : _tl(gc, false, 0)
+    , _tt(gc, false, PrefixBytes)
 {
 }
 
@@ -58,10 +65,7 @@ bool TypeRegistry::init()
 {
     memset(_builtins, 0, sizeof(_builtins));
 
-    if(!_tt.init())
-        return false;
-
-    return true;
+    return _tt.init() && _tl.init();
 }
 
 void TypeRegistry::dealloc()
@@ -158,15 +162,39 @@ Type TypeRegistry::mkstruct(const DArray& t)
     return _store(td);
 }
 
-Type TypeRegistry::mklist(const sref* ts, size_t n)
+Type TypeRegistry::mklist(const Type* ts, size_t n)
 {
-    TDesc *td = TDesc_New(_tt.gc, n, TDESC_BITS_NO_NAMES, 0, 0);
+    /*TDesc *td = TDesc_New(_tt.gc, n, TDESC_BITS_NO_NAMES, 0, 0);
     for(size_t i = 0; i < n; ++i)
     {
         td->names()[i] = 0;
         td->types()[i] = ts[i];
     }
-    return _store(td);
+    return _store(td);*/
+
+
+    sref id = _tl.putCopy(ts, sizeof(*ts) * n);
+    if(!id)
+        id = 1; // 0 means that ts was NULL. Don't want this distinction here so make it "valid" in all cases.
+
+    return (Type)(id | _TLIST_BIT);
+}
+
+Type TypeRegistry::lookuplist(const Type* ts, size_t n) const
+{
+    sref id = _tl.find(ts, sizeof(*ts) * n);
+    if(!id)
+        id = 1; // 0 means that ts was NULL. Don't want this distinction here so make it "valid" in all cases.
+
+    return (Type)(id | _TLIST_BIT);
+}
+
+TypeIdList TypeRegistry::getlist(Type t)
+{
+    assert(!t || (t & _TLIST_BIT));
+    MemBlock mb = _tl.get(t & ~_TLIST_BIT);
+    TypeIdList tl = { (const Type*)mb.p, (tsize)mb.n };
+    return tl;
 }
 
 TDesc* TypeRegistry::mkprimDesc(PrimType t)

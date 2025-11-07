@@ -65,8 +65,6 @@ struct Keyword
 static const Keyword Keywords[] =
 {
     { "nil",       Lexer::TOK_NIL      },
-    { "true",      Lexer::TOK_TRUE     }, // TODO: these don't have to be keywords. could be toplevel constant typed values.
-    { "false",     Lexer::TOK_FALSE    },
     { "if",        Lexer::TOK_IF       },
     { "else",      Lexer::TOK_ELSE     },
     { "func",      Lexer::TOK_FUNC     },
@@ -230,6 +228,8 @@ isident:
     }
     else if((c >= 'A' && c <= 'Z') || c == '_') // ident
         goto isident;
+    else if(c == '@' && (p[1] == '\"' || p[1] == '\''))
+        return atident(p+1);
     else if((c >= '0' && c <= '9') || (c == '.' && (p[1] >= '0' && p[1] <= '9'))) // numeric
         return litnum(p);
     else if(c == '\"' || c == '\'') // "string literal"
@@ -311,6 +311,16 @@ Lexer::Token Lexer::ident(const char* where)
     return tok(tt, where, end);
 }
 
+// @"name with spaces"
+// Parse a literal string but make it a freeform identifier
+Lexer::Token Lexer::atident(const char* where)
+{
+    Lexer::Token t = litstr(where + 1, *where);
+    t.tt = TOK_IDENT;
+    return t;
+}
+
+// where points to first actual character of literal (after the opening ")
 Lexer::Token Lexer::litstr(const char* where, unsigned char term)
 {
     WsNoms s = eatstr(where, term);
@@ -322,8 +332,7 @@ Lexer::Token Lexer::litstr(const char* where, unsigned char term)
         _linebegin = s.pnl;
 
     Token t = tok(TOK_LITSTR, where, s.p);
-    t.begin++; // skip opening and closing "
-    t.u.len--;
+    t.u.len--; // skip closing "
     return t;
 }
 

@@ -59,8 +59,6 @@ public:
         TOK_CONCAT, // ++
         // keywords
         TOK_NIL,    // nil
-        TOK_TRUE,   // true
-        TOK_FALSE,  // false
         TOK_IF,     // if
         TOK_ELSE,   // else
         TOK_FUNC,   // func
@@ -114,6 +112,7 @@ private:
     Token tok(TokenType tt, const char *where, const char *end);
     Token errtok(const char *msg);
     Token ident(const char *where);
+    Token atident(const char *where);
     Token litstr(const char *where, unsigned char term);
     Token litnum(const char *where);
 

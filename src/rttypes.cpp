@@ -29,6 +29,7 @@ struct ClassReg
     }
 
     void method(const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets);
+    void op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity);
 
 private:
     RTReg& r;
@@ -51,7 +52,15 @@ struct RTReg
         DType *uint;
         DType *flt;
         DType *str;
+        DType *array;
+        DType *table;
+        DType *symtab;
     } types;
+
+    struct
+    {
+        Type empty;
+    } tids;
 
     sref str(const char *s)
     {
@@ -114,6 +123,14 @@ void ClassReg::method(const char * name, LeafFunc lfunc, const Type * params, si
     r.regfunc(cls.asDType(), name, lfunc, params, nparams, rets, nrets);
 }
 
+void ClassReg::op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity)
+{
+    assert(arity <= 2);
+    const char *name = Lexer::GetTokenText(optok);
+    Type ta[] = { t, t };
+    this->method(name, lfunc, ta, arity, ta, 1);
+}
+
 template<typename T>
 static void _reg_numeric(ClassReg& xr)
 {
@@ -155,10 +172,20 @@ void reg_type_type(RTReg& r)
 
 static void reg_type_func(RTReg& r)
 {
+    r.tids.empty = r.tr.mklist(NULL, 0);
+
     DType *d = r.tr.mkprim(PRIMTYPE_FUNC);
     r.types.func = d;
     ClassReg xfunc = r.regclass("anyfunc", d);
 }
+
+static void op_uint_plus(VM *, Val *v) // TEMP
+{
+    assert(v[0].type == PRIMTYPE_UINT);
+    assert(v[1].type == PRIMTYPE_UINT);
+    v[0].u.ui += v[1].u.ui;
+}
+
 
 static void reg_type_uint(RTReg& r)
 {
@@ -166,13 +193,15 @@ static void reg_type_uint(RTReg& r)
     r.types.uint = d;
     ClassReg xuint = r.regclass("uint", d);
     _reg_numeric<uint>(xuint);
+
+    xuint.op(Lexer::TOK_PLUS, op_uint_plus, PRIMTYPE_UINT, 2);
 }
 
 
 static void mth_int_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_SINT);
-    const int i = v->u.si;
+    const sint i = v->u.si;
     v->u.si = i < 0 ? -i : i; // TODO degenerate cases
 }
 
@@ -214,6 +243,16 @@ static void reg_type_float(RTReg& r)
     }
 }
 
+/*
+VMFUNC_IMM(strlen, Imm_2xu32)
+{
+    Val *v = LOCAL(imm->a);
+    assert(s->type == PRIMTYPE_STRING);
+    sref s = v->u.str;
+    vm->
+    NEXT();
+}
+*/
 
 static void mth_string_len(VM *vm, Val *v)
 {
@@ -236,12 +275,53 @@ static void reg_type_string(RTReg& r)
     }
 }
 
+static void reg_type_array(RTReg& r)
+{
+    DType *d = r.tr.mkprim(PRIMTYPE_ARRAY);
+    r.types.array = d;
+    ClassReg xarr = r.regclass("array", d);
+}
+
+static void reg_type_table(RTReg& r)
+{
+    DType *d = r.tr.mkprim(PRIMTYPE_TABLE);
+    r.types.table = d;
+    ClassReg xtab = r.regclass("table", d);
+}
+
+static void reg_type_symtab(RTReg& r)
+{
+    DType *d = r.tr.mkprim(PRIMTYPE_SYMTAB);
+    r.types.symtab = d;
+    ClassReg xsymt = r.regclass("symtable", d);
+}
 
 static void reg_constants(RTReg& r)
 {
+    // nil is kinda special. It exists as a keyword for the parser (in particular, '-> nil' for void function returns),
+    // but is also a "constant predefined identifier", in case that ever matters.
     r.symbol("nil", _Nil());
+
     r.symbol("true", true);
     r.symbol("false", false);
+}
+
+#include <time.h>
+static void u_clock(VM *vm, Val *v)
+{
+    *v = Val((uint)clock());
+}
+static void u_time(VM *vm, Val *v)
+{
+    *v = Val((uint)time(NULL));
+}
+
+
+static void reg_test(RTReg& r)
+{
+    const Type uint1[] = { PRIMTYPE_UINT };
+    r.regfunc(NULL, "clock", u_clock, NULL, 0, uint1, 1);
+    r.regfunc(NULL, "time", u_clock, NULL, 0, uint1, 1);
 }
 
 void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
@@ -253,5 +333,65 @@ void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
     reg_type_uint(r);
     reg_type_float(r);
     reg_type_string(r);
+    reg_type_array(r);
+    reg_type_table(r);
+    reg_type_symtab(r);
     reg_constants(r);
+    reg_test(r);
 }
+
+
+
+template<typename T>
+struct FoldOpsBase
+{
+    enum { Bitsize = sizeof(T) * CHAR_BIT };
+
+    /*typedef bool (*Binary)(T& r, T a, T b);
+    typedef bool (*Unary)(T& r, T a);
+    typedef bool (*Compare)(T a, T& b);*/
+
+    static bool Add(T& r, T a, T b) { r = a + b; return true; }
+    static bool Sub(T& r, T a, T b) { r = a - b; return true; }
+    static bool Mul(T& r, T a, T b) { r = a * b; return true; }
+    static bool Div(T& r, T a, T b) { if(!b) return false; r = a / b; return true; }
+    static bool Mod(T& r, T a, T b) { if(!b) return false; r = a % b; return true; }
+    static bool Shl(T& r, T a, T b) { if(b >= Bitsize) return false; r = a << b; return true; }
+    static bool Shr(T& r, T a, T b) { if(b >= Bitsize) return false; r = a >> b; return true; }
+    static bool Rol(T& r, T a, T b) { if(b >= Bitsize) return false; r = (a << b) | (a >> (Bitsize-b)); return true; }
+    static bool Ror(T& r, T a, T b) { if(b >= Bitsize) return false; r = (a >> b) | (a << (Bitsize-b)); return true; }
+
+    static bool BAnd(T& r, T a, T b) { r = a & b; return true; }
+    static bool BOr (T& r, T a, T b) { r = a | b; return true; }
+    static bool BXor(T& r, T a, T b) { r = a ^ b; return true; }
+
+    static bool UPos(T& r, T a) { r = +a; return true; }
+    static bool UNeg(T& r, T a) { r = -a; return true; }
+    static bool UNot(T& r, T a) { r = !a; return true; }
+    static bool UCpl(T& r, T a) { r = ~a; return true; }
+
+    // Alternative representations of relations so that only < and == are enough to handle everything
+    static bool C_Eq (T a, T b) { return  (a == b); }
+    static bool C_Neq(T a, T b) { return !(a == b); }
+    static bool C_Lt (T a, T b) { return  (a <  b); }
+    static bool C_Gt (T a, T b) { return  (b <  a); }
+    static bool C_Lte(T a, T b) { return !(b <  a); }
+    static bool C_Gte(T a, T b) { return !(a <  b); }
+};
+
+template<typename T>
+struct FoldOps : FoldOpsBase<T>
+{
+};
+
+template<>
+struct FoldOps<real> : FoldOpsBase<real>
+{
+    static bool Rol(real& r, real a, real b) { return false; }
+    static bool Ror(real& r, real a, real b) { return false; }
+    static bool BAnd(real& r, real a, real b) { return false; }
+    static bool BOr (real& r, real a, real b) { return false; }
+    static bool BXor(real& r, real a, real b) { return false; }
+
+    static bool UCpl(real& r, real a) { return false; }
+};
