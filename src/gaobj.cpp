@@ -56,3 +56,10 @@ DFunc* DFunc::GCNew(GC& gc)
 {
     return (DFunc*)gc_new(gc, sizeof(DFunc), PRIMTYPE_FUNC);
 }
+
+void DFunc::call(VM *vm, Val* a)
+{
+    // TODO: the other function types
+    assert(info.flags & FuncInfo::LFunc);
+    u.lfunc(vm, a);
+}

@@ -100,6 +100,8 @@ struct FuncInfo
     u32 nrets;
     enum Flags
     {
+        None = 0,
+
         FuncTypeMask = 3 << 0, // lowest 2 bits:
         LFunc = 0, // light/leaf C function
         CFunc = 1, // regular/variadic C function
@@ -108,11 +110,13 @@ struct FuncInfo
 
         VarArgs = 1 << 2, // set if variadic
         VarRets = 1 << 3,
+        Pure    = 1 << 4, // Can run at compile time
     };
     u32 flags;
     u32 nlocals; // # of local slots that are needed to run the function
     u32 nupvals;
 };
+inline FuncInfo::Flags operator|(FuncInfo::Flags a, FuncInfo::Flags b) { return FuncInfo::Flags((unsigned)a | (unsigned)b); }
 
 struct DebugInfo
 {
@@ -125,6 +129,8 @@ struct DebugInfo
 struct DFunc : public GCobj
 {
     static DFunc *GCNew(GC& gc);
+
+    inline bool isPure() const { return info.flags & FuncInfo::Pure; }
 
     FuncInfo info;
     // TODO: (DType: Func(Args, Ret))
@@ -146,5 +152,7 @@ struct DFunc : public GCobj
     // TODO: forward to VMFunc descriptor with codegen helper
 
     DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
+
+    void call(VM *vm, Val *a);
 };
 

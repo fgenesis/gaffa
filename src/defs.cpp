@@ -53,7 +53,7 @@ static const unsigned char TypeElementSizes[] =
 {
     /* PRIMTYPE_NIL    */ sizeof(u32),
     /* PRIMTYPE_ERROR  */ sizeof(sref),
-    /* PRIMTYPE_OPAQUE */ sizeof(uintptr_t),
+    /* PRIMTYPE_OPAQUE */ sizeof(_AnyValU),
     /* PRIMTYPE_BOOL   */ sizeof(u32), // FIXME: do we need an extra bool type for compact array storage?
     /* PRIMTYPE_UINT   */ sizeof(uint),
     /* PRIMTYPE_SINT   */ sizeof(sint),
@@ -65,8 +65,11 @@ static const unsigned char TypeElementSizes[] =
     /* PRIMTYPE_ARRAY  */ sizeof(GCobj*),
     /* PRIMTYPE_SYMTAB */ sizeof(SymTable*),
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
-    /* PRIMTYPE_ANY    */ sizeof(ValU),
-    /* PRIMTYPE_AUTO   */ sizeof(ValU)
+    /* PRIMTYPE_ANY    */ sizeof(ValU), // both type + opaque
+    /* PRIMTYPE_AUTO   */ sizeof(ValU),
+    /* _PRIMTYPE_X_VARIADIC, */ 0,
+    /* _PRIMTYPE_X_OPTIONAL, */ 0,
+    /* _PRIMTYPE_X_SUBTYPE,  */ 0
 };
 
 size_t GetPrimTypeStorageSize(unsigned t)

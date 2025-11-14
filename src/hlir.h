@@ -7,7 +7,9 @@
 #include "gainternal.h"
 #include "lex.h"
 #include "gaalloc.h"
+#include "symtable.h"
 #include <vector>
+
 
 struct GC;
 struct HLFoldTracker;
@@ -330,7 +332,7 @@ struct HLNode
     byte tok; // Lexer::TokenType
     byte flags; // any of the flags above, depends on type
     byte _nch; // number of child nodes
-    sref mytype; // derived type (PRIMTYPE_* or custom),
+    Type mytype; // derived type (PRIMTYPE_* or custom),
 
     template<typename T> T *as()
     {
@@ -468,5 +470,6 @@ struct HLFoldTracker
     Symstore& syms;
     TypeRegistry& tr;
     StringPool& sp;
+    SymTable &env;
     std::vector<std::string> errors;
 };

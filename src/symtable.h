@@ -7,27 +7,8 @@
 #include "gaobj.h"
 #include "lex.h"
 
-class SimpleSymTable
-{
-public:
-    SimpleSymTable();
-    ~SimpleSymTable();
-    void dealloc(GC& gc);
 
-    // Regular symbol lookup -- with optional function overloading
-    void add(GC& gc, sref key, const Val& val);
-    const Val *lookupIdent(sref key) const;
-    // When looking up functions, pass the arg list type so we can figure out which overload to select
-    const Val *lookupFunc(sref key, Type argt) const;
-
-
-
-protected:
-    Table regular;
-};
-
-
-class SymTable : public GCobj, public SimpleSymTable
+class SymTable : public GCobj
 {
 public:
 
@@ -36,13 +17,15 @@ public:
     ~SymTable();
     void dealloc(GC& gc);
 
-    // Any value may serve as an anchor (-> "namespace") to register symbols under
-    // Typically that would be type values, ie. to attach functions to types to use as methods
-    void addToNamespace(GC& gc, const Val& ns, sref key, const Val& val);
-    const Val *lookupFuncInNamespace(const Val& ns, sref key, Type argt) const;
-    const Val *lookupIdentInNamespace(const Val& ns, sref key) const;
+    void addSymbol(GC& gc, sref key, const Val& val);
+    const Val *lookupSymbol(sref key) const;
+
+    // Any value may serve as an anchor (-> "namespace") to register symbols under a type.
+    // Ie. to attach functions to types to use as methods
+    void addToNamespace(GC& gc, Type ns, sref key, const Val& val);
+    const Val *lookupInNamespace(Type ns, sref key) const;
 
 private:
     SymTable();
-    Table namespaced;
+    Table tab;
 };

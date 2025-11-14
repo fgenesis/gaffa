@@ -21,10 +21,22 @@ class DType;
 
 */
 
-enum TDescBits
+enum TypeFlags
 {
-    TDESC_BITS_IS_UNION   = 1 << 0, // is a union type, instead of a struct
-    TDESC_BITS_NO_NAMES   = 1 << 1
+    TYPEFLAG_TYPELIST = 1u << 0u, //  > always up to 1 of these bits set, never more
+    TYPEFLAG_STRUCT   = 1u << 1u, //
+    TYPEFLAG_UNION    = 1u << 2u, //
+
+    TYPEFLAG_OPTIONAL = 1u << 3u,
+    TYPEFLAG_VARIADIC = 1u << 4u,
+
+    TYPEFLAG_SUBTYPE  = 1u << 5u
+};
+
+struct TypeInfo
+{
+    TypeFlags flags;
+    Type base; // Resolved base type without vararg, optional, or subtyping
 };
 
 struct TDescAlias
@@ -57,11 +69,7 @@ struct TDesc
 
     // Defines what kind of type description this is.
     // - Always: primtype < PRIMTYPE_ANY
-    // - if PRIMTYPE_ARRAY, n == 1 and the type that follows is the array specialization
-    // - if PRIMTYPE_TABLE, n == 2 and the types that follow are key and value types
     // - if PRIMTYPE_OBJECT, n >= 0 and the types that follow are struct members
-    // - if PRIMTYPE_FUNC, n == 2. first type is the func params as an ordered struct,
-    //                               second is the same for the return values
     PrimType primtype;
     u32 bits;
 
@@ -135,14 +143,19 @@ public:
     // Use this if you need the type list back. if .ptr is NULL, the ID was not registered.
     TypeIdList getlist(Type t);
 
+    // Get some infos about a type and resolve the base type (without vararg, optional, or subtyping)
+    TypeInfo getinfo(Type t);
 
+    Type mkvariadic(Type t);
+    Type mkoptional(Type t);
 
     Type mkstruct(const StructMember *m, size_t n, size_t numdefaults);
     Type mkstruct(const Table& t); // makes a struct from t (named)
-    Type mkstruct(const DArray& t);
 
     TDesc *mkprimDesc(PrimType t);
     DType *mkprim(PrimType t);
+
+
 
     // Helper to create a function type
     Type mkfunc(Type argt, Type rett);

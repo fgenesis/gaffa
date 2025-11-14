@@ -37,6 +37,12 @@ public:
         // strongest binding
     };
 
+    enum OpFlags
+    {
+        OPF_NONE,
+        OPF_OVL, // Overloadable
+    };
+
     enum Context
     {
         CTX_DEFAULT = 0x00,
@@ -83,6 +89,7 @@ protected:
     HLNode *functionbody();
     void _funcattribs(unsigned *pfuncflags);
     HLNode *_funcreturns();
+    HLNode *_methodname();
 
     HLNode *_assignmentWithPrefix(HLNode *lhs); // = EXPR or := EXPR
     HLNode *_restassign(HLNode *firstLhs, const Lexer::Token& lhsTok); // returns list
@@ -183,6 +190,7 @@ private:
         InfixMth infix;
         InfixMth postfix;
         Prec precedence;
+        OpFlags opflags;
     };
 
     static const ParseRule Rules[];

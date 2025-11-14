@@ -189,57 +189,57 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
 const Parser::ParseRule Parser::Rules[] =
 {
     // grouping
-    { Lexer::TOK_LPAREN, &Parser::grouping, &Parser::fncall, NULL,             Parser::PREC_CALL  },
-    { Lexer::TOK_COLON,  NULL,              &Parser::mthcall,NULL,             Parser::PREC_CALL  },
+    { Lexer::TOK_LPAREN, &Parser::grouping, &Parser::fncall, NULL,             Parser::PREC_CALL,      Parser::OPF_NONE },
+    { Lexer::TOK_COLON,  NULL,              &Parser::mthcall,NULL,             Parser::PREC_CALL,      Parser::OPF_NONE },
 
     // math operators
-    { Lexer::TOK_PLUS  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_ADD   },
-    { Lexer::TOK_MINUS , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_ADD   },
-    { Lexer::TOK_STAR  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_MUL   },
-    { Lexer::TOK_EXCL  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_MUL   },
-    { Lexer::TOK_SLASH , NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
-    { Lexer::TOK_SLASH2X,NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
-    { Lexer::TOK_PERC,   NULL,              &Parser::binary, NULL,             Parser::PREC_MUL   },
+    { Lexer::TOK_PLUS  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_ADD,       Parser::OPF_OVL  },
+    { Lexer::TOK_MINUS , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_ADD,       Parser::OPF_OVL  },
+    { Lexer::TOK_STAR  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_MUL,       Parser::OPF_OVL  },
+    { Lexer::TOK_EXCL  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_MUL,       Parser::OPF_OVL  },
+    { Lexer::TOK_SLASH , NULL,              &Parser::binary, NULL,             Parser::PREC_MUL,       Parser::OPF_OVL  },
+    { Lexer::TOK_SLASH2X,NULL,              &Parser::binary, NULL,             Parser::PREC_MUL,       Parser::OPF_OVL  },
+    { Lexer::TOK_PERC,   NULL,              &Parser::binary, NULL,             Parser::PREC_MUL,       Parser::OPF_OVL  },
 
     // bitwise
-    { Lexer::TOK_SHL   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_SHIFT },
-    { Lexer::TOK_SHR   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_SHIFT },
-    { Lexer::TOK_BITAND, NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_AND   },
-    { Lexer::TOK_BITOR , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_OR    },
-    { Lexer::TOK_HAT   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_XOR   },
-    { Lexer::TOK_TILDE , &Parser::unary,    NULL,            NULL,             Parser::PREC_BIT_XOR   },
+    { Lexer::TOK_SHL   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_SHIFT, Parser::OPF_OVL  },
+    { Lexer::TOK_SHR   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_SHIFT, Parser::OPF_OVL  },
+    { Lexer::TOK_BITAND, NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_AND,   Parser::OPF_OVL  },
+    { Lexer::TOK_BITOR , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_OR,    Parser::OPF_OVL  },
+    { Lexer::TOK_HAT   , NULL,              &Parser::binary, NULL,             Parser::PREC_BIT_XOR,   Parser::OPF_OVL  },
+    { Lexer::TOK_TILDE , &Parser::unary,    NULL,            NULL,             Parser::PREC_BIT_XOR,   Parser::OPF_OVL  },
 
     // logical
-    { Lexer::TOK_EQ    , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY   },
-    { Lexer::TOK_NEQ   , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY   },
-    { Lexer::TOK_LT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
-    { Lexer::TOK_LTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
-    { Lexer::TOK_GT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
-    { Lexer::TOK_GTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON },
-    { Lexer::TOK_EXCL  , NULL,              &Parser::binary, NULL,             Parser::PREC_UNARY      },
-    { Lexer::TOK_LOGAND, NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_AND  },
-    { Lexer::TOK_LOGOR , NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_OR   },
+    { Lexer::TOK_EQ    , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY,  Parser::OPF_OVL  },
+    { Lexer::TOK_NEQ   , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY,  Parser::OPF_OVL  },
+    { Lexer::TOK_LT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
+    { Lexer::TOK_LTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
+    { Lexer::TOK_GT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
+    { Lexer::TOK_GTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
+    { Lexer::TOK_EXCL  , NULL,              &Parser::binary, NULL,             Parser::PREC_UNARY,     Parser::OPF_OVL  },
+    { Lexer::TOK_LOGAND, NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_AND, Parser::OPF_NONE },
+    { Lexer::TOK_LOGOR , NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_OR,  Parser::OPF_NONE },
 
     // special
-    { Lexer::TOK_QQM,    &Parser::unary,    NULL,            NULL,             Parser::PREC_UNARY  },
-    { Lexer::TOK_FATARROW,NULL,             &Parser::binary, NULL,             Parser::PREC_UNWRAP  },
-    { Lexer::TOK_HASH  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_UNARY  },
-    { Lexer::TOK_CONCAT, NULL,              &Parser::binary, NULL,             Parser::PREC_CONCAT  },
+    { Lexer::TOK_QQM,    &Parser::unary,    NULL,            NULL,             Parser::PREC_UNARY,     Parser::OPF_NONE },
+    { Lexer::TOK_FATARROW,NULL,             &Parser::binary, NULL,             Parser::PREC_UNWRAP,    Parser::OPF_NONE },
+    { Lexer::TOK_HASH  , &Parser::unary,    &Parser::binary, NULL,             Parser::PREC_UNARY,     Parser::OPF_OVL  },
+    { Lexer::TOK_CONCAT, NULL,              &Parser::binary, NULL,             Parser::PREC_CONCAT,    Parser::OPF_OVL  },
 
     // ranges
-    { Lexer::TOK_DOTDOT, &Parser::unaryRange,&Parser::binaryRange,&Parser::postfixRange, Parser::PREC_UNARY  },
+    { Lexer::TOK_DOTDOT, &Parser::unaryRange,&Parser::binaryRange,&Parser::postfixRange, Parser::PREC_UNARY, Parser::OPF_NONE },
 
     // values
-    { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_IDENT,  &Parser::_identInExpr,NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_NIL,    &Parser::nil,      NULL,            NULL,             Parser::PREC_NONE  },
-    //{ Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_LCUR,   &Parser::tablecons,NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_LSQ,    &Parser::arraycons,NULL,            NULL,             Parser::PREC_NONE  },
-    { Lexer::TOK_FUNC,   &Parser::closurecons,NULL,            NULL,             Parser::PREC_NONE  },
+    { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_IDENT,  &Parser::_identInExpr,NULL,         NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_NIL,    &Parser::nil,      NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    //{ Lexer::TOK_DOLLAR, &Parser::valblock, NULL,          NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_LCUR,   &Parser::tablecons,NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_LSQ,    &Parser::arraycons,NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_FUNC,   &Parser::closurecons,NULL,          NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
 
-    { Lexer::TOK_E_ERROR,NULL,              NULL,            NULL,             Parser::PREC_NONE, }
+    { Lexer::TOK_E_ERROR,NULL,              NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE }
 };
 
 const Parser::ParseRule * Parser::GetRule(Lexer::TokenType tok)
@@ -546,25 +546,27 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     if(tryeat(Lexer::TOK_LSQ))
         _funcattribs(&flags);
 
+    unsigned hasns = 0;
+    Lexer::Token sep;
+    HLNode *ns = NULL;
     if(pname) // Named functions can be declared in a namespace
     {
-        const Lexer::Token tok = curtok; // used in case fo error
+        const Lexer::Token tok = curtok; // used in case of error
         HLNode *nname = ident("function or namespace", IDENT_USAGE_UNTRACKED, SYMREF_VISIBLE); // namespace or function name
-        HLNode *ns = NULL;
         SymbolRefContext nameref = SYMREF_VISIBLE;
 
+        sep = curtok;
         if(tryeat(Lexer::TOK_DOT)) // . follows -> it's a namespaced function (namespace can be a type or table)
-        {
-            ns = nname;
-            nname = ident("functionName", IDENT_USAGE_DECL, SYMREF_VISIBLE);
-        }
+            hasns = 1;
         else if(tryeat(Lexer::TOK_COLON)) // : follows -> it's a method (syntax sugar only; Lua style)
+            hasns = 2;
+
+        if(hasns)
         {
             ns = nname;
-            nname = ident("methodName", IDENT_USAGE_DECL, SYMREF_VISIBLE);
-            assert(false);
-            //flags |= FUNCFLAGS_METHOD_SUGAR;
+            nname = _methodname();
         }
+
         *pname = nname;
         *pnamespac = ns;
 
@@ -573,7 +575,32 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 
     _beginFunction();
 
-    h->u.fhdr.paramlist = _funcparams();
+    HLNode *params = _funcparams(); // This returns NULL if there are no parameters
+
+    if(hasns == 2) // Lua-style: ns:mth(...) -> ns.mth(ns self, ...)
+    {
+        if(!params)
+            params = ensure(hlir->list());
+
+        // Shift parameters up to make space at the front
+        HLList *list = &params->u.list;
+        const size_t n = list->used;
+        list->add(NULL, gc);
+        for(size_t i = 0; i < n; ++i)
+            list->list[i+1] = list->list[i];
+
+        // Inject a 'ns self' parameter
+        HLNode *self = ensure(hlir->vardef(), sep); // Whatev; use the ':' as anchoring point in case there are errors to report
+        Lexer::Token selftok = sep;
+        selftok.begin = "self";
+        selftok.u.len = 4;
+        selftok.tt = Lexer::TOK_IDENT;
+        self->u.vardef.ident = _ident(selftok, "implicit 'self' in method def", IDENT_USAGE_DECL, SYMREF_VISIBLE);
+        self->u.vardef.type = ns;
+        list->list[0] = self;
+    }
+
+    h->u.fhdr.paramlist = params;
 
     if(tryeat(Lexer::TOK_RARROW))
         h->u.fhdr.rettypes = _funcreturns();
@@ -589,6 +616,29 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
         pname ? symbolname(*pname) : NULL, h->u.fhdr.nargs(), h->u.fhdr.nrets());
 
     return f;
+}
+
+// namespace:hello
+// int.+
+// int.@"+"
+HLNode * Parser::_methodname()
+{
+    if(curtok.tt != Lexer::TOK_IDENT)
+        for(size_t i = 0; i < Countof(Rules); ++i)
+            if(curtok.tt == Rules[i].tok)
+            {
+                if(Rules[i].opflags & OPF_OVL) // Can overload operator? accept that as a "function name" token too...
+                {
+
+                    curtok.tt = Lexer::TOK_IDENT; // ... but make it a regular identifier
+                    break;
+                }
+                else
+                    error("Attempt to overload an operator that is not overloadable");
+            }
+
+    advance();
+    return _ident(prevtok, "function or method name or operator", IDENT_USAGE_DECL, SYMREF_VISIBLE);
 }
 
 HLNode* Parser::_funcparams()

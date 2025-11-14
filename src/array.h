@@ -111,6 +111,7 @@ public:
     const tsize elementSize;
 
     void *ensure(GC& gc, tsize n);
+    void *enlarge(GC& gc, tsize minsize);
     void *_resize(GC& gc, tsize n);
 
     static DArray *GCNew(GC& gc, tsize prealloc, Type t);

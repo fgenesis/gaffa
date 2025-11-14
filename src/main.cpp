@@ -176,9 +176,6 @@ int main(int argc, char **argv)
     TypeRegistry tr(gc);
     tr.init();
 
-    SymTable *syms = SymTable::GCNew(gc);
-    rtinit(*syms, gc, strtab, tr);
-
     //testdedup();
     //vmtest(gc);
     //return 0;
@@ -206,8 +203,10 @@ int main(int argc, char **argv)
 
     hlirDebugDump(strtab, node);
 
+    SymTable *env = SymTable::GCNew(gc);
+    rtinit(*env, gc, strtab, tr);
 
-    HLFoldTracker ft = { gc, pp.syms, tr, strtab };
+    HLFoldTracker ft = { gc, pp.syms, tr, strtab, *env };
 
     HLNode *folded = node->fold(ft, FOLD_INITIAL);
 

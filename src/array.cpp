@@ -84,6 +84,15 @@ void* DArray::ensure(GC& gc, tsize n)
     return n <= cap ? storage.p : _resize(gc, n);
 }
 
+void* DArray::enlarge(GC& gc, tsize minsize)
+{
+    if(minsize <= cap)
+        return storage.p;
+
+    size_t next = sz * 2;
+    return _resize(gc, next < minsize ? minsize : next);
+}
+
 void *DArray::_resize(GC& gc, tsize n)
 {
     void *p = AllocStorage(gc, storage.p, t, cap, n);
@@ -122,7 +131,7 @@ Val DArray::dynamicLookup(tsize idx) const
 void DArray::dynamicAppend(GC& gc, ValU v)
 {
     const tsize idx = sz;
-    void *mem = ensure(gc, idx + 1);
+    void *mem = enlarge(gc, idx + 1);
     assert(mem); // TODO: handle OOM
 
     ++sz;

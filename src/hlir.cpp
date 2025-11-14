@@ -619,10 +619,15 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
     const char *opname = Lexer::GetTokenText(tt);
     Str name = ft.sp.put(opname);
 
-    if(L->isknowntype() && R->isknowntype())
+    if(L->isconst() && R->isconst())
     {
-        //Val f = ft.syms.lookup(
-        assert(false);
+        const Val *v = ft.env.lookupInNamespace(L->mytype, name.id);
+        const DFunc *f = v->asFunc();
+        if(f->isPure())
+        {
+            Val stk[] = { L->u.constant.val, R->u.constant.val };
+            f->call(vm, stk);
+        }
     }
 
     //if(typesrc->isknowntype())

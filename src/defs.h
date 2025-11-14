@@ -72,7 +72,11 @@ enum PrimType
     PRIMTYPE_OBJECT, // T  o     G   //
 
     PRIMTYPE_ANY,    // can hold any value. must be after specific types.
-    PRIMTYPE_AUTO,   // special marker for type analysis
+
+    PRIMTYPE_AUTO,     // special marker for type analysis
+    _PRIMTYPE_X_VARIADIC, // special marker for type lists
+    _PRIMTYPE_X_OPTIONAL, // special marker for optionals
+    _PRIMTYPE_X_SUBTYPE,  // special marker for subtype specialization
     // These are the engine-level types. Runtime-created types are any IDs after this.
     PRIMTYPE_MAX,
 
@@ -181,7 +185,7 @@ struct Val : public ValU
     explicit Val(DObj *o);
 
 
-    Val(const void *func); // Not implemented, catch-all
+    Val(const void *func) = delete; // Not implemented, catch-all
 
     inline GCobj *asAnyObj(PrimType prim);
     DFunc    *asFunc();

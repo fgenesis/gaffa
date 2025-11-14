@@ -19,21 +19,21 @@ struct ClassReg
     void symbol(const char *name, const T& obj)
     {
         sref s = r.sp.put(name).id;
-        r.syms.addToNamespace(r.gc, cls, s, Val(obj));
+        r.syms.addToNamespace(r.gc, cls->tid, s, Val(obj));
     }
 
     template<size_t NP, size_t NR>
-    inline void method(const char *name, LeafFunc lfunc, const Type (&params)[NP], const Type (&rets)[NR])
+    inline DFunc *method(const char *name, LeafFunc lfunc, const Type (&params)[NP], const Type (&rets)[NR], FuncInfo::Flags extraflags = FuncInfo::None)
     {
-        this->method(name, lfunc, params, NP, rets, NR);
+        return this->method(name, lfunc, params, NP, rets, NR, extraflags);
     }
 
-    void method(const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets);
-    void op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity);
+    DFunc *method(const char * name, LeafFunc lfunc, const Type * params, size_t nparams, const Type * rets, size_t nrets, FuncInfo::Flags extraflags);
+    DFunc *op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity);
 
 private:
     RTReg& r;
-    Val cls;
+    DType *cls;
 };
 
 
@@ -70,7 +70,7 @@ struct RTReg
     template<typename T>
     inline void symbol(const char *name, const T& obj)
     {
-        syms.add(gc, str(name), Val(obj));
+        syms.addSymbol(gc, str(name), Val(obj));
     }
 
     ClassReg regclass(const char *name, DType *t)
@@ -80,34 +80,36 @@ struct RTReg
     }
 
 
-    void regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
+    DFunc *regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets, FuncInfo::Flags extraflags)
     {
         Type tp = tr.mklist(params, nparams);
         Type tret = tr.mklist(rets, nrets);
         Type tf = tr.mkfunc(tp, tret);
         sref sname = str(name);
 
-        DFunc *df = mkfunc(lfunc, tf, nparams, nrets);
+        DFunc *df = mkfunc(lfunc, tf, nparams, nrets, extraflags);
         if(ns)
-            syms.addToNamespace(gc, Val(ns), sname, Val(df));
+            syms.addToNamespace(gc, ns->tid, sname, Val(df));
         else
-            syms.add(gc, sname, Val(df));
+            syms.addSymbol(gc, sname, Val(df));
+
+        return df;
     }
 
 
     template<size_t NP, size_t NR>
-    inline void regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type (&params)[NP], const Type (&rets)[NR])
+    inline DFunc *regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type (&params)[NP], const Type (&rets)[NR], FuncInfo::Flags extraflags = FuncInfo::None)
     {
-        regfunc(ns, name, lfunc, params, NP, rets, NR);
+        return regfunc(ns, name, lfunc, params, NP, rets, NR, extraflags);
     }
 
-    DFunc *mkfunc(LeafFunc lfunc, Type ty, size_t nargs, size_t nrets)
+    DFunc *mkfunc(LeafFunc lfunc, Type ty, size_t nargs, size_t nrets, FuncInfo::Flags extraflags)
     {
         DFunc *f = DFunc::GCNew(gc);
         f->info.t = ty;
         f->info.nargs = nargs;
         f->info.nrets = nrets;
-        f->info.flags = FuncInfo::LFunc;
+        f->info.flags = FuncInfo::LFunc | extraflags;
         f->info.nlocals = 0;
         f->info.nupvals = 0;
         f->u.lfunc = lfunc;
@@ -118,17 +120,17 @@ struct RTReg
 };
 
 
-void ClassReg::method(const char * name, LeafFunc lfunc, const Type * params, size_t nparams, const Type * rets, size_t nrets)
+DFunc *ClassReg::method(const char * name, LeafFunc lfunc, const Type * params, size_t nparams, const Type * rets, size_t nrets, FuncInfo::Flags extraflags)
 {
-    r.regfunc(cls.asDType(), name, lfunc, params, nparams, rets, nrets);
+    return r.regfunc(cls, name, lfunc, params, nparams, rets, nrets, extraflags);
 }
 
-void ClassReg::op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity)
+DFunc *ClassReg::op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity)
 {
     assert(arity <= 2);
     const char *name = Lexer::GetTokenText(optok);
     Type ta[] = { t, t };
-    this->method(name, lfunc, ta, arity, ta, 1);
+    return this->method(name, lfunc, ta, arity, ta, 1, FuncInfo::Pure);
 }
 
 template<typename T>
@@ -320,8 +322,8 @@ static void u_time(VM *vm, Val *v)
 static void reg_test(RTReg& r)
 {
     const Type uint1[] = { PRIMTYPE_UINT };
-    r.regfunc(NULL, "clock", u_clock, NULL, 0, uint1, 1);
-    r.regfunc(NULL, "time", u_clock, NULL, 0, uint1, 1);
+    r.regfunc(NULL, "clock", u_clock, NULL, 0, uint1, 1, FuncInfo::None);
+    r.regfunc(NULL, "time", u_clock, NULL, 0, uint1, 1, FuncInfo::None);
 }
 
 void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
