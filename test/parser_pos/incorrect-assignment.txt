@@ -1,0 +1,2 @@
+int lol = 0
+lol y = 0

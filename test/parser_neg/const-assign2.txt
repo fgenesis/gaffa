@@ -1,0 +1,2 @@
+int x = 0
+func test() x = 1

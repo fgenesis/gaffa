@@ -1,0 +1,4 @@
+func int.+(int a, int b) {}
+func int.@"-"(int a, int b) {}
+func int:*(int o) -> int {}
+func int:/(int o) { return self }

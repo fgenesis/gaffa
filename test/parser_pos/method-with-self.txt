@@ -1,0 +1,3 @@
+// self must not be referenced as a global symbol
+
+func T:test() return self

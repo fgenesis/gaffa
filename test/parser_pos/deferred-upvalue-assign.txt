@@ -1,0 +1,3 @@
+int x = defer
+func test() return x
+int x = 0

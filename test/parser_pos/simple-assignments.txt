@@ -1,0 +1,9 @@
+int p = +0
+int n = -0
+uint u = 0
+float f = 0.0
+array a = [1,2,3]
+table t = {1,2,3}
+table t2 = {1,2,3, x=5 y=6}
+type tt = float
+tt x = 1.0
