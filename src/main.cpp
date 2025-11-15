@@ -10,6 +10,7 @@
 #include "typing.h"
 #include "rttypes.h"
 #include "symtable.h"
+#include "runtime.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -167,14 +168,9 @@ extern void vmtest(GC& gc);
 
 int main(int argc, char **argv)
 {
-    GC gc = {0};
-    gc.alloc = myalloc;
+    Runtime rt;
+    rt.init(myalloc);
 
-    StringPool strtab(gc);
-    strtab.init();
-
-    TypeRegistry tr(gc);
-    tr.init();
 
     //testdedup();
     //vmtest(gc);
@@ -194,25 +190,25 @@ int main(int argc, char **argv)
 
 
     Lexer lex(code);
-    Parser pp(&lex, fn, gc, strtab);
-    HLIRBuilder hb(gc);
+    Parser pp(&lex, fn, rt.gc, rt.sp);
+    HLIRBuilder hb(rt.gc);
     pp.hlir = &hb;
     HLNode *node = pp.parse();
     if(!node)
         return 1;
 
-    hlirDebugDump(strtab, node);
+    hlirDebugDump(rt.sp, node);
 
-    SymTable *env = SymTable::GCNew(gc);
-    rtinit(*env, gc, strtab, tr);
+    SymTable *env = SymTable::GCNew(rt.gc);
+    rtinit(*env, rt.gc, rt.sp, rt.tr);
 
-    HLFoldTracker ft = { gc, pp.syms, tr, strtab, *env };
+    HLFoldTracker ft = { rt, pp.syms, *env };
 
     HLNode *folded = node->fold(ft, FOLD_INITIAL);
 
     puts("\n####### AFTER FOLDING #######\n");
 
-    hlirDebugDump(strtab, folded);
+    hlirDebugDump(rt.sp, folded);
 
 
     //MLIRContainer mc(gc);

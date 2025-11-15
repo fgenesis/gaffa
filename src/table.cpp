@@ -214,6 +214,8 @@ Val Table::get(Val k) const
     if(!keys)
         return _Nil();
     const TKey *tk = _getkey(k, idxmask);
+    if(tk->type == PRIMTYPE_NIL)
+        return _Nil();
     const size_t idx = tk->validx;
     return vals.dynamicLookup(idx);
 }
@@ -223,6 +225,8 @@ Val* Table::getp(Val k)
     if(!keys)
         return NULL;
     const TKey *tk = _getkey(k, idxmask);
+    if(tk->type == PRIMTYPE_NIL)
+        return NULL;
     const size_t idx = tk->validx;
     return (Val*)&vals.storage.vals[idx];
 }
@@ -233,6 +237,8 @@ const Val* Table::getp(Val k) const
     if(!keys)
         return NULL;
     const TKey *tk = _getkey(k, idxmask);
+    if(tk->type == PRIMTYPE_NIL)
+        return NULL;
     const size_t idx = tk->validx;
     return (const Val*)&vals.storage.vals[idx];
 }

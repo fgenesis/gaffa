@@ -181,7 +181,7 @@ static void reg_type_func(RTReg& r)
     ClassReg xfunc = r.regclass("anyfunc", d);
 }
 
-static void op_uint_plus(VM *, Val *v) // TEMP
+static void op_uint_plus(Runtime *, Val *v) // TEMP
 {
     assert(v[0].type == PRIMTYPE_UINT);
     assert(v[1].type == PRIMTYPE_UINT);
@@ -200,7 +200,7 @@ static void reg_type_uint(RTReg& r)
 }
 
 
-static void mth_int_abs(VM *, Val *v)
+static void mth_int_abs(Runtime *, Val *v)
 {
     assert(v->type == PRIMTYPE_SINT);
     const sint i = v->u.si;
@@ -225,7 +225,7 @@ static void reg_type_sint(RTReg& r)
 }
 
 
-static void mth_float_abs(VM *, Val *v)
+static void mth_float_abs(Runtime *, Val *v)
 {
     assert(v->type == PRIMTYPE_FLOAT);
     float f = v->u.f;
@@ -256,11 +256,11 @@ VMFUNC_IMM(strlen, Imm_2xu32)
 }
 */
 
-static void mth_string_len(VM *vm, Val *v)
+static void mth_string_len(Runtime *rt, Val *v)
 {
     assert(v->type == PRIMTYPE_STRING);
     const sref s = v->u.str;
-    v->u.str = vm->rt->sp.lookup(s).len;
+    v->u.str = rt->sp.lookup(s).len;
     v->type = PRIMTYPE_UINT;
 }
 
@@ -309,11 +309,11 @@ static void reg_constants(RTReg& r)
 }
 
 #include <time.h>
-static void u_clock(VM *vm, Val *v)
+static void u_clock(Runtime *rt, Val *v)
 {
     *v = Val((uint)clock());
 }
-static void u_time(VM *vm, Val *v)
+static void u_time(Runtime *rt, Val *v)
 {
     *v = Val((uint)time(NULL));
 }

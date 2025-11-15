@@ -288,7 +288,7 @@ Observations:
 // Assumes params are already on top of the stack and the stack is large enough
 VMFUNC_IMM(leafcall, Imm_LeafCall)
 {
-    imm->f(vm, sp); // this writes to return slots
+    imm->f(vm->rt, sp); // this writes to return slots
     NEXT();
 }
 

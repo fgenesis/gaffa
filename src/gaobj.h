@@ -74,7 +74,7 @@ public:
 //   and type system know this too.
 // - Stack space is limited; up to MINSTACK usable slots total
 // - Can't throw errors (but can return error values)
-typedef void (*LeafFunc)(VM *vm, Val *inout);
+typedef void (*LeafFunc)(Runtime *rt, Val *inout);
 
 struct StackCRef;
 struct StackRef;
@@ -153,6 +153,7 @@ struct DFunc : public GCobj
 
     DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
 
-    void call(VM *vm, Val *a);
+    // Slow path for compile-time eval and such
+    void call(Runtime& rt, Val *a) const;
 };
 

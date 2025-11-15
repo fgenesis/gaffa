@@ -466,10 +466,10 @@ private:
 
 struct HLFoldTracker
 {
-    GC& gc;
+    Runtime &rt;
     Symstore& syms;
-    TypeRegistry& tr;
-    StringPool& sp;
     SymTable &env;
     std::vector<std::string> errors;
+
+    void error(const HLNode *where, const char *msg);
 };
