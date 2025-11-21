@@ -55,6 +55,7 @@ struct RTReg
         DType *array;
         DType *table;
         DType *symtab;
+        DType *any;
     } types;
 
     struct
@@ -181,7 +182,7 @@ static void reg_type_func(RTReg& r)
     ClassReg xfunc = r.regclass("anyfunc", d);
 }
 
-static void op_uint_plus(Runtime *, Val *v) // TEMP
+static void op_uint_plus(VM *, Val *v) // TEMP
 {
     assert(v[0].type == PRIMTYPE_UINT);
     assert(v[1].type == PRIMTYPE_UINT);
@@ -200,7 +201,7 @@ static void reg_type_uint(RTReg& r)
 }
 
 
-static void mth_int_abs(Runtime *, Val *v)
+static void mth_int_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_SINT);
     const sint i = v->u.si;
@@ -225,7 +226,7 @@ static void reg_type_sint(RTReg& r)
 }
 
 
-static void mth_float_abs(Runtime *, Val *v)
+static void mth_float_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_FLOAT);
     float f = v->u.f;
@@ -256,11 +257,11 @@ VMFUNC_IMM(strlen, Imm_2xu32)
 }
 */
 
-static void mth_string_len(Runtime *rt, Val *v)
+static void mth_string_len(VM *vm, Val *v)
 {
     assert(v->type == PRIMTYPE_STRING);
     const sref s = v->u.str;
-    v->u.str = rt->sp.lookup(s).len;
+    v->u.str = vm->rt->sp.lookup(s).len;
     v->type = PRIMTYPE_UINT;
 }
 
@@ -298,6 +299,39 @@ static void reg_type_symtab(RTReg& r)
     ClassReg xsymt = r.regclass("symtable", d);
 }
 
+static void op_any_plus(VM *vm, Val *v)
+{
+    const PrimType t0 = v[0].type;
+    if(t0 == v[1].type)
+    {
+        switch(t0)
+        {
+            case PRIMTYPE_UINT: v[0].u.ui += v[1].u.ui; return; // TODO: check overflow
+            case PRIMTYPE_SINT: v[0].u.si += v[1].u.si; return;
+            case PRIMTYPE_FLOAT: v[0].u.f += v[1].u.f; return;
+        }
+    }
+
+    if(t0 == PRIMTYPE_OBJECT)
+    {
+        DObj *obj0 = v[0].asDObj();
+        const Type tt0 = obj0->dynamicType();
+        // TODO: need to pass current env (aka symtab) somehow
+    }
+}
+
+static void reg_type_any(RTReg& r)
+{
+    DType *d = r.tr.mkprim(PRIMTYPE_ANY);
+    r.types.any = d;
+    ClassReg xany = r.regclass("any", d);
+
+    {
+        const Type any1[] = { PRIMTYPE_ANY };
+        xany.op(Lexer::TOK_PLUS, op_any_plus, PRIMTYPE_ANY, 2);
+    }
+}
+
 static void reg_constants(RTReg& r)
 {
     // nil is kinda special. It exists as a keyword for the parser (in particular, '-> nil' for void function returns),
@@ -309,11 +343,11 @@ static void reg_constants(RTReg& r)
 }
 
 #include <time.h>
-static void u_clock(Runtime *rt, Val *v)
+static void u_clock(VM *vm, Val *v)
 {
     *v = Val((uint)clock());
 }
-static void u_time(Runtime *rt, Val *v)
+static void u_time(VM *vm, Val *v)
 {
     *v = Val((uint)time(NULL));
 }
@@ -338,6 +372,7 @@ void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
     reg_type_array(r);
     reg_type_table(r);
     reg_type_symtab(r);
+    reg_type_any(r);
     reg_constants(r);
     reg_test(r);
 }

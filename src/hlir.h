@@ -466,7 +466,7 @@ private:
 
 struct HLFoldTracker
 {
-    Runtime &rt;
+    VM &vm;
     Symstore& syms;
     SymTable &env;
     std::vector<std::string> errors;

@@ -8,8 +8,6 @@
 #include "symtable.h"
 #include "gaobj.h"
 
-      GCobj *Val::asAnyObj(PrimType prim)       { assert(prim == type); return u.obj; }
-const GCobj *Val::asAnyObj(PrimType prim) const { assert(prim == type); return u.obj; }
 
 Val::Val(DType *t)       { _init(PRIMTYPE_TYPE);   u.obj = t; }
 Val::Val(SymTable *symt) { _init(PRIMTYPE_SYMTAB); u.obj = symt; }

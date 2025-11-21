@@ -187,13 +187,13 @@ struct Val : public ValU
 
     Val(const void *func) = delete; // Not implemented, catch-all
 
-    inline GCobj *asAnyObj(PrimType prim);
+    inline GCobj *asAnyObj(PrimType prim) { return prim == type ? u.obj : NULL; }
     DFunc    *asFunc();
     SymTable *asSymTab();
     DObj     *asDObj();
     DType    *asDType();
 
-    inline const GCobj *asAnyObj(PrimType prim) const;
+    inline const GCobj *asAnyObj(PrimType prim) const {  return prim == type ? u.obj : NULL; }
     const DFunc    *asFunc() const;
     const SymTable *asSymTab() const;
     const DObj     *asDObj() const;

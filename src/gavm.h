@@ -41,6 +41,7 @@ struct VmIter
 struct VM
 {
     Runtime *rt;
+    SymTable *env; // Updated whenever a function is called that has an env
 };
 
 struct Imm_None

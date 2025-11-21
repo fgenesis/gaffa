@@ -57,9 +57,9 @@ DFunc* DFunc::GCNew(GC& gc)
     return (DFunc*)gc_new(gc, sizeof(DFunc), PRIMTYPE_FUNC);
 }
 
-void DFunc::call(Runtime& rt, Val* a) const
+void DFunc::call(VM *vm, Val* a) const
 {
     // TODO: the other function types
     assert((info.flags & FuncInfo::FuncTypeMask) == FuncInfo::LFunc);
-    u.lfunc(&rt, a);
+    u.lfunc(vm, a);
 }

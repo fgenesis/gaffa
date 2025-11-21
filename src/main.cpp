@@ -202,7 +202,11 @@ int main(int argc, char **argv)
     SymTable *env = SymTable::GCNew(rt.gc);
     rtinit(*env, rt.gc, rt.sp, rt.tr);
 
-    HLFoldTracker ft = { rt, pp.syms, *env };
+    VM vm;
+    vm.rt = &rt;
+    vm.env = env;
+
+    HLFoldTracker ft = { vm, pp.syms, *env };
 
     HLNode *folded = node->fold(ft, FOLD_INITIAL);
 

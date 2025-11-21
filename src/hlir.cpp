@@ -98,7 +98,7 @@ HLNode *HLNode::fold(HLFoldTracker& ft, HLFoldStep step)
     _foldRec(ft, step);
 
     // Chop functions into separate memory blocks so that they can be specialized individually
-    HLNode *cp = clone(ft.rt.gc);
+    HLNode *cp = clone(ft.vm.rt->gc);
 
     return cp;
 }
@@ -130,7 +130,7 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             {
                 const Symstore::Sym *sym = ft.syms.getsym(u.ident.symid);
                 if(const Val *v = sym->value()) // Symbol has a known value? Become that value.
-                    return makeconst(ft.rt.gc, *v);
+                    return makeconst(ft.vm.rt->gc, *v);
             }
             break;
 
@@ -169,8 +169,8 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
                         if(!sym->isMutable())
                         {
                             sym->setValue(rhs->as<HLConstantValue>()->val);
-                            lhs->clear(ft.rt.gc); // These are removed during child compaction
-                            rhs->clear(ft.rt.gc);
+                            lhs->clear(ft.vm.rt->gc); // These are removed during child compaction
+                            rhs->clear(ft.vm.rt->gc);
                             continue;
                         }
                     }
@@ -183,7 +183,7 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             }
             if(all)
             {
-                clear(ft.rt.gc);
+                clear(ft.vm.rt->gc);
             }
         }
         break;
@@ -331,7 +331,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
         // TODO: variadic?
 
         info.nargs = n;
-        paramt = ft.rt.tr.mkstruct(&sm[0], n, 0);
+        paramt = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
     }
 
 
@@ -357,15 +357,15 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
         // TODO: variadic?
 
         info.nrets = n;
-        rett = ft.rt.tr.mkstruct(&sm[0], n, 0);
+        rett = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
     }
 
     const Type subs[] = { paramt, rett };
-    info.t = ft.rt.tr.mksub(PRIMTYPE_FUNC, &subs[0], Countof(subs));
+    info.t = ft.vm.rt->tr.mksub(PRIMTYPE_FUNC, &subs[0], Countof(subs));
 
 
 
-    DFunc *f = (DFunc*)gc_new(ft.rt.gc, sizeof(DFunc), PRIMTYPE_FUNC);
+    DFunc *f = (DFunc*)gc_new(ft.vm.rt->gc, sizeof(DFunc), PRIMTYPE_FUNC);
 
     f->info = info;
 
@@ -373,7 +373,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
     // TODO: populate func body
 
 
-    return makeconst(ft.rt.gc, Val(f));
+    return makeconst(ft.vm.rt->gc, Val(f));
 }
 
 size_t HLNode::memoryNeeded() const
@@ -618,22 +618,30 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
     HLNode *R = u.binary.b;
     const Lexer::TokenType tt = Lexer::TokenType(tok);
     const char *opname = Lexer::GetTokenText(tt);
-    Str name = ft.rt.sp.put(opname);
+    Str name = ft.vm.rt->sp.put(opname);
 
-    const Val *opr = ft.env.lookupInNamespace(L->mytype, name.id);
-    const DFunc *fopr = opr ? opr->asFunc() : NULL;
-    if(!fopr)
+    const Val *opr = ft.env.lookupInNamespace(L->mytype != PRIMTYPE_AUTO ? L->mytype : PRIMTYPE_ANY, name.id);
+    if(!opr)
     {
         std::ostringstream os;
         os << "type has no operator '" << opname << "'";
         ft.error(this, os.str().c_str());
+        return FOLD_FAILED;
+    }
+    const DFunc *fopr = opr->asFunc();
+    if(!fopr)
+    {
+        std::ostringstream os;
+        os << "type's '" << opname << "' is not a function";
+        ft.error(this, os.str().c_str());
+        return FOLD_FAILED;
     }
 
     if(L->isconst() && R->isconst() && fopr->isPure())
     {
         Val stk[] = { L->u.constant.val, R->u.constant.val };
-        fopr->call(ft.rt, stk);
-        makeconst(ft.rt.gc, stk[0]);
+        fopr->call(&ft.vm, stk);
+        makeconst(ft.vm.rt->gc, stk[0]);
         return FOLD_OK;
     }
 

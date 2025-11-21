@@ -37,6 +37,7 @@ public:
 
     inline       Val *memberArray()        { return reinterpret_cast<      Val*>(this + 1); }
     inline const Val *memberArray() const  { return reinterpret_cast<const Val*>(this + 1); }
+    inline Type dynamicType() const;
 
     Val *member(const Val& key);
     tsize memberOffset(const Val *pmember) const; // Returns offset for memberAtOffset()
@@ -62,6 +63,8 @@ public:
     tsize numfields() const { return tdesc->size(); }
 };
 
+inline Type DObj::dynamicType() const { return dtype->tid; }
+
 
 
 // C leaf function; fastest to call but has some restrictions:
@@ -74,7 +77,7 @@ public:
 //   and type system know this too.
 // - Stack space is limited; up to MINSTACK usable slots total
 // - Can't throw errors (but can return error values)
-typedef void (*LeafFunc)(Runtime *rt, Val *inout);
+typedef void (*LeafFunc)(VM *vm, Val *inout);
 
 struct StackCRef;
 struct StackRef;
@@ -146,6 +149,7 @@ struct DFunc : public GCobj
         struct
         {
             void *vmcode;
+            SymTable *env;
         } gfunc;
     } u;
     //VMFunc vmfunc;
@@ -154,6 +158,6 @@ struct DFunc : public GCobj
     DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
 
     // Slow path for compile-time eval and such
-    void call(Runtime& rt, Val *a) const;
+    void call(VM *vm, Val *a) const;
 };
 
