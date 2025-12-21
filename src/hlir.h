@@ -249,6 +249,14 @@ struct HLFunction : HLNodeBase
     HLNode *body;
 };
 
+// generated during folding when function calls are resolved
+struct HLResolvedCall : HLNodeBase
+{
+    enum { EnumType = HLNODE_FUNCTION, Children = 1, DefaultValType = PRIMTYPE_ANY };
+    HLNode *paramlist;
+    const DFunc *func;
+};
+
 struct HLExport : HLNodeBase
 {
     enum { EnumType = HLNODE_EXPORT, Children = 1 };
@@ -323,6 +331,7 @@ struct HLNode
         HLSink sink;
         HLExport exprt;
         HLFuncProto funcproto;
+        HLResolvedCall resolvedcall;
 
         HLNode *aslist[3];
     } u;
@@ -415,6 +424,11 @@ private:
     void _applyTypeFromList(HLFoldTracker& ft, HLNode *from);
     HLFoldResult propagateMyType(HLFoldTracker &ft, const HLNode *typesrc);
 
+    void _deductMyType(HLFoldTracker &ft);
+    void _propagateTypeFromChildren(HLFoldTracker &ft);
+    void _propagateTypeToChildren(HLFoldTracker &ft);
+    void _inheritType(HLFoldTracker &ft, HLNode *from);
+
     HLNode *_clone(void *mem, size_t bytes, GC& gc) const;
     byte *_cloneRec(byte *m, HLNode *target, GC& gc) const;
 };
@@ -469,7 +483,12 @@ struct HLFoldTracker
     VM &vm;
     Symstore& syms;
     SymTable &env;
+    HLIRBuilder& hlir;
+
     std::vector<std::string> errors;
+    std::string filename;
+
 
     void error(const HLNode *where, const char *msg);
+    void warn(const HLNode *where, const char *msg);
 };

@@ -98,7 +98,9 @@ typedef int (*CFunc)(VM *vm, size_t nargs, StackCRef *ret,
 
 struct FuncInfo
 {
-    Type t;
+    Type rettype; // type list of return values
+    Type paramtype; // type list of parameter values
+    Type functype; // All combined: func(argtype) -> rettype
     u32 nargs; // Minimal number. If variadic, there may be more.
     u32 nrets;
     enum Flags

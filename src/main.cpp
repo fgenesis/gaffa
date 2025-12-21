@@ -206,7 +206,7 @@ int main(int argc, char **argv)
     vm.rt = &rt;
     vm.env = env;
 
-    HLFoldTracker ft = { vm, pp.syms, *env };
+    HLFoldTracker ft = { vm, pp.syms, *env, hb };
 
     HLNode *folded = node->fold(ft, FOLD_INITIAL);
 

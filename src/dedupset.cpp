@@ -329,7 +329,8 @@ Dedup::HKey* Dedup::_kresize(tsize newsize)
 
     if(oldsize)
     {
-        memcpy(newks, keys, oldsize * sizeof(*keys));
+        if(newsize)
+            memcpy(newks, keys, oldsize * sizeof(*keys));
         gc_alloc_unmanaged_T(gc, keys, oldsize, 0);
     }
 

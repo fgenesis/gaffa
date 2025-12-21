@@ -331,14 +331,13 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
         // TODO: variadic?
 
         info.nargs = n;
-        paramt = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
+        info.paramtype = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
     }
 
 
     // TODO: autodetect return types
 
     // Fold return types
-    Type rett = {};
     if(retlist)
     {
         StructMember sm[256];
@@ -357,11 +356,11 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
         // TODO: variadic?
 
         info.nrets = n;
-        rett = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
+        info.rettype = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
     }
 
-    const Type subs[] = { paramt, rett };
-    info.t = ft.vm.rt->tr.mksub(PRIMTYPE_FUNC, &subs[0], Countof(subs));
+    const Type subs[] = { info.paramtype, info.rettype };
+    info.functype = ft.vm.rt->tr.mksub(PRIMTYPE_FUNC, &subs[0], Countof(subs));
 
 
 
@@ -535,7 +534,7 @@ void HLNode::_applyTypeFrom(HLFoldTracker& ft, HLNode* from)
 
 void HLNode::_applyTypeFromList(HLFoldTracker& ft, HLNode* from)
 {
-    assert(_nch == HLList::Children);
+    assert(from->_nch == HLList::Children);
     if(from->isknowntype())
     {
         propagateMyType(ft, from);
@@ -610,6 +609,62 @@ HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
     return FOLD_OK;
 }
 
+void HLNode::_deductMyType(HLFoldTracker &ft)
+{
+    switch((HLNodeType)type)
+    {
+        // TODO: big switch over all the things
+    }
+}
+
+void HLNode::_propagateTypeFromChildren(HLFoldTracker &ft)
+{
+    // Do children first -- this goes into the leaves...
+    HLNode **children = this->children();
+    size_t nch = this->numchildren();
+    for(size_t i = 0; i < nch; ++i)
+        children[i]->_propagateTypeFromChildren(ft);
+
+    // ... then work back up to the root (upon return)
+    _deductMyType(ft);
+}
+
+void HLNode::_propagateTypeToChildren(HLFoldTracker &ft)
+{
+    assert(mytype != PRIMTYPE_AUTO);
+    HLNode **children = this->children();
+    size_t nch = this->numchildren();
+    for(size_t i = 0; i < nch; ++i)
+        children[i]->_inheritType(ft, this);
+}
+
+void HLNode::_inheritType(HLFoldTracker &ft, HLNode* from)
+{
+    if(this->isknowntype())
+    {
+        // FIXME: This needs to be a proper subtype check
+        if(from->mytype == mytype)
+        {
+            // All good
+        }
+        else
+        {
+            std::ostringstream os;
+            // TODO: get source location if possible, and show it
+            const char *toktxt = Lexer::GetTokenText(Lexer::TokenType(this->tok));
+            os << "(" << line << ":" << column << ") '" << toktxt << "': mismatched types, found " << mytype << ", expected " << from->mytype;
+            ft.errors.push_back(os.str());
+            puts(os.str().c_str());
+        }
+    }
+    else
+    {
+        setknowntype(from->mytype);
+        _propagateTypeToChildren(ft);
+    }
+
+}
+
 HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
 {
     assert(type == HLNODE_BINARY);
@@ -620,7 +675,18 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
     const char *opname = Lexer::GetTokenText(tt);
     Str name = ft.vm.rt->sp.put(opname);
 
-    const Val *opr = ft.env.lookupInNamespace(L->mytype != PRIMTYPE_AUTO ? L->mytype : PRIMTYPE_ANY, name.id);
+    GC &gc = ft.vm.rt->gc;
+
+    Type ns = L->mytype;
+    if(ns == PRIMTYPE_AUTO)
+    {
+        ns = PRIMTYPE_ANY;
+        std::ostringstream os;
+        os << "unknown argument type for operator '" << opname << "', assuming 'any'";
+        ft.warn(this, os.str().c_str());
+    }
+
+    const Val *opr = ft.env.lookupInNamespace(ns, name.id);
     if(!opr)
     {
         std::ostringstream os;
@@ -641,70 +707,28 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
     {
         Val stk[] = { L->u.constant.val, R->u.constant.val };
         fopr->call(&ft.vm, stk);
-        makeconst(ft.vm.rt->gc, stk[0]);
+        makeconst(gc, stk[0]);
         return FOLD_OK;
     }
 
-    //if(typesrc->isknowntype())
-    //    setknowntype(typesrc->mytype);
+    HLNode *params = ft.hlir.list(); // TOOD: prealloc, known to be 2 elems
+    params->u.list.add(L, gc);
+    params->u.list.add(R, gc);
 
-#if 0
-    if(L->isconst() && R->isconst())
-    {
-        // TODO: This is all temporary until pure functions are supported,
-        // and the primitive types (with operator definitions) exist in the runtime.
-        // once that is done, forward to the existing operator functions (which should all be pure)
-        bool ok = false;
-        Val r;
-        Val a = L->u.constant.val;
-        Val b = R->u.constant.val;
-
-        switch(a.type.id)
-        {
-            case PRIMTYPE_SINT:
-                foldBinaryT<sint>(r, tt, a.u.si, a.u.si);
-                break;
-
-            case PRIMTYPE_UINT:
-                foldBinaryT<uint>(r, tt, a.u.ui, a.u.ui);
-                break;
-
-            case PRIMTYPE_FLOAT:
-                foldBinaryT<real>(r, tt, a.u.f, a.u.f);
-                break;
-
-            case PRIMTYPE_STRING:
-                // TODO: string concats -- and for optimization purposes, turn them into a (flat) concat list
-                break;
-
-            default:
-        }
-    }
-    else if(R->isconst() && commutative(tt))
-    {
-        HLNode *tmp = L;
-        L = R;
-        R = tmp;
-        goto Lconst;
-    }
-    else if(L->isconst())
-    {
-        Lconst:
-        // TODO: Specialized rules for 0+x, 0*x, 1*x and such ops that can be simplified
-    }
-#endif
-
-    // When we're here, this node wasn't folded and remains a binop. Propagate types.
-
-    /*if(isknowntype())
-    {
-        propagateMyType(ft, typesrc);
-    }*/
+    HLNode *me = morph<HLResolvedCall>(gc);
+    me->u.resolvedcall.paramlist = params;
+    me->u.resolvedcall.func = fopr;
+    me->setknowntype(fopr->info.rettype);
 
     return FOLD_OK;
 }
 
 void HLFoldTracker::error(const HLNode* where, const char *msg)
 {
-    printf("fold:%u: %s\n", where->line, msg);
+    printf("(%s:%u): %s\n", filename.c_str(), where->line, msg);
+}
+
+void HLFoldTracker::warn(const HLNode* where, const char *msg)
+{
+    printf("(%s:%u): Warning: %s\n", filename.c_str(), where->line, msg);
 }

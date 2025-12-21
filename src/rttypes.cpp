@@ -88,7 +88,19 @@ struct RTReg
         Type tf = tr.mkfunc(tp, tret);
         sref sname = str(name);
 
-        DFunc *df = mkfunc(lfunc, tf, nparams, nrets, extraflags);
+        DFunc *df = DFunc::GCNew(gc);
+        df->info.paramtype = tp;
+        df->info.rettype = tret;
+        df->info.functype = tf;
+        df->info.nargs = nparams;
+        df->info.nrets = nrets;
+        df->info.flags = FuncInfo::LFunc | extraflags;
+        df->info.nlocals = 0;
+        df->info.nupvals = 0;
+        df->u.lfunc = lfunc;
+        df->dbg = NULL;
+        df->dtype = types.func;
+
         if(ns)
             syms.addToNamespace(gc, ns->tid, sname, Val(df));
         else
@@ -102,21 +114,6 @@ struct RTReg
     inline DFunc *regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type (&params)[NP], const Type (&rets)[NR], FuncInfo::Flags extraflags = FuncInfo::None)
     {
         return regfunc(ns, name, lfunc, params, NP, rets, NR, extraflags);
-    }
-
-    DFunc *mkfunc(LeafFunc lfunc, Type ty, size_t nargs, size_t nrets, FuncInfo::Flags extraflags)
-    {
-        DFunc *f = DFunc::GCNew(gc);
-        f->info.t = ty;
-        f->info.nargs = nargs;
-        f->info.nrets = nrets;
-        f->info.flags = FuncInfo::LFunc | extraflags;
-        f->info.nlocals = 0;
-        f->info.nupvals = 0;
-        f->u.lfunc = lfunc;
-        f->dbg = NULL;
-        f->dtype = types.func;
-        return f;
     }
 };
 
