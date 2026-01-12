@@ -68,7 +68,25 @@
   #endif
 #endif
 
+#ifndef UNLIKELY
+#  if __has_builtin(__builtin_expect)
+#    define UNLIKELY(expr) __builtin_expect(!!(expr), 0)
+#  else
+#    define UNLIKELY(expr) (!!(expr))
+#  endif
+#endif
+
+#ifndef LIKELY
+#  if __has_builtin(__builtin_expect)
+#    define LIKELY(expr) __builtin_expect(!!(expr), 1)
+#  else
+#    define LIKELY(expr) (!!(expr))
+#  endif
+#endif
+
 #define STATIC_ASSERT(cond) switch((int)!!(cond)){case 0:;case(!!(cond)):;}
+
+
 
 
 namespace detail
@@ -151,3 +169,15 @@ static inline T alignTo(T val, T aln)
 {
     return ((val + (aln - 1)) / aln) * aln;
 }
+
+template <typename T, T v>
+struct IntegralConstant
+{
+    typedef T value_type;
+    typedef IntegralConstant<T,v> type;
+    enum { value = v };
+};
+
+typedef IntegralConstant<bool, true>  CompileTrue;
+typedef IntegralConstant<bool, false> CompileFalse;
+template<bool V> struct CompileCheck : IntegralConstant<bool, V>{};

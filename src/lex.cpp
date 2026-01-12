@@ -270,6 +270,21 @@ bool Lexer::IsKeyword(TokenType tt)
     return false;
 }
 
+// To be able to distinguish infix operators (a+b) from prefix ops (+a),
+// when the operator is used as a function name, append a _.
+// (There is no overloading so names must be different)
+Lexer::OpName Lexer::GetOperatorName(TokenType tt, bool prefix)
+{
+    OpName ret = {0};
+    char *dst = ret.name;
+    const char *text = GetTokenText(tt);
+    for(size_t i = 0; text[i]; ++i)
+        *dst++ = text[i];
+    if(prefix)
+        *dst++ = '_';
+    return ret;
+}
+
 Lexer::Token Lexer::tok(TokenType tt, const char *where, const char *end)
 {
     assert(where <= end);

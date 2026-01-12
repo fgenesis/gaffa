@@ -3,62 +3,11 @@
 #include "gavm.h"
 #include "util.h"
 #include "gaobj.h"
+#include "gc.h"
+#include "runtime.h"
 
-#include <vector>
-
-
-struct Inst;
 struct DFunc;
-struct Runtime;
 
-struct VMCallFrame
-{
-    Val *sp;
-    Val *sbase;
-    const Inst *ins;
-    const DFunc *func;
-};
-
-class Stack : public PodArray<Val>
-{
-public:
-    GC& gc;
-
-    inline Val *root() { return this->data(); }
-
-    Stack(GC& gc) : gc(gc) {}
-    ~Stack() { this->dealloc(gc); }
-
-    inline Val *push(Val v)
-    {
-        return this->push_back(gc, v);
-    }
-
-    inline Val *alloc(size_t n)
-    {
-        return this->alloc_n(gc, n);
-    }
-
-    inline Val *allocz(size_t n)
-    {
-        Val *a = alloc(n);
-        if(a)
-            memset(a, 0, sizeof(Val) * n);
-        return a;
-    }
-};
-
-struct VMP : VM
-{
-    VMP(GC& gc) : stk(gc), cur({}) {}
-    Stack stk;
-    VMCallFrame cur;
-    int err;
-    std::vector<VMCallFrame> callstack;
-    std::vector<VmIter> iterstack;
-
-    const DFunc *currentFunc() { return callstack.back().func; }
-};
 
 // This is exposed to the C API.
 // The idea is that this removes the need for manual
@@ -66,59 +15,59 @@ struct VMP : VM
 // easily accessible via stackref[0..n)
 struct StackCRef
 {
-    Stack * const stk;
+    VM * const vm;
     const size_t offs;
 
-    FORCEINLINE StackCRef(Stack *stk, Val *where)
-        : stk(stk), offs(where - stk->data())
+    FORCEINLINE StackCRef(VM *vm, Val *where)
+        : vm(vm), offs(where - vm->stack_base())
     {
     }
 
     FORCEINLINE Val *ptr()
     {
-        return &(*stk)[offs];
+        return &vm->stk[offs];
     }
 
     FORCEINLINE const Val *ptr() const
     {
-        return &(*stk)[offs];
+        return &vm->stk[offs];
     }
 
     FORCEINLINE Val& operator[](size_t idx)
     {
-        return (*stk)[offs + idx];
+        return vm->stk[offs + idx];
     }
 
     FORCEINLINE const Val& operator[](size_t idx) const
     {
-        return (*stk)[offs + idx];
+        return vm->stk[offs + idx];
     }
 };
 
 struct StackRef : public StackCRef
 {
-    FORCEINLINE StackRef(Stack *stk, Val *where) : StackCRef(stk, where)
+    FORCEINLINE StackRef(VM *vm, Val *where) : StackCRef(vm, where)
     {
     }
 
     FORCEINLINE Val *push(Val v)
     {
-        return stk->push(v);
+        return vm->stack_push(v);
     }
 
     FORCEINLINE Val *alloc(size_t n)
     {
-        return stk->alloc(n);
+        return vm->stack_alloc(n);
     }
 
     FORCEINLINE Val pop()
     {
-        return stk->pop_back();
+        return vm->stk.pop_back();
     }
 
     FORCEINLINE void popn(size_t n)
     {
-        return stk->pop_n(n);
+        return vm->stk.pop_n(n);
     }
 };
 
@@ -129,6 +78,7 @@ struct StackRef : public StackCRef
 struct Imm_LeafCall
 {
     LeafFunc f;
+    u32 spmod;
 };
 
 struct Imm_CCall
@@ -139,26 +89,27 @@ struct Imm_CCall
     byte flags;
 };
 
-
-
-static FORCEINLINE VMFUNC_DEF(curop)
+struct Imm_GCall
 {
-    TAIL_RETURN(ins->f(VMARGS));
-}
+    Inst *entry;
+    u32 nrets;   // return slots
+    u32 nlocals; // prealloc this much stack for args + locals
+};
 
 
 // Call stack rollback helper. Set ins, then CHAIN(rer) to return all the way and resume at ins.
-static VMFUNC_DEF(rer)
+VMFUNC_DEF(rer)
 {
     // sbase is only changed by function call/return
     vm->cur.sp = sp;
     return ins;
 }
 
-VMFUNC(error)
+// Error handler helper. Set vm->err, then CHAIN(onerror) to handle error
+VMFUNC(onerror)
 {
+    assert(vm->err);
     // TODO: use ins to figure out where exactly we are
-    vm->err = 1;
     return NULL;
 }
 
@@ -236,7 +187,7 @@ sp[] is the current stack top (moved as the function allocates stack)
 
 Given a function f():
 
-locals[] = sbase + f.numargs + f.
+locals[] = sbase + f.numargs + f.numrets
 
 R return values are assigned to sbase[0...R) before returning.
 
@@ -250,13 +201,15 @@ So we end up with this generic layout:
     x, y, z = f(a, b)
 
     [x, y, z| a, b| ...locals...]
+    ^sbase    ^sp
 
 2) A function with #args known, and variadic returns:
 
     x, y, z, ... = f(a, b)
 
     [x, y, z| a, b| ...local...|..vreturns...]
-            >~~~~~~~cut~~~~~~~~< (This is a known constant)
+            >~~~~~~~cut~~~~~~~~< (This is a known constant RETV)
+    ^sbase    ^sp
     After shifting by RETV:
 
     [x, y, z, ...vreturns...]
@@ -280,27 +233,49 @@ Observations:
 - Args is always a contiguous array
 - Return values must be shifted if variadic
 - After shifting, return values are contiguous
--
-
+- assign return values to sbase[0..]
+- args start at sp[0..]
 */
+
 
 // Call a nonvariadic C leaf function -- no stack fixup necessary
 // Assumes params are already on top of the stack and the stack is large enough
 VMFUNC_IMM(leafcall, Imm_LeafCall)
 {
-    imm->f(vm, sp); // this writes to return slots
+    RTError err = imm->f(vm, sp + imm->spmod); // this writes to return slots
+    if(LIKELY(!err))
+        NEXT();
+    FAIL(err);
+}
+
+// Specialization without error check for functions that are known to never cause an error
+VMFUNC_IMM(leafcall_noerr, Imm_LeafCall)
+{
+    RTError err = imm->f(vm, sp + imm->spmod); // this writes to return slots
+    assert(!err && "Function was marked to never cause an error, but it did");
     NEXT();
+}
+
+// The imm param here is just for type inference and to get the correct number of slots
+template<typename Imm>
+static FORCEINLINE void pushret(VMPARAMS, const Imm *imm)
+{
+    VMCallFrame f;
+    f.ins = ins + immslots(imm);
+    f.sp = sp;
+    f.sbase = sbase;
+    vm->callstack.push_back(f);
 }
 
 static const Inst *fullCcall(VMPARAMS, CFunc f, size_t nargs, size_t nret, u32 flags, size_t skipslots)
 {
     const tsize totalstack = MINSTACK + nargs + nret;
     const size_t stackBaseOffs = sp - sbase;
-    sp = vm->stk.alloc(totalstack);
+    sp = vm->stack_alloc(totalstack);
     // TODO: when we realloc, fixup all stack frames in the VM??
-    StackCRef rets(&vm->stk, sp);
-    StackCRef args(&vm->stk, sp + nret); // args follow after return slots
-    StackRef stk(&vm->stk, sp + nargs + nret);
+    StackCRef rets(vm, sp);
+    StackCRef args(vm, sp + nret); // args follow after return slots
+    StackRef stk(vm, sp + nargs + nret);
     int r = f(vm, nargs, &rets, &args, &stk); // this writes to return slots and may invalidate sp, sbase
     if(r < 0)
     {
@@ -314,7 +289,7 @@ static const Inst *fullCcall(VMPARAMS, CFunc f, size_t nargs, size_t nret, u32 f
     sbase = rets.ptr();
     sp = sbase + nret;
 
-    const Val *pend = stk.stk->pend();
+    const Val *pend = vm->stk.pend();
     if(flags & FuncInfo::VarRets)
     {
         // Move extra return values after the regular return slots
@@ -341,34 +316,80 @@ VMFUNC_IMM(ccall, Imm_CCall)
     return fullCcall(VMARGS, imm->f, imm->nargs, imm->nret, imm->flags, immslots(imm));
 }
 
-// The imm param here is just for type inference and to get the correst number of slots
-template<typename Imm>
-static FORCEINLINE void pushret(VMPARAMS, const Imm *imm, const DFunc *func)
+VMFUNC_IMM(gcall, Imm_GCall)
 {
-    VMCallFrame f;
-    f.ins = ins + immslots(imm);
-    f.sp = sp;
-    f.sbase = sbase;
-    f.func = func;
-    vm->callstack.push_back(f);
+    pushret(VMARGS, imm);
+    sbase = sp + imm->nrets;
+    sp = sbase + imm->nlocals;
+    ins = imm->entry;
+    CHAIN(curop); // Can't CHAIN(rer) here since that doesn't save sbase
 }
 
-VMFUNC_IMM(dcall, Imm_u32)
+VMFUNC_IMM(anycall, Imm_2xu32)
 {
-    const Val *a = LOCAL(imm->a);
-    GCobj *obj = a->u.obj;
-    assert(false);
-    DFunc *d = static_cast<DFunc*>(obj); // FIXME: check that this is actually callable (and castable to DFunc)
-
-    if(d->info.flags & FuncInfo::CFunc)
+    Val *f = LOCAL(imm->a);
+    const u32 nargs = imm->b;
+    DFunc *df = f->asFunc();
+    if(LIKELY(df))
     {
-        return fullCcall(VMARGS, d->u.cfunc, d->info.nargs, d->info.nrets, d->info.flags, immslots(imm));
+        switch(df->info.flags & FuncInfo::FuncTypeMask)
+        {
+            case FuncInfo::LFunc:
+            {
+                RTError err = df->u.lfunc(vm, sp);
+                if(UNLIKELY(err))
+                    FAIL(err);
+                NEXT();
+            }
+
+            case FuncInfo::GFunc:
+                pushret(VMARGS, imm);
+                sbase = sp + df->info.nrets;
+                sp = sbase + df->info.nlocals;
+                ins = df->u.gfunc.chunk->begin();
+                CHAIN(rer);
+
+            case FuncInfo::CFunc:
+                return fullCcall(VMARGS, df->u.cfunc, df->info.nargs, df->info.nrets, df->info.flags, immslots(imm));
+        }
     }
 
-    pushret(VMARGS, imm, d);
+    // TODO: if it's an object with overloaded call op, call that
 
-    ins = (Inst*)d->u.gfunc.vmcode;
-    CHAIN(rer);
+    FAIL(RTE_NOT_CALLABLE);
+}
+
+
+size_t emitMovesToSlots(void *dst, const u32 *argslots)
+{
+    
+}
+
+
+// argslots[]: indices of locals where the parameters for this function are stored
+size_t emitCall(void *dst, const DFunc *df, const u32 *argslots)
+{
+    if(df->opdef) // Best case: Function can be implemented with a VM op
+        return df->opdef->gen(dst, argslots);
+
+    // TODO: emit move args into param slots
+
+    switch(df->info.flags & FuncInfo::FuncTypeMask)
+    {
+        case FuncInfo::LFunc:
+        {
+            Imm_LeafCall imm { df->u.lfunc, spmod };
+            // Use slightly more efficient forwarder in case the function is known to not throw errors
+            VMFunc op = (df->info.flags & FuncInfo::NoError) ? op_leafcall_noerr : op_leafcall;
+            return writeInst(dst, op, imm);
+        }
+        
+        case FuncInfo::CFunc:
+        case FuncInfo::GFunc:
+    
+        default: unreachable();
+    }
+
 }
 
 
@@ -475,7 +496,7 @@ VMFUNC_IMM(loadkui32, Imm_2xu32)
     NEXT();
 }
 
-static VmIter *newiter(VMP *vm)
+static VmIter *newiter(VM *vm)
 {
     vm->iterstack.emplace_back();
     return &vm->iterstack.back();
@@ -533,7 +554,7 @@ static uint iter_init_f(ValU& v, VmIter& it)
 }
 
 // This is for when we know all values have the correct type
-static VmIter *setupiter(VMP *vm, const Val *sp, const Imm_3xu32 *imm)
+static VmIter *setupiter(VM *vm, const Val *sp, const Imm_3xu32 *imm)
 {
     VmIter *it = newiter(vm);
     it->u.numeric.start = sp[imm->a];
@@ -703,7 +724,7 @@ struct Testcode
     Inst halt;
 };
 
-static void runloop(VMP *vm)
+static void runloop(VM *vm)
 {
     if(const Inst *ins = vm->cur.ins)
     {
@@ -727,6 +748,7 @@ static void runloop(VMP *vm)
 }
 
 
+#if 0
 Testcode tc;
 
 void vmtest(GC& gc)
@@ -756,7 +778,7 @@ void vmtest(GC& gc)
     //tc.iterpopp = { 1 };
     tc.halt = { op_halt };
 
-    VMP vm(gc);
+    VM vm(gc);
     vm.stk.alloc(16);
     vm.err = 0;
     vm.stk[10] = Val(uint(500) * uint(1000000) + 1);
@@ -770,3 +792,36 @@ void vmtest(GC& gc)
     printf("r0 = %zu\n", vm.stk[0].u.ui);
 
 };
+
+#endif
+
+
+VM* VM::GCNew(Runtime* rt, SymTable* env)
+{
+    VM *vm = (VM*)gc_new(rt->gc, sizeof(VM), PRIMTYPE_OPAQUE);
+    if(!vm)
+        return NULL;
+    vm->rt = rt;
+    vm->env = env;
+    vm->err = 0;
+    vm->cur = {};
+    return vm;
+}
+
+inline Val *VM::stack_push(Val v)
+{
+    return stk.push_back(rt->gc, v);
+}
+
+inline Val *VM::stack_alloc(size_t n)
+{
+    return stk.alloc_n(rt->gc, n);
+}
+
+inline Val *VM::stack_allocz(size_t n)
+{
+    Val *a = stack_alloc(n);
+    if(a)
+        memset(a, 0, sizeof(Val) * n);
+    return a;
+}

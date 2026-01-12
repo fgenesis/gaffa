@@ -623,21 +623,33 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 // int.@"+"
 HLNode * Parser::_methodname()
 {
+    bool adv = true;
     if(curtok.tt != Lexer::TOK_IDENT)
         for(size_t i = 0; i < Countof(Rules); ++i)
             if(curtok.tt == Rules[i].tok)
             {
                 if(Rules[i].opflags & OPF_OVL) // Can overload operator? accept that as a "function name" token too...
                 {
-
+                    adv = false;
                     curtok.tt = Lexer::TOK_IDENT; // ... but make it a regular identifier
+                    advance();
+                    if(curtok.tt == Lexer::TOK_SINK) // "func T.+_" ?
+                    {
+                        // Special case notation for prefix/unary operators
+                        adv = true;
+                        // Extend previous token to cover also the "_"
+                        unsigned oldlen = prevtok.u.len;
+                        prevtok.u.len = curtok.begin - prevtok.begin + curtok.u.len;
+                        if(prevtok.u.len != oldlen + 1) // Code is immutable so we can't collapse the space here
+                            error("Malformed prefix operator: _ must follow without space");
+                    }
                     break;
                 }
                 else
                     error("Attempt to overload an operator that is not overloadable");
             }
-
-    advance();
+    if(adv)
+        advance();
     return _ident(prevtok, "function or method name or operator", IDENT_USAGE_DECL, SYMREF_VISIBLE);
 }
 

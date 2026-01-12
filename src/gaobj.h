@@ -21,7 +21,7 @@ struct HLNode;
 class DType;
 struct VM;
 struct HLNode;
-
+struct OpDef;
 
 // Base for any object instance.
 // Beware, variable sized! Do NOT derive from this class!
@@ -76,8 +76,8 @@ inline Type DObj::dynamicType() const { return dtype->tid; }
 //   and the function must be registered correctly so the VM
 //   and type system know this too.
 // - Stack space is limited; up to MINSTACK usable slots total
-// - Can't throw errors (but can return error values)
-typedef void (*LeafFunc)(VM *vm, Val *inout);
+// - To throw a runtime error, return any of RTError != 0
+typedef RTError (*LeafFunc)(VM *vm, Val *inout);
 
 struct StackCRef;
 struct StackRef;
@@ -91,7 +91,7 @@ struct StackRef;
 // - If normal return: Write return values to ret[0..n), then return n
 // - If variadic return: Write regular return values to ret[0..n),
 //   push extra variadic ones onto the stack, then return (n + #variadic)
-// - To throw an error, write error to ret[0], then return -1
+// - To throw a runtime error, return a RTError value < 0
 typedef int (*CFunc)(VM *vm, size_t nargs, StackCRef *ret,
     const StackCRef *args, StackRef *stack);
 
@@ -108,17 +108,18 @@ struct FuncInfo
         None = 0,
 
         FuncTypeMask = 3 << 0, // lowest 2 bits:
-        LFunc = 0, // light/leaf C function
+        LFunc = 0, // light/leaf C function (much more efficient to call)
         CFunc = 1, // regular/variadic C function
-        Gfunc = 2, // bytecode function
+        GFunc = 2, // bytecode function
         Proto = 3, // HLNode, not yet folded
 
         VarArgs = 1 << 2, // set if variadic
         VarRets = 1 << 3,
         Pure    = 1 << 4, // Can run at compile time
+        NoError = 1 << 5, // Will not set vm->err (sligthly more efficient to call)
     };
     u32 flags;
-    u32 nlocals; // # of local slots that are needed to run the function
+    u32 nlocals; // # of local slots that are needed to run the function. Always >= nargs.
     u32 nupvals;
 };
 inline FuncInfo::Flags operator|(FuncInfo::Flags a, FuncInfo::Flags b) { return FuncInfo::Flags((unsigned)a | (unsigned)b); }
@@ -129,6 +130,19 @@ struct DebugInfo
     u32 lineend;
     sref name;
      // TODO
+};
+
+// Owned by DFunc
+struct InstChunk
+{
+    u32 allocsize;
+    u32 ninst;
+    SymTable *env;
+    Inst *begin() { return (Inst*)(this + 1); }
+
+    // Inst[] follows
+
+    // Optional: Debug info follows
 };
 
 struct DFunc : public GCobj
@@ -150,12 +164,11 @@ struct DFunc : public GCobj
         } proto;
         struct
         {
-            void *vmcode;
-            SymTable *env;
+            InstChunk *chunk;
         } gfunc;
     } u;
-    //VMFunc vmfunc;
-    // TODO: forward to VMFunc descriptor with codegen helper
+
+    const OpDef *opdef; // Infos for codegen, if this function can be implemented as VM opcode directly
 
     DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
 

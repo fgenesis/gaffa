@@ -107,6 +107,14 @@ public:
     static const char *GetTokenText(TokenType tt);
     static bool IsKeyword(TokenType tt);
 
+    union OpName
+    {
+        char name[4];
+        u32 _pad;
+    };
+
+    static OpName GetOperatorName(TokenType tt, bool prefix);
+
 private:
     const char *skipws();
     Token tok(TokenType tt, const char *where, const char *end);

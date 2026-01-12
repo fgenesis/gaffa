@@ -11,6 +11,7 @@ typedef size_t usize;
 typedef int64_t sint;
 typedef uint64_t uint;
 typedef float real;
+typedef double widereal;
 typedef uint32_t realui;
 
 typedef uint32_t u32;
