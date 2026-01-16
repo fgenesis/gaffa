@@ -47,24 +47,32 @@ struct VMCallFrame
     const Inst *ins;
 };
 
+struct VmStackAlloc
+{
+    Val *p;
+    ptrdiff_t diff;
+};
+
+
 struct VM
 {
     VM *GCNew(Runtime *rt, SymTable *env);
-    
+
     Runtime *rt;
     SymTable *env; // Updated whenever a function is called that has an env
     int err;
-    PodArray<Val> stk;
     VMCallFrame cur;
+    Val *_stkbase, *_stkend;
     std::vector<VMCallFrame> callstack;
     std::vector<VmIter> iterstack;
 
     const DFunc *currentFunc();
 
-    Val *stack_push(Val v);
-    Val *stack_alloc(size_t n);
-    Val *stack_allocz(size_t n);
-    inline Val *stack_base() { return stk.data(); }
+    // Add the returned .diff to all pointers to stack memory to move the pointer in case the stack reallocated.
+    // If .p is valid, p[0..slots) is valid to access.
+    VmStackAlloc stack_ensure(Val *sp, size_t slots);
+
+
 };
 
 struct Imm_None
@@ -156,6 +164,7 @@ static FORCEINLINE VMFUNC_DEF(curop)
 }
 
 VMFUNC_DEF(rer);
+VMFUNC_DEF(onerror);
 
 
 
@@ -202,6 +211,7 @@ enum RTError
     RTE_DIV_BY_ZERO = -2,
     RTE_VALUE_CAST = -3,
     RTE_NOT_CALLABLE = -4,
+    RTE_ALLOC_FAIL = -5,
 };
 
 

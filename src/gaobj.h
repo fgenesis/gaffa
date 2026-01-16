@@ -79,21 +79,20 @@ inline Type DObj::dynamicType() const { return dtype->tid; }
 // - To throw a runtime error, return any of RTError != 0
 typedef RTError (*LeafFunc)(VM *vm, Val *inout);
 
-struct StackCRef;
-struct StackRef;
+
 
 // Full-fledged C function; slower to call
 // - May or may not be variadic (params, return values, or both)
 // - Calling back into the VM is allowed
 // - Can grow the stack
 // ---- C function call protocol: ----
-// - Parameters are in args[0..nargs)
-// - If normal return: Write return values to ret[0..n), then return n
-// - If variadic return: Write regular return values to ret[0..n),
-//   push extra variadic ones onto the stack, then return (n + #variadic)
+// - Parameters are in inout[0..nargs)
+// - Write return values to inout[0..N), then return N (there will be enough space pre-allocated)
+// - If variadic returning N values: in the function, do this:
+//     inout = vm->stack_ensure(inout, N);
+//   Then proceed as above.
 // - To throw a runtime error, return a RTError value < 0
-typedef int (*CFunc)(VM *vm, size_t nargs, StackCRef *ret,
-    const StackCRef *args, StackRef *stack);
+typedef int (*CFunc)(VM *vm, size_t nargs, Val *inout);
 
 
 struct FuncInfo

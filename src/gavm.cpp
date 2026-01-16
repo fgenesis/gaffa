@@ -8,70 +8,6 @@
 
 struct DFunc;
 
-
-// This is exposed to the C API.
-// The idea is that this removes the need for manual
-// index tracking, making each designated stack loction
-// easily accessible via stackref[0..n)
-struct StackCRef
-{
-    VM * const vm;
-    const size_t offs;
-
-    FORCEINLINE StackCRef(VM *vm, Val *where)
-        : vm(vm), offs(where - vm->stack_base())
-    {
-    }
-
-    FORCEINLINE Val *ptr()
-    {
-        return &vm->stk[offs];
-    }
-
-    FORCEINLINE const Val *ptr() const
-    {
-        return &vm->stk[offs];
-    }
-
-    FORCEINLINE Val& operator[](size_t idx)
-    {
-        return vm->stk[offs + idx];
-    }
-
-    FORCEINLINE const Val& operator[](size_t idx) const
-    {
-        return vm->stk[offs + idx];
-    }
-};
-
-struct StackRef : public StackCRef
-{
-    FORCEINLINE StackRef(VM *vm, Val *where) : StackCRef(vm, where)
-    {
-    }
-
-    FORCEINLINE Val *push(Val v)
-    {
-        return vm->stack_push(v);
-    }
-
-    FORCEINLINE Val *alloc(size_t n)
-    {
-        return vm->stack_alloc(n);
-    }
-
-    FORCEINLINE Val pop()
-    {
-        return vm->stk.pop_back();
-    }
-
-    FORCEINLINE void popn(size_t n)
-    {
-        return vm->stk.pop_n(n);
-    }
-};
-
-
 #define RETVAL(idx) (*(vals+(retidx)))
 
 
@@ -256,59 +192,55 @@ VMFUNC_IMM(leafcall_noerr, Imm_LeafCall)
     NEXT();
 }
 
-// The imm param here is just for type inference and to get the correct number of slots
-template<typename Imm>
-static FORCEINLINE void pushret(VMPARAMS, const Imm *imm)
+static FORCEINLINE void pushret(VMPARAMS, size_t skipslots)
 {
     VMCallFrame f;
-    f.ins = ins + immslots(imm);
+    f.ins = ins + skipslots;
     f.sp = sp;
     f.sbase = sbase;
     vm->callstack.push_back(f);
 }
 
+// The imm param here is just for type inference and to get the correct number of slots
+template<typename Imm>
+static FORCEINLINE void pushret(VMPARAMS, const Imm *imm)
+{
+    pushret(VMARGS, immslots(imm));
+}
+
+static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
+{
+    VMCallFrame f = vm->callstack.back();
+    vm->callstack.pop_back();
+    sp = f.sp + nret; // The function left some things on the stack
+    ins = f.ins;
+    sbase = f.sbase;
+    CHAIN(curop); // A return directly continues with the loaded ins
+}
+
 static const Inst *fullCcall(VMPARAMS, CFunc f, size_t nargs, size_t nret, u32 flags, size_t skipslots)
 {
-    const tsize totalstack = MINSTACK + nargs + nret;
-    const size_t stackBaseOffs = sp - sbase;
-    sp = vm->stack_alloc(totalstack);
-    // TODO: when we realloc, fixup all stack frames in the VM??
-    StackCRef rets(vm, sp);
-    StackCRef args(vm, sp + nret); // args follow after return slots
-    StackRef stk(vm, sp + nargs + nret);
-    int r = f(vm, nargs, &rets, &args, &stk); // this writes to return slots and may invalidate sp, sbase
+    const tsize totalstack = MINSTACK + std::max(nargs, nret);
+    const VmStackAlloc sa = vm->stack_ensure(sp, totalstack);
+    if(UNLIKELY(!sa.p))
+        CHAIN(onerror); // stack_ensure() sets vm->err, just get out
+
+    sp += sa.diff;
+    sbase += sa.diff;
+
+    // The C call below may reallocate the stack.
+    // Push the current frame so that it gets updated in case the stack is moved.
+    pushret(VMARGS, skipslots);
+
+    Val *inout = sp - nargs;
+
+    int r = f(vm, nargs, sbase); // this writes to return slots and may invalidate sp, sbase
     if(r < 0)
-    {
-        assert(false); // TODO: throw error
-        return NULL;
-    }
+        FAIL(r);
 
-    assert(r == nret
-        || ((flags & FuncInfo::VarRets) && r >= nret));
+    assert(r == nret || ((flags & FuncInfo::VarRets) && r >= nret));
 
-    sbase = rets.ptr();
-    sp = sbase + nret;
-
-    const Val *pend = vm->stk.pend();
-    if(flags & FuncInfo::VarRets)
-    {
-        // Move extra return values after the regular return slots
-
-        if(const size_t nv = size_t(r) - nret)
-        {
-            size_t availAtEnd = pend - sp;
-            assert(nv < availAtEnd);
-            const Val *lastfew = pend - availAtEnd;
-            memmove(sp, lastfew, nv);
-            sp += nv;
-        }
-    }
-
-    const size_t topop = pend - sp;
-    stk.popn(topop);
-
-    ins += skipslots + 1;
-    CHAIN(rer);
+    return doreturn(VMARGS, r);
 }
 
 VMFUNC_IMM(ccall, Imm_CCall)
@@ -347,7 +279,7 @@ VMFUNC_IMM(anycall, Imm_2xu32)
                 sbase = sp + df->info.nrets;
                 sp = sbase + df->info.nlocals;
                 ins = df->u.gfunc.chunk->begin();
-                CHAIN(rer);
+                CHAIN(curop);
 
             case FuncInfo::CFunc:
                 return fullCcall(VMARGS, df->u.cfunc, df->info.nargs, df->info.nrets, df->info.flags, immslots(imm));
@@ -362,7 +294,7 @@ VMFUNC_IMM(anycall, Imm_2xu32)
 
 size_t emitMovesToSlots(void *dst, const u32 *argslots)
 {
-    
+    return 0;
 }
 
 
@@ -378,30 +310,19 @@ size_t emitCall(void *dst, const DFunc *df, const u32 *argslots)
     {
         case FuncInfo::LFunc:
         {
+            u32 spmod = 0; // FIXME: ??
             Imm_LeafCall imm { df->u.lfunc, spmod };
             // Use slightly more efficient forwarder in case the function is known to not throw errors
             VMFunc op = (df->info.flags & FuncInfo::NoError) ? op_leafcall_noerr : op_leafcall;
             return writeInst(dst, op, imm);
         }
-        
+
         case FuncInfo::CFunc:
         case FuncInfo::GFunc:
-    
+
         default: unreachable();
     }
 
-}
-
-
-
-static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
-{
-    VMCallFrame f = vm->callstack.back();
-    vm->callstack.pop_back();
-    sp = f.sp + nret; // The function left some things on the stack
-    ins = f.ins;
-    sbase = f.sbase;
-    CHAIN(curop); // A return directly continues with the loaded ins
 }
 
 // single return without return value
@@ -805,23 +726,47 @@ VM* VM::GCNew(Runtime* rt, SymTable* env)
     vm->env = env;
     vm->err = 0;
     vm->cur = {};
+    vm->_stkbase = NULL;
+    vm->_stkend = NULL;
+    if(!vm->stack_ensure(NULL, 64).p)
+        vm = NULL;
     return vm;
 }
 
-inline Val *VM::stack_push(Val v)
+VmStackAlloc VM::stack_ensure(Val *sp, size_t n)
 {
-    return stk.push_back(rt->gc, v);
+    assert(_stkbase <= sp && sp <= _stkend);
+    size_t remain = _stkend - sp;
+    if(LIKELY(remain >= n))
+    {
+        VmStackAlloc ret { sp, 0 };
+        return ret;
+    }
+
+    const size_t oldcap = _stkend - _stkbase;
+    const size_t newcap = oldcap * 2;
+    Val * const nextbase = gc_alloc_unmanaged_T<Val>(rt->gc, _stkbase, oldcap, newcap);
+    if(!nextbase)
+    {
+        this->err = RTE_ALLOC_FAIL;
+        VmStackAlloc ret { NULL, 0 };
+        return ret;
+    }
+
+    memset(nextbase + oldcap, 0, oldcap * sizeof(Val));
+
+    // Fixup pointers in the call stack
+    const ptrdiff_t d = nextbase - _stkbase;
+    for(size_t i = 0; i < callstack.size(); ++i)
+    {
+        VMCallFrame &f = callstack[i];
+        f.sbase += d;
+        f.sp += d;
+    }
+    _stkbase = nextbase;
+    _stkend = nextbase + newcap;
+
+    VmStackAlloc ret { sp + d, d };
+    return ret;
 }
 
-inline Val *VM::stack_alloc(size_t n)
-{
-    return stk.alloc_n(rt->gc, n);
-}
-
-inline Val *VM::stack_allocz(size_t n)
-{
-    Val *a = stack_alloc(n);
-    if(a)
-        memset(a, 0, sizeof(Val) * n);
-    return a;
-}

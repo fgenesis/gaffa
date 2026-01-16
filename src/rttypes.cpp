@@ -181,11 +181,12 @@ static void reg_type_func(RTReg& r)
 
 
 
-static void op_uint_plus(VM *, Val *v) // TEMP
+static RTError op_uint_plus(VM *, Val *v) // TEMP
 {
     assert(v[0].type == PRIMTYPE_UINT);
     assert(v[1].type == PRIMTYPE_UINT);
     v[0].u.ui += v[1].u.ui;
+    return RTE_OK;
 }
 
 
@@ -200,11 +201,12 @@ static void reg_type_uint(RTReg& r)
 }
 
 
-static void mth_int_abs(VM *, Val *v)
+static RTError mth_int_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_SINT);
     const sint i = v->u.si;
     v->u.si = i < 0 ? -i : i; // TODO degenerate cases
+    return RTE_OK;
 }
 
 
@@ -225,11 +227,12 @@ static void reg_type_sint(RTReg& r)
 }
 
 
-static void mth_float_abs(VM *, Val *v)
+static RTError mth_float_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_FLOAT);
     float f = v->u.f;
     v->u.f = f < 0 ? -f : f;
+    return RTE_OK;
 }
 
 static void reg_type_float(RTReg& r)
@@ -256,12 +259,13 @@ VMFUNC_IMM(strlen, Imm_2xu32)
 }
 */
 
-static void mth_string_len(VM *vm, Val *v)
+static RTError mth_string_len(VM *vm, Val *v)
 {
     assert(v->type == PRIMTYPE_STRING);
     const sref s = v->u.str;
     v->u.str = vm->rt->sp.lookup(s).len;
     v->type = PRIMTYPE_UINT;
+    return RTE_OK;
 }
 
 static void reg_type_string(RTReg& r)
@@ -298,6 +302,7 @@ static void reg_type_symtab(RTReg& r)
     ClassReg xsymt = r.regclass("symtable", d);
 }
 
+/*
 static void op_any_plus(VM *vm, Val *v)
 {
     const PrimType t0 = v[0].type;
@@ -318,6 +323,7 @@ static void op_any_plus(VM *vm, Val *v)
         // TODO: need to pass current env (aka symtab) somehow
     }
 }
+*/
 
 static void reg_type_any(RTReg& r)
 {
@@ -325,10 +331,10 @@ static void reg_type_any(RTReg& r)
     r.types.any = d;
     ClassReg xany = r.regclass("any", d);
 
-    {
+    /*{
         const Type any1[] = { PRIMTYPE_ANY };
         xany.op(Lexer::TOK_PLUS, op_any_plus, PRIMTYPE_ANY, 2);
-    }
+    }*/
 }
 
 static void reg_constants(RTReg& r)
@@ -342,13 +348,15 @@ static void reg_constants(RTReg& r)
 }
 
 #include <time.h>
-static void u_clock(VM *vm, Val *v)
+static RTError u_clock(VM *vm, Val *v)
 {
     *v = Val((uint)clock());
+    return RTE_OK;
 }
-static void u_time(VM *vm, Val *v)
+static RTError u_time(VM *vm, Val *v)
 {
     *v = Val((uint)time(NULL));
+    return RTE_OK;
 }
 
 

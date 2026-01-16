@@ -77,7 +77,7 @@ template<typename T> static FORCEINLINE bool C_Neq(T a, T b) { return a != b; }
 template<typename T> static FORCEINLINE bool C_UNot(T& r, T a) { return !a; }
 // ||, && are handled during codegen because the RHS is not always evaluated
 // and these operators need to be implemented with jumps
-    
+
 // Alternative representations of relations so that only < is needed for comparisons
 template<typename T> static FORCEINLINE bool C_Lt (T a, T b) { return  (a <  b); }
 template<typename T> static FORCEINLINE bool C_Gt (T a, T b) { return  (b <  a); }
@@ -106,7 +106,7 @@ struct Bit
 // shif-left overflow is an error
 template<typename T> static FORCEINLINE RTError Shl(T& a, T b) { a = b <= Bit<T>::ShMask ? a << b : 0; return RTE_OK; } // TODO: check overflow
 template<typename T> static FORCEINLINE RTError Shr(T& a, T b) { a = b <= Bit<T>::ShMask ? a >> b : 0; return RTE_OK; }
-    
+
 // rotation is always modulo bitsize
 template<typename T> static FORCEINLINE RTError Rol(T& a, T b) { b &= Bit<T>::ShMask; a = (a << b) | (a >> (Bit<T>::Bits-b)); return RTE_OK; }
 template<typename T> static FORCEINLINE RTError Ror(T& a, T b) { b &= Bit<T>::ShMask; a = (a >> b) | (a << (Bit<T>::Bits-b)); return RTE_OK; }
@@ -213,12 +213,13 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
 
     // Fallback function for compile-time evaluation
     // Protocol: Read params from v[0..], write return values to v[0..]
-    static NOINLINE void Func(VM *vm, Val *v)
+    static NOINLINE RTError Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
         vm->err = F(x, LoadChecked(v[1]));
         Store(v[0], x);
         assert(vm->err || v[0].type == TDef<RT>::Prim);
+        return RTE_OK;
     }
 
     static size_t GenOp(void *dst, const u32 *argslots)
@@ -276,20 +277,21 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
         NEXT();
     }
 
-    static void Func(VM *vm, Val *v)
+    static RTError Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
         vm->err = F(x);
         Store(v[0], x);
         assert(vm->err || v[0].type == TDef<RT>::Prim);
+        return RTE_OK;
     }
 
     static size_t GenOp(void *dst, const u32 *argslots)
     {
         // float +x is a nop
-        if(TDef<ST>::Prim == PRIMTYPE_FLOAT && tt == Lexer::TOKEN_PLUS)
+        if(TDef<ST>::Prim == PRIMTYPE_FLOAT && tt == Lexer::TOK_PLUS)
         {
-            return dst;
+            return 0;
         }
         if(argslots[0] == argslots[1])
         {
@@ -329,12 +331,13 @@ struct WrappedBinComp : WrappedBase<bool, bool, T>
 
     // Fallback function for compile-time evaluation
     // Protocol: Read params from v[0..], write return values to v[0..]
-    static NOINLINE void Func(VM *vm, Val *v)
+    static NOINLINE RTError Func(VM *vm, Val *v)
     {
         T a = LoadChecked(v[0]);
         T b = LoadChecked(v[1]);
         bool x =  F(a, b);
         Store(v[0], x);
+        return RTE_OK;
     }
 
     static size_t GenOp(void *dst, const u32 *argslots)
@@ -352,6 +355,7 @@ struct WrappedBinComp : WrappedBase<bool, bool, T>
 
         const Type params[] = { TDef<T>::Prim, TDef<T>::Prim };
         const Type rets[] = { PRIMTYPE_BOOL };
+        // FIXME: These don't ever fail
         _Register(syms, rt, &opdef, tt, Func, params, Countof(params), rets, Countof(rets));
     }
 };

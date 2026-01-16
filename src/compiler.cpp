@@ -17,7 +17,7 @@ FuncInfo prepareFuncInfo(const HLNode* node)
     int nargs = fhdr->nargs();
     int nrets = fhdr->nrets();
 
-    u32 fflags = FuncInfo::Gfunc;
+    u32 fflags = FuncInfo::GFunc;
     if(nargs < 0)
         fflags |= FuncInfo::VarArgs;
     if(nrets < 0)
