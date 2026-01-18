@@ -77,7 +77,7 @@ inline Type DObj::dynamicType() const { return dtype->tid; }
 //   and type system know this too.
 // - Stack space is limited; up to MINSTACK usable slots total
 // - To throw a runtime error, return any of RTError != 0
-typedef RTError (*LeafFunc)(VM *vm, Val *inout);
+typedef RTError (*LeafFunc)(VM *vm, Val inout[]);
 
 
 

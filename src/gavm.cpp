@@ -20,16 +20,21 @@ struct Imm_LeafCall
 struct Imm_CCall
 {
     CFunc f;
-    byte nargs;
-    byte nret;
-    byte flags;
+    u32 baseoffs; // HMM: This would fit in ~16 bits
+    u32 nargs; // and this in 8
+};
+
+struct Imm_CCallv
+{
+    CFunc f;
+    u32 baseoffs;
 };
 
 struct Imm_GCall
 {
     Inst *entry;
-    u32 nrets;   // return slots
-    u32 nlocals; // prealloc this much stack for args + locals
+    u32 baseoffs;
+    u32 maxstack; // prealloc this much stack for args + locals
 };
 
 
@@ -210,57 +215,66 @@ static FORCEINLINE void pushret(VMPARAMS, const Imm *imm)
 
 static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
 {
+    // Precondition: sbase[0..nret) contains return values
+
+    sp = sbase + nret; // The function left some things on the stack
+    // New sp is one past the return values
+
     VMCallFrame f = vm->callstack.back();
     vm->callstack.pop_back();
-    sp = f.sp + nret; // The function left some things on the stack
-    ins = f.ins;
     sbase = f.sbase;
-    CHAIN(curop); // A return directly continues with the loaded ins
+    TAILFWD(f.ins); // A return directly continues with the loaded ins
 }
 
-static const Inst *fullCcall(VMPARAMS, CFunc f, size_t nargs, size_t nret, u32 flags, size_t skipslots)
+static FORCEINLINE const Inst *finishCCall(VMPARAMS, CFunc f, size_t nargs)
 {
-    const tsize totalstack = MINSTACK + std::max(nargs, nret);
-    const VmStackAlloc sa = vm->stack_ensure(sp, totalstack);
-    if(UNLIKELY(!sa.p))
-        CHAIN(onerror); // stack_ensure() sets vm->err, just get out
-
-    sp += sa.diff;
-    sbase += sa.diff;
-
-    // The C call below may reallocate the stack.
-    // Push the current frame so that it gets updated in case the stack is moved.
-    pushret(VMARGS, skipslots);
-
-    Val *inout = sp - nargs;
+    // Preconditions:
+    // - original stack frame was pushed
+    // - sbase was adjusted so that sbase[0] is the first parameter to the function
 
     int r = f(vm, nargs, sbase); // this writes to return slots and may invalidate sp, sbase
     if(r < 0)
         FAIL(r);
 
-    assert(r == nret || ((flags & FuncInfo::VarRets) && r >= nret));
-
+    // Restore valid sp, sbase (call frames are fixed up on stack realloc)
     return doreturn(VMARGS, r);
 }
 
-VMFUNC_IMM(ccall, Imm_CCall)
-{
-    return fullCcall(VMARGS, imm->f, imm->nargs, imm->nret, imm->flags, immslots(imm));
-}
-
-VMFUNC_IMM(gcall, Imm_GCall)
+VMFUNC_IMM(callc, Imm_CCall)
 {
     pushret(VMARGS, imm);
-    sbase = sp + imm->nrets;
-    sp = sbase + imm->nlocals;
-    ins = imm->entry;
-    CHAIN(curop); // Can't CHAIN(rer) here since that doesn't save sbase
+    sbase += imm->baseoffs;
+    return finishCCall(VMARGS, imm->f, imm->nargs);
 }
 
-VMFUNC_IMM(anycall, Imm_2xu32)
+VMFUNC_IMM(callcv, Imm_CCallv)
+{
+    pushret(VMARGS, imm);
+    sbase += imm->baseoffs;
+    assert(sbase <= sp);
+    size_t nargs = sp - sbase;
+    return finishCCall(VMARGS, imm->f, nargs);
+}
+
+VMFUNC_IMM(callg, Imm_GCall)
+{
+    pushret(VMARGS, imm);
+    sbase += imm->baseoffs;
+
+    // FIXME!! sp not done
+
+    // sbase[0..] is now return slots, sp[0..] are args
+    assert(sbase <= sp);
+    TAILFWD(imm->entry); // Can't CHAIN(rer) here since that doesn't save sbase
+}
+
+VMFUNC_IMM(call, Imm_3xu32)
 {
     Val *f = LOCAL(imm->a);
-    const u32 nargs = imm->b;
+    Val *fbase = sbase + imm->b;
+    assert(fbase <= sp); 
+    const u32 nargs = imm->c ? sp - fbase : imm->c - 1;
+
     DFunc *df = f->asFunc();
     if(LIKELY(df))
     {
@@ -276,13 +290,18 @@ VMFUNC_IMM(anycall, Imm_2xu32)
 
             case FuncInfo::GFunc:
                 pushret(VMARGS, imm);
-                sbase = sp + df->info.nrets;
-                sp = sbase + df->info.nlocals;
+                sbase = fbase;
+                sp = sbase + df->info.nrets;
                 ins = df->u.gfunc.chunk->begin();
                 CHAIN(curop);
 
             case FuncInfo::CFunc:
-                return fullCcall(VMARGS, df->u.cfunc, df->info.nargs, df->info.nrets, df->info.flags, immslots(imm));
+                pushret(VMARGS, imm);
+                sbase = fbase;
+                return finishCCall(VMARGS, df->u.cfunc, nargs);
+
+            default:
+                unreachable();
         }
     }
 

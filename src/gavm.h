@@ -42,9 +42,9 @@ struct VmIter
 
 struct VMCallFrame
 {
-    Val *sp;
-    Val *sbase;
     const Inst *ins;
+    Val *sbase;
+    Val *sp;
 };
 
 struct VmStackAlloc
