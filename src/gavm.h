@@ -45,6 +45,8 @@ struct VMCallFrame
     const Inst *ins;
     Val *sbase;
     Val *sp;
+    // If sp == NULL, it's an error handler frame.
+    // -> On error, write error value to sbase, then continue at ins
 };
 
 struct VmStackAlloc
@@ -54,19 +56,20 @@ struct VmStackAlloc
 };
 
 
+
 struct VM
 {
     VM *GCNew(Runtime *rt, SymTable *env);
 
     Runtime *rt;
-    SymTable *env; // Updated whenever a function is called that has an env
+    SymTable *env; // Runtime symbols
     int err;
-    VMCallFrame cur;
+    VMCallFrame cur; // Saved call frame when yielding
     Val *_stkbase, *_stkend;
     std::vector<VMCallFrame> callstack;
     std::vector<VmIter> iterstack;
 
-    const DFunc *currentFunc();
+    // TODO? DFunc *panic;
 
     // Add the returned .diff to all pointers to stack memory to move the pointer in case the stack reallocated.
     // If .p is valid, p[0..slots) is valid to access.
@@ -212,6 +215,9 @@ enum RTError
     RTE_VALUE_CAST = -3,
     RTE_NOT_CALLABLE = -4,
     RTE_ALLOC_FAIL = -5,
+    RTE_DEAD_VM = -6,
+    RTE_NOT_ENOUGH_PARAMS = -7,
+    RTE_TOO_MANY_PARAMS = -7,
 };
 
 

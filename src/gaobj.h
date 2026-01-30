@@ -164,6 +164,7 @@ struct DFunc : public GCobj
         struct
         {
             InstChunk *chunk;
+            u32 maxstack;
         } gfunc;
     } u;
 
