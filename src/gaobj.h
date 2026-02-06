@@ -118,7 +118,7 @@ struct FuncInfo
         NoError = 1 << 5, // Will not set vm->err (sligthly more efficient to call)
     };
     u32 flags;
-    u32 nlocals; // # of local slots that are needed to run the function. Always >= nargs.
+    u32 fixedstack; // # of stack slots that are needed to run the function. Always >= nargs.
     u32 nupvals;
 };
 inline FuncInfo::Flags operator|(FuncInfo::Flags a, FuncInfo::Flags b) { return FuncInfo::Flags((unsigned)a | (unsigned)b); }

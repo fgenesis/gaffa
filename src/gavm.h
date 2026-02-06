@@ -45,6 +45,7 @@ struct VMCallFrame
     const Inst *ins;
     Val *sbase;
     Val *sp;
+    u32 vargs;
     // If sp == NULL, it's an error handler frame.
     // -> On error, write error value to sbase, then continue at ins
 };
@@ -54,7 +55,6 @@ struct VmStackAlloc
     Val *p;
     ptrdiff_t diff;
 };
-
 
 
 struct VM
@@ -80,6 +80,11 @@ struct VM
 
 struct Imm_None
 {
+};
+
+struct Imm_s32
+{
+    s32 a;
 };
 
 struct Imm_u32
@@ -207,17 +212,20 @@ static size_t writeInst(void *p, VMFunc f, const T& imm)
     return sizeof(S);
 }
 
+// Runtime error and control codes
 enum RTError
 {
     RTE_OK = 0,
-    RTE_OVERFLOW = -1,
-    RTE_DIV_BY_ZERO = -2,
-    RTE_VALUE_CAST = -3,
-    RTE_NOT_CALLABLE = -4,
-    RTE_ALLOC_FAIL = -5,
-    RTE_DEAD_VM = -6,
-    RTE_NOT_ENOUGH_PARAMS = -7,
-    RTE_TOO_MANY_PARAMS = -7,
+    RTE_BREAKPOINT         = -1,
+    RTE_FIRST_ERROR        = -2,
+    RTE_OVERFLOW           = RTE_FIRST_ERROR - 0,
+    RTE_DIV_BY_ZERO        = RTE_FIRST_ERROR - 1,
+    RTE_VALUE_CAST         = RTE_FIRST_ERROR - 2,
+    RTE_NOT_CALLABLE       = RTE_FIRST_ERROR - 3,
+    RTE_ALLOC_FAIL         = RTE_FIRST_ERROR - 4,
+    RTE_DEAD_VM            = RTE_FIRST_ERROR - 5,
+    RTE_NOT_ENOUGH_PARAMS  = RTE_FIRST_ERROR - 6,
+    RTE_TOO_MANY_PARAMS    = RTE_FIRST_ERROR - 7,
 };
 
 

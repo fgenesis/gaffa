@@ -38,6 +38,21 @@ struct Imm_GCall
 };
 
 
+// Any variadic opcode must know how many elements on the stack are supposed to be passed along variadically.
+// For this, we only need to know how many local stack slots the function uses, any more things on the stack
+// must be variadic parameters.
+//
+// [                         |           ]  <-- This is the stack
+// (locals,params,temporaries)              <-- size known by function (FuncInfo::fixedstack)
+// ^ sbase                               ^ sp
+//                           ^ sbase + fixedstack
+//                           {~~~~~~~~~~~}  <-- Then this region is variadic args
+static FORCEINLINE size_t numvargs(VMPARAMS, size_t fixedstack)
+{
+    size_t stacksize = sp - sbase;
+    return stacksize - fixedstack;
+}
+
 // Call stack rollback helper. Set ins, then CHAIN(rer) to return all the way and resume at ins.
 // Do NOT use this as a regular op! If this appears in the instruction stream it's an endless loop with no escape.
 VMFUNC_DEF(rer)
@@ -49,7 +64,7 @@ VMFUNC_DEF(rer)
 
 // TODO/IDEA: in debug codegen, insert a "line reached" opcode after each line and forward to breakpoint handler
 
-VMFUNC(yield)
+VMFUNC(_doyield)
 {
     vm->cur.sbase = sbase;
     vm->cur.sp = sp;
@@ -57,13 +72,25 @@ VMFUNC(yield)
     return NULL;
 }
 
+VMFUNC_IMM(yieldn, Imm_u32)
+{
+    vm->err = imm->a;
+    CHAIN(_doyield);
+}
+
+VMFUNC_IMM(yieldv, Imm_u32)
+{
+    vm->err = numvargs(VMARGS, imm->a);
+    CHAIN(_doyield);
+}
+
 // Error handler helper. Set vm->err, then CHAIN(onerror) to handle error
 // Do NOT use this as a regular op!
-VMFUNC_DEF(onerror)
+VMFUNC_DEF(_onerror)
 {
-    assert(vm->err);
+    assert(vm->err < 0);
     --ins;
-    CHAIN(yield);
+    CHAIN(_doyield);
 }
 
 VMFUNC(resume)
@@ -224,6 +251,51 @@ VMFUNC_IMM(leafcall_noerr, Imm_LeafCall)
     NEXT();
 }
 
+VMFUNC_IMM(vanum, Imm_u32)
+{
+    *LOCAL(imm->a) = Val(vm->cur.vargs);
+    NEXT();
+}
+
+VMFUNC_IMM(vaset, Imm_s32)
+{
+    sp = sbase + vm->cur.vargs + imm->a;
+    NEXT();
+}
+
+VMFUNC_IMM(vapush, Imm_u32)
+{
+    size_t n = vm->cur.vargs;
+    VmStackAlloc sa = vm->stack_ensure(sp, n);
+    if(!sa.p)
+        CHAIN(_onerror);
+    sp = sa.p;
+    sbase += sa.diff;
+    Val *args = sbase + imm->a; // skip over fixedstack slots
+    while(n--)
+        *sp++ = *args++;
+    NEXT();
+}
+
+VMFUNC_IMM(vamove, Imm_3xu32)
+{
+    size_t n = imm->c;
+    if(!n)
+        n = vm->cur.vargs;
+    assert(n <= vm->cur.vargs);
+    VmStackAlloc sa = vm->stack_ensure(sp, n);
+    if(!sa.p)
+        CHAIN(_onerror);
+    sp = sa.p;
+    sbase += sa.diff;
+    Val *args = sbase + imm->a; // skip over fixedstack slots
+    Val *p = sbase + imm->b;
+    while(n--)
+        *p++ = *args++;
+    sp = p > sp ? p : sp;
+    NEXT();
+}
+
 static FORCEINLINE void pushEH(VMPARAMS, Inst *errh, Val *errvalGoesHere)
 {
     assert(sbase <= errvalGoesHere);
@@ -234,21 +306,32 @@ static FORCEINLINE void pushEH(VMPARAMS, Inst *errh, Val *errvalGoesHere)
     vm->callstack.push_back(f);
 }
 
-static FORCEINLINE void pushret(VMPARAMS, size_t skipslots)
+// On function call the stack is organized like this:
+// <-- SBASE
+// return slots        (constant, known by function, uninited)
+// locals, temporaries (constant, known by function, uninited)
+// <-- SBASE + fixedstack - nargs
+// non-variadic params (constant, known by function as FuncInfo::nargs, written before call)
+// <-- SBASE + fixedstack
+// variadic params     (unknown)
+// <-- SP
+static FORCEINLINE void pushFrame(VMPARAMS, size_t skipslots, size_t fixedstack)
 {
     assert(sbase <= sp);
     VMCallFrame f;
-    f.ins = ins + skipslots;
+    f.ins = ins + skipslots; // Where to continue upon return
     f.sp = sp;
     f.sbase = sbase;
+    f.vargs = vm->cur.vargs; // Store current function's vargs count
+    vm->cur.vargs = numvargs(VMARGS, fixedstack); // This is the varargs count of the new function
     vm->callstack.push_back(f);
 }
 
 // The imm param here is just for type inference and to get the correct number of slots
 template<typename Imm>
-static FORCEINLINE void pushret(VMPARAMS, const Imm *imm)
+static FORCEINLINE void pushFrame(VMPARAMS, const Imm *imm, size_t fixedstack)
 {
-    pushret(VMARGS, immslots(imm));
+    pushFrame(VMARGS, immslots(imm), fixedstack);
 }
 
 static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
@@ -269,6 +352,7 @@ static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
 
     sbase = f.sbase;
     ins = f.ins;
+    vm->cur.vargs = f.vargs;
 
 #ifdef _DEBUG
     CHAIN(unwind); // unwind the stack
@@ -297,14 +381,14 @@ static FORCEINLINE const Inst *finishCCall(VMPARAMS, CFunc f, size_t nargs)
 
 VMFUNC_IMM(callc, Imm_CCall)
 {
-    pushret(VMARGS, imm);
+    pushFrame(VMARGS, imm, imm->baseoffs);
     sbase += imm->baseoffs;
     return finishCCall(VMARGS, imm->f, imm->nargs);
 }
 
 VMFUNC_IMM(callcv, Imm_CCallv)
 {
-    pushret(VMARGS, imm);
+    pushFrame(VMARGS, imm, imm->baseoffs);
     sbase += imm->baseoffs;
     assert(sbase <= sp);
     size_t nargs = sp - sbase;
@@ -327,7 +411,7 @@ static FORCEINLINE const Inst *finishGCall(VMPARAMS, size_t maxstack, size_t mak
     // Ensure that the function has enough stack space
     VmStackAlloc sa = vm->stack_ensure(sp, maxstack);
     if(UNLIKELY(!sa.p))
-        CHAIN(onerror);
+        CHAIN(_onerror);
     sp = sa.p;
     sbase += sa.diff;
 
@@ -352,7 +436,7 @@ static FORCEINLINE const Inst *finishGCall(VMPARAMS, size_t maxstack, size_t mak
 
 VMFUNC_IMM(callg, Imm_GCall)
 {
-    pushret(VMARGS, imm);
+    pushFrame(VMARGS, imm, imm->baseoffs);
     sbase += imm->baseoffs;
     ins = imm->entry;
     return finishGCall(VMARGS, imm->maxstack, 0, 0);
@@ -385,13 +469,13 @@ VMFUNC_IMM(callany, Imm_3xu32)
             }
 
             case FuncInfo::GFunc:
-                pushret(VMARGS, imm);
+                pushFrame(VMARGS, imm, df->info.fixedstack);
                 sbase = fbase;
                 ins = df->u.gfunc.chunk->begin();
                 return finishGCall(VMARGS, df->u.gfunc.maxstack, df->info.nrets, nargs);
 
             case FuncInfo::CFunc:
-                pushret(VMARGS, imm);
+                pushFrame(VMARGS, imm, df->info.fixedstack);
                 sbase = fbase;
                 return finishCCall(VMARGS, df->u.cfunc, nargs);
 
@@ -852,7 +936,15 @@ run:
     // Yield or error.
     int err = vm->err;
 
-    if(err)
+    if(LIKELY(err >= 0))
+    {
+        // vm->cur.sbase[0..err) holds yielded values
+    }
+    else if(err == RTE_BREAKPOINT)
+    {
+        // Nothing to do, just return
+    }
+    else
     {
         // Error. Try to recover...
         VMCallFrame f = vm->callstack.back();

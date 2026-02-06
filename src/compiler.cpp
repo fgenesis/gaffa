@@ -28,7 +28,7 @@ FuncInfo prepareFuncInfo(const HLNode* node)
     info.nrets = nrets < 0 ? -nrets+1 : nrets;
 
     // These are filled later
-    info.nlocals = 0;
+    info.fixedstack = 0;
     info.nupvals = 0;
 
     return info;

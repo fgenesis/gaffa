@@ -95,7 +95,7 @@ struct RTReg
         df->info.nargs = nparams;
         df->info.nrets = nrets;
         df->info.flags = FuncInfo::LFunc | extraflags;
-        df->info.nlocals = 0;
+        df->info.fixedstack = 0; // TODO
         df->info.nupvals = 0;
         df->u.lfunc = lfunc;
         df->dbg = NULL;
