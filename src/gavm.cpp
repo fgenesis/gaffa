@@ -57,7 +57,7 @@ static FORCEINLINE size_t numvargs(VMPARAMS, size_t fixedstack)
 // Do NOT use this as a regular op! If this appears in the instruction stream it's an endless loop with no escape.
 VMFUNC_DEF(rer)
 {
-    // sbase is only changed by function call/return
+    // sbase is only changed by function call/return and updated there
     vm->cur.sp = sp;
     return ins;
 }
@@ -74,23 +74,25 @@ VMFUNC(_doyield)
 
 VMFUNC_IMM(yieldn, Imm_u32)
 {
-    vm->err = imm->a;
+    vm->state = imm->a;
     CHAIN(_doyield);
 }
 
 VMFUNC_IMM(yieldv, Imm_u32)
 {
-    vm->err = numvargs(VMARGS, imm->a);
+    vm->state = numvargs(VMARGS, imm->a);
     CHAIN(_doyield);
 }
 
-// Error handler helper. Set vm->err, then CHAIN(onerror) to handle error
+// Error handler helper. Set vm->state, then CHAIN(_onerror) to handle error
 // Do NOT use this as a regular op!
 VMFUNC_DEF(_onerror)
 {
-    assert(vm->err < 0);
-    --ins;
-    CHAIN(_doyield);
+    assert(vm->state < 0);
+    vm->cur.sbase = sbase;
+    vm->cur.sp = sp;
+    vm->cur.ins = ins; // This is the faulting op
+    return NULL;
 }
 
 VMFUNC(resume)
@@ -114,8 +116,7 @@ VMFUNC_IMM(jb, Imm_u32)
 }
 
 // Unwind is a bit of a hack -- it unwinds the stack but preserves sbase.
-// (Like rer, but is always safe to use, but also slower.
-// Normally sbase is not restored, but the thunked resume takes care of that.)
+// (Like rer, but is always safe to use, but also slower.)
 // Should not be needed outside of debugging.
 static const Inst unwind_thunk { op_resume };
 VMFUNC_DEF(unwind)
@@ -234,20 +235,20 @@ Observations:
 VMFUNC_IMM(leafcall, Imm_LeafCall)
 {
     const Val *oldstack = vm->_stkend;
-    RTError err = imm->f(vm, sbase + imm->baseoffs); // this writes to return slots
+    RTError state = imm->f(vm, sbase + imm->baseoffs); // this writes to return slots
     assert(oldstack == vm->_stkend && "Leafcalls are not supposed to change the stack in any way, this will crash");
-    if(LIKELY(!err))
+    if(LIKELY(!state))
         NEXT();
-    FAIL(err);
+    FAIL(state);
 }
 
 // Specialization without error check for functions that are known to never cause an error
 VMFUNC_IMM(leafcall_noerr, Imm_LeafCall)
 {
     const Val *oldstack = vm->_stkend;
-    RTError err = imm->f(vm, sp + imm->baseoffs); // this writes to return slots
+    RTError state = imm->f(vm, sp + imm->baseoffs); // this writes to return slots
     assert(oldstack == vm->_stkend && "Leafcalls are not supposed to change the stack in any way, this will crash");
-    assert(!err && "Function was marked to never cause an error, but it did");
+    assert(!state && "Function was marked to never cause an error, but it did");
     NEXT();
 }
 
@@ -293,6 +294,24 @@ VMFUNC_IMM(vamove, Imm_3xu32)
     while(n--)
         *p++ = *args++;
     sp = p > sp ? p : sp;
+    NEXT();
+}
+
+
+// move up to 3 or 7 values to base[0..]
+// lowest byte encodes the base slot; all slot indices must fit in 1 byte
+// can't move from 0 as the last slot or it would be ignored (don't put it last)
+VMFUNC_IMM(bmovetiny, Imm_uint)
+{
+    uint a = imm->a;
+    Val *base = LOCAL(a & 0xff);
+    a >>= 8u;
+    do
+    {
+        *base++ = *LOCAL(a & 0xff);
+        a >>= 8u;
+    }
+    while(a);
     NEXT();
 }
 
@@ -373,7 +392,7 @@ static FORCEINLINE const Inst *finishCCall(VMPARAMS, CFunc f, size_t nargs)
 
     // sbase[0..] now contains return values
 
-    assert(!vm->err && "VM error is set but was not indicated by the C function's return value");
+    assert(!vm->state && "VM error is set but was not indicated by the C function's return value");
 
     // Restore valid sp, sbase (the call frame popped here was fixed up if stack was realloc'd in f())
     return doreturn(VMARGS, r);
@@ -462,9 +481,9 @@ VMFUNC_IMM(callany, Imm_3xu32)
         {
             case FuncInfo::LFunc:
             {
-                RTError err = df->u.lfunc(vm, fbase);
-                if(UNLIKELY(err))
-                    FAIL(err);
+                RTError state = df->u.lfunc(vm, fbase);
+                if(UNLIKELY(state))
+                    FAIL(state);
                 NEXT();
             }
 
@@ -611,7 +630,7 @@ VMFUNC_IMM(retn, Imm_u32)
 // example for n = 4, m = the number of locals in the function (which is known)
 // <---- n ---><--- gap ------------><--- vn ------------------------------------------------------>
 // [0][1][2][3][.params..][.locals..][extra stuff on the stack to be used as variadic return values]
-// Is moved to that it looks like:
+// Is moved so that the gap is cut out:
 // <----- n + vn -------->
 // [0][1][2][3][extra....]
 static FORCEINLINE const Inst *vreturn(VMPARAMS, tsize n, tsize gap)
@@ -899,12 +918,12 @@ static const char *vmerrstr(int rte)
     return "unknown error";
 }
 
-static Val vmerrval(VM *vm, int err)
+static Val vmerrval(VM *vm, int state)
 {
-    if(err >= RTE_OK)
+    if(state >= RTE_OK)
         return Val();
 
-    Str s = vm->rt->sp.put(vmerrstr(err));
+    Str s = vm->rt->sp.put(vmerrstr(state));
     Val ret(s);
     ret.type = PRIMTYPE_ERROR;
     return ret;
@@ -916,50 +935,57 @@ static int runloop(VM *vm)
     if(!ins)
         return RTE_DEAD_VM;
 
-run:
-    vm->err = 0;
+
+    vm->state = RTE_OK;
+
+    // Main VM loop
+    do
     {
-        do
-        {
-            // sp is saved by rer or yield; since it's passed along as
-            // funcparam upon return it needs to be saved there and restored here.
-            Val * const sbase = vm->cur.sbase; // This is changed by calls, return, and unwind
-            Val * const sp = vm->cur.sp;
-            ins = op_curop(VMARGS);
-            // We end up here on rer, yield, or error. Most likely a rer.
-            // In that case just loop around since we got the next instruction
-            // returned. More expensive handling is only necessary for ins == NULL.
-        }
-        while(ins);
+        // sp is saved by rer or yield; since it's passed along as
+        // funcparam upon return it needs to be saved there and restored here.
+        Val * const sbase = vm->cur.sbase; // This is changed by calls, return, and unwind
+        Val * const sp = vm->cur.sp;
+        ins = op_curop(VMARGS);
+        // We end up here on rer, yield, or error. Most likely a rer.
+        // In that case just loop around since we got the next instruction
+        // returned. More expensive handling is only necessary for ins == NULL.
     }
+    while(ins);
+
+    // If resumable, vm->cur.ins was set to the next runnable op
+
 
     // Yield or error.
-    int err = vm->err;
+    int state = vm->state;
 
-    if(LIKELY(err >= 0))
-    {
-        // vm->cur.sbase[0..err) holds yielded values
-    }
-    else if(err == RTE_BREAKPOINT)
-    {
-        // Nothing to do, just return
-    }
-    else
+    if(UNLIKELY(RTIsError(state)))
     {
         // Error. Try to recover...
         VMCallFrame f = vm->callstack.back();
         if(!f.sp) // error handler frame? (Don't go up the callstack. Exceptions don't cross function boundaries!)
         {
-            vm->callstack.pop_back();
-            ins = f.ins;
-
             if(f.sbase) // Should produce error value?
             {
                 assert(vm->cur.sbase <= f.sbase);
-                f.sbase[0] = vmerrval(vm, err);
+                Val err = vmerrval(vm, state);
+                if(err.u.str == unsigned(-1))
+                    return RTE_ALLOC_FAIL; // No space for error message
+                f.sbase[0] = err;
+                // TODO: fill the rest of the valid stack with nils? (how many values are expected?)
             }
-            goto run; // Recovered! Continue with error handler
+            vm->callstack.pop_back();
+            ins = f.ins;
+            assert(ins);
+            // Recovered! Continue with error handler. But first, yield out and allow the caller to see this too.
+            vm->cur.ins = ins;
+            vm->debug.val = state; // Save original error
+            state = RTE_OK_RECOVERED;
         }
+    }
+    else
+    {
+        // If state >= 0: vm->cur.sbase[0..state) holds yielded values
+        // RTE_OK_BREAKPOINT etc: Nothing to do, just return
     }
 
     // This VM is now either yielded, or failed.
@@ -968,7 +994,7 @@ run:
     //   - If yielded, points to the instruction to continue
     // - The callstack is intact
     // - Local variables are in their slots on the stack
-    return err;
+    return state;
 }
 
 
@@ -1004,7 +1030,7 @@ void vmtest(GC& gc)
 
     VM vm(gc);
     vm.stk.alloc(16);
-    vm.err = 0;
+    vm.state = 0;
     vm.stk[10] = Val(uint(500) * uint(1000000) + 1);
     vm.stk[11] = Val(1u);
     vm.cur.ins = &tc.init0;
@@ -1020,20 +1046,26 @@ void vmtest(GC& gc)
 #endif
 
 
-VM* VM::GCNew(Runtime* rt, SymTable* env)
+VM* VM::GCNew(Runtime* rt)
 {
     VM *vm = (VM*)gc_new(rt->gc, sizeof(VM), PRIMTYPE_OPAQUE);
     if(!vm)
         return NULL;
     vm->rt = rt;
-    vm->env = env;
-    vm->err = 0;
+    vm->state = RTE_OK_NEW_VM;
     vm->cur = {};
     vm->_stkbase = NULL;
     vm->_stkend = NULL;
     if(!vm->stack_ensure(NULL, 64).p)
         vm = NULL;
     return vm;
+}
+
+
+
+void VM::init(Inst* entry)
+{
+    cur.ins = entry;
 }
 
 VmStackAlloc VM::stack_ensure(Val *sp, size_t n)
@@ -1054,12 +1086,12 @@ VmStackAlloc VM::stack_ensure(Val *sp, size_t n)
     Val * const nextbase = gc_alloc_unmanaged_T<Val>(rt->gc, _stkbase, oldcap, newcap);
     if(!nextbase)
     {
-        this->err = RTE_ALLOC_FAIL;
+        this->state = RTE_ALLOC_FAIL;
         VmStackAlloc ret { NULL, 0 };
         return ret;
     }
 
-    memset(nextbase + oldcap, 0, oldcap * sizeof(Val));
+    memset(nextbase + oldcap, 0, oldcap * sizeof(Val)); // TODO: this is probably not needed when we knows the used parts of the stack
 
     // Fixup pointers in the call stack
     const ptrdiff_t d = nextbase - _stkbase;

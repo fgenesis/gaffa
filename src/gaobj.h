@@ -69,6 +69,7 @@ inline Type DObj::dynamicType() const { return dtype->tid; }
 
 // C leaf function; fastest to call but has some restrictions:
 // - Non-variadic, max(#parameters, #retvals) must be <= MINSTACK
+// - The VM will not try to allocate extra stack, MINSTACK has to suffice
 // - Read args from inout[0..], write return values to inout[0..]
 // - Must NOT call back into the VM (no call frame is pushed)
 // - Can not reallocate the VM stack
@@ -76,7 +77,8 @@ inline Type DObj::dynamicType() const { return dtype->tid; }
 //   and the function must be registered correctly so the VM
 //   and type system know this too.
 // - Stack space is limited; up to MINSTACK usable slots total
-// - To throw a runtime error, return any of RTError != 0
+// - Return RTE_OK if all went well
+// - To cause a runtime error, return any of RTError < 0
 typedef RTError (*LeafFunc)(VM *vm, Val inout[]);
 
 
@@ -91,7 +93,7 @@ typedef RTError (*LeafFunc)(VM *vm, Val inout[]);
 // - If variadic returning N values: in the function, do this:
 //     inout = vm->stack_ensure(inout, N);
 //   Then proceed as above.
-// - To throw a runtime error, return a RTError value < 0
+// - To cause a runtime error, return a RTError value < 0
 typedef int (*CFunc)(VM *vm, size_t nargs, Val *inout);
 
 
@@ -115,7 +117,7 @@ struct FuncInfo
         VarArgs = 1 << 2, // set if variadic
         VarRets = 1 << 3,
         Pure    = 1 << 4, // Can run at compile time
-        NoError = 1 << 5, // Will not set vm->err (sligthly more efficient to call)
+        NoError = 1 << 5, // Will not set vm->state (sligthly more efficient to call)
     };
     u32 flags;
     u32 fixedstack; // # of stack slots that are needed to run the function. Always >= nargs.

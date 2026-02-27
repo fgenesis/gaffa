@@ -216,9 +216,9 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
     static NOINLINE RTError Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
-        vm->err = F(x, LoadChecked(v[1]));
+        vm->state = F(x, LoadChecked(v[1]));
         Store(v[0], x);
-        assert(vm->err || v[0].type == TDef<RT>::Prim);
+        assert(vm->state || v[0].type == TDef<RT>::Prim);
         return RTE_OK;
     }
 
@@ -280,9 +280,9 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
     static RTError Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
-        vm->err = F(x);
+        vm->state = F(x);
         Store(v[0], x);
-        assert(vm->err || v[0].type == TDef<RT>::Prim);
+        assert(vm->state || v[0].type == TDef<RT>::Prim);
         return RTE_OK;
     }
 

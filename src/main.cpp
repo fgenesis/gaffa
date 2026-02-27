@@ -204,7 +204,6 @@ int main(int argc, char **argv)
 
     VM vm;
     vm.rt = &rt;
-    vm.env = env;
 
     HLFoldTracker ft = { vm, pp.syms, *env, hb };
 

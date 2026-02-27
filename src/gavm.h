@@ -56,18 +56,50 @@ struct VmStackAlloc
     ptrdiff_t diff;
 };
 
+// Runtime error and control codes. Must be negative.
+enum RTError
+{
+    RTE_OK = 0,
+    // Yield signals and temporaries that exit the VM loop. Can just resume afterward.
+    RTE_OK_MINIYIELD          = -1, // Yield once to get out of the VM loop. No value.
+    RTE_OK_LINE_REACHED       = -2, // line reached debug op. Line is in VM::debug.val.
+    RTE_OK_BREAK              = -3, // debug marker. VM::debug.val is a user-defined value
+    RTE_OK_RECOVERED          = -4, // Recovered from an runtime error. Original error is in VM::debug.val
+    RTE_OK_NEW_VM             = -5, // New VM/coroutine that was never run yet
+    // Actual errors
+    RTE_FIRST_ERROR        = -100,
+    RTE_OVERFLOW           = RTE_FIRST_ERROR - 0,
+    RTE_DIV_BY_ZERO        = RTE_FIRST_ERROR - 1,
+    RTE_VALUE_CAST         = RTE_FIRST_ERROR - 2,
+    RTE_NOT_CALLABLE       = RTE_FIRST_ERROR - 3,
+    RTE_ALLOC_FAIL         = RTE_FIRST_ERROR - 4,
+    RTE_DEAD_VM            = RTE_FIRST_ERROR - 5,
+    RTE_NOT_ENOUGH_PARAMS  = RTE_FIRST_ERROR - 6,
+    RTE_TOO_MANY_PARAMS    = RTE_FIRST_ERROR - 7,
+};
+
+static FORCEINLINE bool RTIsError(int e)
+{
+    return e <= RTE_FIRST_ERROR;
+}
+
 
 struct VM
 {
-    VM *GCNew(Runtime *rt, SymTable *env);
+    VM *GCNew(Runtime *rt);
+    void init(Inst *entry);
 
     Runtime *rt;
-    SymTable *env; // Runtime symbols
-    int err;
+    int state; // RTError if negative, otherwise # of return values on the stack
     VMCallFrame cur; // Saved call frame when yielding
     Val *_stkbase, *_stkend;
     std::vector<VMCallFrame> callstack;
     std::vector<VmIter> iterstack;
+
+    struct
+    {
+        int val; // Some RTError place a value here, eg. RTE_OK_LINE_REACHED: line number.
+    } debug;
 
     // TODO? DFunc *panic;
 
@@ -104,6 +136,10 @@ struct Imm_3xu32
 struct Imm_4xu32
 {
     u32 a, b, c, d;
+};
+struct Imm_uint
+{
+    uint a; // 32 or 64 bit depending on arch
 };
 
 template<typename T>
@@ -180,7 +216,7 @@ VMFUNC_DEF(onerror);
 #define NEXT() do { ins += immslots(imm); CHAIN(nextop); } while(0)
 
 #define TAILFWD(nx) do { ins = nx; TAIL_RETURN(ins->f(VMARGS)); } while(0)
-#define FAIL(e) do { vm->err = (e); CHAIN(onerror); } while(0)
+#define FAIL(e) do { vm->state = (e); CHAIN(onerror); } while(0)
 #define FORWARD(a) do { imm += (a); CHAIN(nextop); } while(0)
 
 #define LOCAL(i) (&sbase[i])
@@ -211,23 +247,6 @@ static size_t writeInst(void *p, VMFunc f, const T& imm)
     ((S*)p)->imm = imm;
     return sizeof(S);
 }
-
-// Runtime error and control codes
-enum RTError
-{
-    RTE_OK = 0,
-    RTE_BREAKPOINT         = -1,
-    RTE_FIRST_ERROR        = -2,
-    RTE_OVERFLOW           = RTE_FIRST_ERROR - 0,
-    RTE_DIV_BY_ZERO        = RTE_FIRST_ERROR - 1,
-    RTE_VALUE_CAST         = RTE_FIRST_ERROR - 2,
-    RTE_NOT_CALLABLE       = RTE_FIRST_ERROR - 3,
-    RTE_ALLOC_FAIL         = RTE_FIRST_ERROR - 4,
-    RTE_DEAD_VM            = RTE_FIRST_ERROR - 5,
-    RTE_NOT_ENOUGH_PARAMS  = RTE_FIRST_ERROR - 6,
-    RTE_TOO_MANY_PARAMS    = RTE_FIRST_ERROR - 7,
-};
-
 
 struct LocalTracker
 {
