@@ -235,9 +235,9 @@ Observations:
 VMFUNC_IMM(leafcall, Imm_LeafCall)
 {
     const Val *oldstack = vm->_stkend;
-    RTError state = imm->f(vm, sbase + imm->baseoffs); // this writes to return slots
+    int state = imm->f(vm, sbase + imm->baseoffs); // this writes to return slots
     assert(oldstack == vm->_stkend && "Leafcalls are not supposed to change the stack in any way, this will crash");
-    if(LIKELY(!state))
+    if(LIKELY(state >= 0))
         NEXT();
     FAIL(state);
 }
@@ -246,11 +246,14 @@ VMFUNC_IMM(leafcall, Imm_LeafCall)
 VMFUNC_IMM(leafcall_noerr, Imm_LeafCall)
 {
     const Val *oldstack = vm->_stkend;
-    RTError state = imm->f(vm, sp + imm->baseoffs); // this writes to return slots
+    int state = imm->f(vm, sp + imm->baseoffs); // this writes to return slots
     assert(oldstack == vm->_stkend && "Leafcalls are not supposed to change the stack in any way, this will crash");
-    assert(!state && "Function was marked to never cause an error, but it did");
+    assert(state >= 0 && "Function was marked to never cause an error, but it did");
     NEXT();
 }
+
+// TODO: leafcall_debug that checks nrets?
+
 
 VMFUNC_IMM(vanum, Imm_u32)
 {
@@ -380,13 +383,13 @@ static FORCEINLINE const Inst *doreturn(VMPARAMS, tsize nret)
 #endif
 }
 
-static FORCEINLINE const Inst *finishCCall(VMPARAMS, CFunc f, size_t nargs)
+static FORCEINLINE const Inst *finishCCall(VMPARAMS, CFunc f, size_t nargs, Val *upvals)
 {
     // Preconditions:
     // - original stack frame was pushed
     // - sbase was adjusted so that sbase[0] is the first parameter to the function
 
-    int r = f(vm, nargs, sbase); // this writes to return slots and may invalidate sp, sbase
+    int r = f(vm, nargs, sbase, upvals); // this writes to return slots and may invalidate sp, sbase
     if(r < 0)
         FAIL(r);
 
@@ -402,7 +405,7 @@ VMFUNC_IMM(callc, Imm_CCall)
 {
     pushFrame(VMARGS, imm, imm->baseoffs);
     sbase += imm->baseoffs;
-    return finishCCall(VMARGS, imm->f, imm->nargs);
+    return finishCCall(VMARGS, imm->f, imm->nargs, NULL); // TODO: upvalues
 }
 
 VMFUNC_IMM(callcv, Imm_CCallv)
@@ -411,7 +414,7 @@ VMFUNC_IMM(callcv, Imm_CCallv)
     sbase += imm->baseoffs;
     assert(sbase <= sp);
     size_t nargs = sp - sbase;
-    return finishCCall(VMARGS, imm->f, nargs);
+    return finishCCall(VMARGS, imm->f, nargs, NULL); // TODO: upvalues
 }
 
 // Notes for Gcalls:
@@ -474,15 +477,15 @@ VMFUNC_IMM(callany, Imm_3xu32)
     {
         // TODO: Could keep track of the minimal required number of params (excl. optionals at the end),
         // and fill those with nil values if not passed
-        if(nargs < df->info.nargs)
+        if(nargs < df->info.nargs) // TODO: add a minargs if the later funcargs are optionals?
             FAIL(RTE_NOT_ENOUGH_PARAMS);
 
         switch(df->info.flags & FuncInfo::FuncTypeMask)
         {
             case FuncInfo::LFunc:
             {
-                RTError state = df->u.lfunc(vm, fbase);
-                if(UNLIKELY(state))
+                int state = df->u.lfunc(vm, fbase);
+                if(UNLIKELY(state < 0))
                     FAIL(state);
                 NEXT();
             }
@@ -496,7 +499,7 @@ VMFUNC_IMM(callany, Imm_3xu32)
             case FuncInfo::CFunc:
                 pushFrame(VMARGS, imm, df->info.fixedstack);
                 sbase = fbase;
-                return finishCCall(VMARGS, df->u.cfunc, nargs);
+                return finishCCall(VMARGS, df->u.cfunc.f, nargs, df->upvals);
 
             default:
                 unreachable();
@@ -537,12 +540,12 @@ size_t emitFuncCall(void *dst, const DFunc *df, const u32 *argslots, u32 nargs, 
         case FuncInfo::CFunc:
             if(!variadicArgs)
             {
-                Imm_CCall imm { df->u.cfunc, baseoffs, nargs };
+                Imm_CCall imm { df->u.cfunc.f, baseoffs, nargs };
                 return writeInst(dst, op_callc, imm);
             }
             else
             {
-                Imm_CCallv imm { df->u.cfunc, baseoffs };
+                Imm_CCallv imm { df->u.cfunc.f, baseoffs };
                 return writeInst(dst, op_callcv, imm);
             }
 
@@ -913,6 +916,7 @@ static const char *vmerrstr(int rte)
         case RTE_DEAD_VM:             return "dead VM";
         case RTE_NOT_ENOUGH_PARAMS:   return "not enough parameters";
         case RTE_TOO_MANY_PARAMS:     return "too many parameters";
+        case RTE_NOT_YIELDABLE:       return "can't yield";
     }
 
     return "unknown error";
@@ -920,8 +924,7 @@ static const char *vmerrstr(int rte)
 
 static Val vmerrval(VM *vm, int state)
 {
-    if(state >= RTE_OK)
-        return Val();
+    assert(RTIsError(state));
 
     Str s = vm->rt->sp.put(vmerrstr(state));
     Val ret(s);
@@ -929,14 +932,15 @@ static Val vmerrval(VM *vm, int state)
     return ret;
 }
 
-static int runloop(VM *vm)
+static int vm_runloop(VM *vm)
 {
     const Inst *ins = vm->cur.ins;
     if(!ins)
         return RTE_DEAD_VM;
 
 
-    vm->state = RTE_OK;
+    vm->state = 0;
+    vm->debug.errinst = NULL;
 
     // Main VM loop
     do
@@ -952,7 +956,7 @@ static int runloop(VM *vm)
     }
     while(ins);
 
-    // If resumable, vm->cur.ins was set to the next runnable op
+    // If resumable, vm->cur.ins is set to the next runnable op
 
 
     // Yield or error.
@@ -961,6 +965,7 @@ static int runloop(VM *vm)
     if(UNLIKELY(RTIsError(state)))
     {
         // Error. Try to recover...
+        vm->debug.errinst = vm->cur.ins;
         VMCallFrame f = vm->callstack.back();
         if(!f.sp) // error handler frame? (Don't go up the callstack. Exceptions don't cross function boundaries!)
         {
@@ -1046,26 +1051,14 @@ void vmtest(GC& gc)
 #endif
 
 
-VM* VM::GCNew(Runtime* rt)
+void VM::init(Runtime* rt, const Inst* entry)
 {
-    VM *vm = (VM*)gc_new(rt->gc, sizeof(VM), PRIMTYPE_OPAQUE);
-    if(!vm)
-        return NULL;
-    vm->rt = rt;
-    vm->state = RTE_OK_NEW_VM;
-    vm->cur = {};
-    vm->_stkbase = NULL;
-    vm->_stkend = NULL;
-    if(!vm->stack_ensure(NULL, 64).p)
-        vm = NULL;
-    return vm;
-}
-
-
-
-void VM::init(Inst* entry)
-{
-    cur.ins = entry;
+    this->cur.ins = entry;
+    this->rt = rt;
+    this->state = 0;
+    this->cur = {};
+    this->_stkbase = NULL;
+    this->_stkend = NULL;
 }
 
 VmStackAlloc VM::stack_ensure(Val *sp, size_t n)
@@ -1104,6 +1097,11 @@ VmStackAlloc VM::stack_ensure(Val *sp, size_t n)
         if(f.sp)
             f.sp += d;
     }
+    if(cur.sbase)
+        cur.sbase += d;
+    if(cur.sp)
+        cur.sp += d;
+
     _stkbase = nextbase;
     _stkend = nextbase + newcap;
 
@@ -1111,3 +1109,21 @@ VmStackAlloc VM::stack_ensure(Val *sp, size_t n)
     return ret;
 }
 
+int VM::run()
+{
+    return vm_runloop(this);
+}
+
+Val* VM::prepareArgs(size_t n)
+{
+    assert(isYielded());
+    VmStackAlloc sa = stack_ensure(cur.sp, n);
+    if(!sa.p)
+        return NULL;
+    return cur.sbase;
+}
+
+const Val* VM::getReturns()
+{
+    return state >= 0 ? cur.sbase : NULL;
+}

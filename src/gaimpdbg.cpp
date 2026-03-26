@@ -92,13 +92,29 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
     else if(n->type == HLNODE_FUNC_PROTO)
     {
         printf(" -> Packaged function:\n");
-        dumprec(p, n->u.funcproto.proto->node, level+1);
+        dumprec(p, n->u.funcproto.proto->body, level+1);
     }
     else
     {
         const char *tt = n->tok ? Lexer::GetTokenText((Lexer::TokenType)n->tok) : "";
         if(tt && *tt)
             printf(" [%s]", tt);
+
+        if(n->type == HLNODE_CONSTANT_VALUE)
+        {
+            Val v = n->u.constant.val;
+            printf(" :: value = ");
+            switch(v.type)
+            {
+                case PRIMTYPE_UINT: printf("%zu", v.u.ui); break;
+                case PRIMTYPE_SINT: printf("%zi", v.u.si); break;
+                case PRIMTYPE_BOOL: printf("%s", v.u.ui ? "true" : "false"); break;
+                case PRIMTYPE_FLOAT: printf("%f", v.u.f); break;
+                case PRIMTYPE_STRING: printf("\"%s\"", p.lookup(v.u.str).s); break;
+                //case PRIMTYPE_FUNCTION: { const DFunc *df = v.asFunc(); printf("function %s in line %d", df->dbg ? p.get(df->dbg->name).s : "?", df->dbg ? df->dbg->linestart : -1); break; }
+                default: printf("%08p, type=%d", v.u.p, v.type); break;
+            }
+        }
     }
 
     printf("\n");

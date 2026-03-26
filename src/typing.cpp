@@ -10,10 +10,18 @@ enum
 {
     _TLIST_BIT = 1u << (sizeof(Type) * 8 - 1),
 
-     // Currently there are 1 (Array<T>) or 2 (Table<K, V>,) subtypes
+     // Currently there are 1 (Array<T>) or 2 (Table<K, V>, Func<P, R>) subtypes
     MAX_SUBTYPES = 2
 };
 
+/* HMM:
+some bits directly in the type id?
+optional
+variadic
+-> limit of 2^30 distinct types (that much doesn't fit in ram on a 32 bit machine!)
+
+also: type lists of length 1 should be the type itself?
+*/
 
 static const Val XNil = _Xnil();
 
@@ -143,20 +151,19 @@ Type TypeRegistry::mkstruct(const Table& t)
 
 Type TypeRegistry::mklist(const Type* ts, size_t n)
 {
+    assert(ts);
     sref id = _tl.putCopy(ts, sizeof(*ts) * n);
-    if(!id)
-        id = 1; // 0 means that ts was NULL. Don't want this distinction here so make it "valid" in all cases.
-
+    assert(id && id != -1); // FIXME: handle OOM
     return (Type)(id | _TLIST_BIT);
 }
 
 Type TypeRegistry::lookuplist(const Type* ts, size_t n) const
 {
+    assert(ts);
     sref id = _tl.find(ts, sizeof(*ts) * n);
-    if(!id)
-        id = 1; // 0 means that ts was NULL. Don't want this distinction here so make it "valid" in all cases.
-
-    return (Type)(id | _TLIST_BIT);
+    if(id)
+        id |= _TLIST_BIT;
+    return (Type)id;
 }
 
 TypeIdList TypeRegistry::getlist(Type t)
@@ -244,6 +251,8 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
 
 Type TypeRegistry::mkfunc(Type argt, Type rett)
 {
+    assert(argt & _TLIST_BIT);
+    assert(rett & _TLIST_BIT);
     Type ts[] = { argt, rett };
     return mksub(PRIMTYPE_FUNC, &ts[0], Countof(ts));
 }
@@ -290,6 +299,21 @@ DType* TypeRegistry::lookup(Type t)
     const TDesc *td = lookupDesc(t);
     assert(td);
     return td->h.dtype;
+}
+
+FuncDTypes TypeRegistry::lookupFunc(Type t)
+{
+    FuncDTypes ret = {};
+    const TDesc *td = lookupDesc(t);
+    size_t sz = td->size();
+    const Type *ts = td->types();
+    assert(false);
+    return ret;
+}
+
+bool TypeRegistry::isListCompatible(Type sub, Type bigger) const
+{
+    return sub == bigger; // FIXME
 }
 
 Type TypeRegistry::_store(TDesc *td)

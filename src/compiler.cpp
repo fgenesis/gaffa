@@ -5,6 +5,7 @@
 #include "symtable.h"
 
 
+#if 0
 FuncInfo prepareFuncInfo(const HLNode* node)
 {
     assert(node->type == HLNODE_FUNCTION);
@@ -38,3 +39,5 @@ ModuleCompileResult compileToModule(HLNode* node, GC& gc, const SymTable& symtab
 {
     return ModuleCompileResult();
 }
+
+#endif

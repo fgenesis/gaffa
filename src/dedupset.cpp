@@ -50,7 +50,11 @@ bool Dedup::init()
      && arr.push_back(gc, NullBlock)
      && arr.push_back(gc, EmptyBlock))
     {
+#ifdef _DEBUG
+        _hashseed = 0; // For reproducibility across debug runs
+#else
         _hashseed = uhash((uintptr_t(arr.data()) >> 3u) ^ (uintptr_t(this) << 4u));
+#endif
         return true;
     }
 
@@ -263,12 +267,13 @@ void Dedup::_regenkeys(HKey *ks, tsize newmask)
     // Regenerate keys from hashed blocks
     // Precond: ks is all zeros
     const tsize N = arr.size();
+    const uhash seed = _hashseed;
     for(tsize j = 2; j < N; ++j) // skip sentinel values
     {
         unsigned char x = arr[j].x;
         const uhash h = x & LONG_BIT
             ? arr[j].h // Long blocks store the hash because recopmuting it may take a while
-            : keyhash(_hashseed, &arr[j], x & SHRT_SIZE_MASK); // Hashes of short blocks must be recomputed
+            : keyhash(seed, &arr[j], x & SHRT_SIZE_MASK); // Hashes of short blocks must be recomputed
         usize i = h;
         for(;;)
         {
@@ -329,19 +334,19 @@ Dedup::HKey* Dedup::_kresize(tsize newsize)
 
     if(oldsize)
     {
-        if(newsize)
-            memcpy(newks, keys, oldsize * sizeof(*keys));
         gc_alloc_unmanaged_T(gc, keys, oldsize, 0);
+
+        if(newsize)
+        {
+            // These don't use this->keys or this->mask
+            if(newsize < oldsize) // When shrinking, compact valid entries
+                _compact();
+            _regenkeys(newks, newmask); // Always regenerate keys
+        }
     }
 
     keys = newks;
     mask = newmask;
-
-    if(newsize < oldsize && oldsize && newsize) // When shrinking, compact valid entries
-    {
-        _compact();
-        _regenkeys(newks, newmask);
-    }
 
     return newks;
 }

@@ -612,8 +612,12 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 
     _endFunction();
 
-    printf("DEBUG: Finalized function '%s', nargs = %d, nrets = %d\n",
-        pname ? symbolname(*pname) : NULL, h->u.fhdr.nargs(), h->u.fhdr.nrets());
+    const HLFunctionHdr::Values args = h->u.fhdr.nargs();
+    const HLFunctionHdr::Values rets = h->u.fhdr.nrets();
+    printf("DEBUG: Finalized function '%s', nargs = %u%s, nrets = %d%s\n",
+        pname ? symbolname(*pname) : NULL,
+        args.n, args.variadic ? " variadic" : "",
+        rets.n, rets.variadic ? " variadic" : "");
 
     return f;
 }

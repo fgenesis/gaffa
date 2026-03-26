@@ -59,13 +59,11 @@ struct VmStackAlloc
 // Runtime error and control codes. Must be negative.
 enum RTError
 {
-    RTE_OK = 0,
     // Yield signals and temporaries that exit the VM loop. Can just resume afterward.
     RTE_OK_MINIYIELD          = -1, // Yield once to get out of the VM loop. No value.
     RTE_OK_LINE_REACHED       = -2, // line reached debug op. Line is in VM::debug.val.
     RTE_OK_BREAK              = -3, // debug marker. VM::debug.val is a user-defined value
-    RTE_OK_RECOVERED          = -4, // Recovered from an runtime error. Original error is in VM::debug.val
-    RTE_OK_NEW_VM             = -5, // New VM/coroutine that was never run yet
+    RTE_OK_RECOVERED          = -4, // Recovered from a runtime error. Original error is in VM::debug.val
     // Actual errors
     RTE_FIRST_ERROR        = -100,
     RTE_OVERFLOW           = RTE_FIRST_ERROR - 0,
@@ -73,9 +71,10 @@ enum RTError
     RTE_VALUE_CAST         = RTE_FIRST_ERROR - 2,
     RTE_NOT_CALLABLE       = RTE_FIRST_ERROR - 3,
     RTE_ALLOC_FAIL         = RTE_FIRST_ERROR - 4,
-    RTE_DEAD_VM            = RTE_FIRST_ERROR - 5,
+    RTE_DEAD_VM            = RTE_FIRST_ERROR - 5, // VM ran to completion and terminated without error
     RTE_NOT_ENOUGH_PARAMS  = RTE_FIRST_ERROR - 6,
     RTE_TOO_MANY_PARAMS    = RTE_FIRST_ERROR - 7,
+    RTE_NOT_YIELDABLE      = RTE_FIRST_ERROR - 8,
 };
 
 static FORCEINLINE bool RTIsError(int e)
@@ -86,8 +85,7 @@ static FORCEINLINE bool RTIsError(int e)
 
 struct VM
 {
-    VM *GCNew(Runtime *rt);
-    void init(Inst *entry);
+    void init(Runtime* rt, const Inst *entry);
 
     Runtime *rt;
     int state; // RTError if negative, otherwise # of return values on the stack
@@ -99,7 +97,9 @@ struct VM
     struct
     {
         int val; // Some RTError place a value here, eg. RTE_OK_LINE_REACHED: line number.
+        const Inst *errinst;
     } debug;
+
 
     // TODO? DFunc *panic;
 
@@ -107,6 +107,26 @@ struct VM
     // If .p is valid, p[0..slots) is valid to access.
     VmStackAlloc stack_ensure(Val *sp, size_t slots);
 
+    // Continue running from any interrupted state
+    int run();
+
+    // True when the VM is in a regular yield state, ie. adjusting any values in [sbase..sp]
+    // or reallocating the stack is allowed.
+    inline bool isYielded() const { return cur.ins && state >= 0; }
+
+    // '... = yield(...)' is a function that takes values and returns values.
+    // The body of a file is a function f(...).
+    // -> Both accept any number of parameters that are made available to the called code.
+    // To set the parameters passed to the script function, call prepareArgs(n) with n equal to
+    // the number of parameters you want to set.
+    // The returned pointer is an array where [0..n) should be set to your values. Then call run().
+    Val *prepareArgs(size_t n);
+
+    // Get a pointer to the start of the return values from a previous script run. The VM may be dead
+    // (ie. ran to completion, or died due to an error) or yielded. The number of valid elements is equal to
+    // the last return value of run() (equal to VM::state), if it is >= 0.
+    // Otherwise this returns NULL
+    const Val *getReturns();
 
 };
 
@@ -208,7 +228,8 @@ static FORCEINLINE VMFUNC_DEF(curop)
 }
 
 VMFUNC_DEF(rer);
-VMFUNC_DEF(onerror);
+VMFUNC_DEF(_onerror);
+VMFUNC_DEF(callany);
 
 
 
@@ -216,7 +237,7 @@ VMFUNC_DEF(onerror);
 #define NEXT() do { ins += immslots(imm); CHAIN(nextop); } while(0)
 
 #define TAILFWD(nx) do { ins = nx; TAIL_RETURN(ins->f(VMARGS)); } while(0)
-#define FAIL(e) do { vm->state = (e); CHAIN(onerror); } while(0)
+#define FAIL(e) do { vm->state = (e); CHAIN(_onerror); } while(0)
 #define FORWARD(a) do { imm += (a); CHAIN(nextop); } while(0)
 
 #define LOCAL(i) (&sbase[i])

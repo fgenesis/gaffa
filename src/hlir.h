@@ -28,7 +28,7 @@ enum HLFlags
     IDENTFLAGS_RHS          = 0x10, // Identifier is in a context of being evaluated
     // Neither LHS/RHS set: Identifier without a specific role
 
-    HLFLAG_KNOWNTYPE        = 0x40, // Runtyime type has been deducted or is known somehow
+    HLFLAG_KNOWNTYPE        = 0x40, // Runtime type has been deducted or is known somehow
     HLFLAG_NOEXTMEM         = 0x80, // Node doesn't use any external memory, don't try to free on deletion
 };
 
@@ -78,8 +78,7 @@ enum HLTypeFlags
 struct HLNode;
 struct HLNodeBase
 {
-    // Since there is nothing that can only result in nil, use that to indicate "no actual value type"
-    enum { DefaultValType = PRIMTYPE_NIL };
+    enum { DefaultValType = PRIMTYPE_NOTYPE };
 };
 
 // Important: Any children must be the FIRST struct members!
@@ -146,6 +145,7 @@ struct HLList : HLNodeBase
     HLNode **list;
 
     HLNode *add(HLNode *node, GC& gc); // returns node, unless memory allocation fails
+    HLNode **resize(GC& gc, size_t n);
 };
 
 struct HLVarDef : HLNodeBase // appears only as child of HLVarDeclList
@@ -229,17 +229,22 @@ struct HLIndex : HLNodeBase
     HLNode *idx; // name or expr
 };
 
+
 struct HLFunctionHdr : HLNodeBase
 {
     enum { EnumType = HLNODE_FUNCTIONHDR, Children = 2 };
     HLNode *paramlist; // list of HLVarDef // TODO: make this HLVarDeclList in the future when there are function default args?
     HLNode *rettypes; // OPTIONAL list of HLNode
 
-    // # of args / return values
-    // if negative: variadic, and abs()-1 of that is the minimal number
-    // The get the number of non-variadic elements, compute abs(n) - (n < 0)
-    int nargs() const;
-    int nrets() const;
+    // # of args / return values and whether the last element is variadic
+    struct Values
+    {
+        unsigned n;
+        bool variadic;
+    };
+
+    Values nargs() const;
+    Values nrets() const;
 };
 
 struct HLFunction : HLNodeBase
@@ -267,9 +272,10 @@ struct HLExport : HLNodeBase
 struct FuncProto
 {
     FuncProto *New(GC& gc, size_t nodemem);
-    HLNode *node; // points to the AST behind the struct
+    HLNode *body; // points to the AST behind the struct
     DType *paramtype;
     DType *rettype;
+    FuncInfo info;
     size_t refcount;
     size_t memsize;
 
@@ -290,12 +296,12 @@ enum HLFoldStep
     FOLD_SPECIALIZE, // At this point, all external symbols need to be defined
 };
 
-enum HLFoldResult
+enum HLVisitResult
 {
-    FOLD_FAILED, // Folding failed irrecoverably
-    FOLD_OK,     // Fold successful
-    FOLD_LATER,  // Retry folding later; can't finish now
+    VISIT_CONTINUE, // Continue visiting children
+    VISIT_NOREC // Break recursion
 };
+typedef HLVisitResult (*HLNodeVisitor)(HLNode *node, void *ud);
 
 // All of the node types intentionally occupy the same memory.
 // This is so that a node type can be easily mutated into another,
@@ -387,9 +393,9 @@ struct HLNode
     bool iscall() const;
 
     bool isknowntype() const { return flags & HLFLAG_KNOWNTYPE; }
-    void setknowntype(sref tid);
+    void setknowntype(Type tid);
 
-    HLFoldResult makeconst(GC& gc, const Val& val);
+    void makeconst(GC& gc, const Val& val);
     void clear(GC& gc);
 
     template<typename T>
@@ -411,26 +417,27 @@ struct HLNode
     HLNode *fold(HLFoldTracker &ft, HLFoldStep step);
 
     size_t memoryNeeded() const;
-    HLNode *clone(GC& gc) const;
+    HLNode *clone(HLFoldTracker& ft) const;
+
+    void visit(HLNodeVisitor visitor, void *ud);
 
 private:
     DType *getDType();
-    HLFoldResult _foldfunc(HLFoldTracker &ft);
-    HLFoldResult _tryfoldfunc(HLFoldTracker &ft);
-    HLFoldResult _foldRec(HLFoldTracker &ft, HLFoldStep step);
-    HLFoldResult _foldUnop(HLFoldTracker &ft);
-    HLFoldResult _foldBinop(HLFoldTracker &ft);
+    void _tryfoldfunc(HLFoldTracker &ft);
+    void _foldRec(HLFoldTracker &ft, HLFoldStep step);
+    void _foldUnop(HLFoldTracker &ft);
+    void _foldBinop(HLFoldTracker &ft);
     void _applyTypeFrom(HLFoldTracker& ft, HLNode *from);
     void _applyTypeFromList(HLFoldTracker& ft, HLNode *from);
-    HLFoldResult propagateMyType(HLFoldTracker &ft, const HLNode *typesrc);
+    void propagateMyType(HLFoldTracker &ft, const HLNode *typesrc);
 
     void _deductMyType(HLFoldTracker &ft);
     void _propagateTypeFromChildren(HLFoldTracker &ft);
     void _propagateTypeToChildren(HLFoldTracker &ft);
     void _inheritType(HLFoldTracker &ft, HLNode *from);
 
-    HLNode *_clone(void *mem, size_t bytes, GC& gc) const;
-    byte *_cloneRec(byte *m, HLNode *target, GC& gc) const;
+    HLNode *_clone(void *mem, size_t bytes, HLFoldTracker& ft) const;
+    byte *_cloneRec(byte *m, HLNode *target, HLFoldTracker& ft) const;
 };
 
 
@@ -467,6 +474,8 @@ public:
     inline HLNode *dummy()         { return allocT<HLDummy>();         }
     inline HLNode *funcproto()     { return allocT<HLFuncProto>();     }
 
+    HLNode *list(GC& gc, size_t prealloc);
+
 private:
 
     BlockListAllocator bla;
@@ -491,4 +500,7 @@ struct HLFoldTracker
 
     void error(const HLNode *where, const char *msg);
     void warn(const HLNode *where, const char *msg);
+
+    // Ensures sub < reference. 'where' is the thing to typecheck, 'decl' is where reference comes from
+    bool checktype(Type sub, Type reference, const char *what, const HLNode *where, const HLNode *decl);
 };

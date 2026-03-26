@@ -181,12 +181,12 @@ static void reg_type_func(RTReg& r)
 
 
 
-static RTError op_uint_plus(VM *, Val *v) // TEMP
+static int op_uint_plus(VM *, Val *v) // TEMP
 {
     assert(v[0].type == PRIMTYPE_UINT);
     assert(v[1].type == PRIMTYPE_UINT);
     v[0].u.ui += v[1].u.ui;
-    return RTE_OK;
+    return 1;
 }
 
 
@@ -201,12 +201,12 @@ static void reg_type_uint(RTReg& r)
 }
 
 
-static RTError mth_int_abs(VM *, Val *v)
+static int mth_int_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_SINT);
     const sint i = v->u.si;
     v->u.si = i < 0 ? -i : i; // TODO degenerate cases
-    return RTE_OK;
+    return 1;
 }
 
 
@@ -227,12 +227,12 @@ static void reg_type_sint(RTReg& r)
 }
 
 
-static RTError mth_float_abs(VM *, Val *v)
+static int mth_float_abs(VM *, Val *v)
 {
     assert(v->type == PRIMTYPE_FLOAT);
     float f = v->u.f;
     v->u.f = f < 0 ? -f : f;
-    return RTE_OK;
+    return 1;
 }
 
 static void reg_type_float(RTReg& r)
@@ -259,13 +259,13 @@ VMFUNC_IMM(strlen, Imm_2xu32)
 }
 */
 
-static RTError mth_string_len(VM *vm, Val *v)
+static int mth_string_len(VM *vm, Val *v)
 {
     assert(v->type == PRIMTYPE_STRING);
     const sref s = v->u.str;
     v->u.str = vm->rt->sp.lookup(s).len;
     v->type = PRIMTYPE_UINT;
-    return RTE_OK;
+    return 1;
 }
 
 static void reg_type_string(RTReg& r)
@@ -348,15 +348,15 @@ static void reg_constants(RTReg& r)
 }
 
 #include <time.h>
-static RTError u_clock(VM *vm, Val *v)
+static int u_clock(VM *vm, Val *v)
 {
     *v = Val((uint)clock());
-    return RTE_OK;
+    return 1;
 }
-static RTError u_time(VM *vm, Val *v)
+static int u_time(VM *vm, Val *v)
 {
     *v = Val((uint)time(NULL));
-    return RTE_OK;
+    return 1;
 }
 
 

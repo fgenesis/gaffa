@@ -126,6 +126,12 @@ struct TypeIdList
     tsize n;
 };
 
+struct FuncDTypes
+{
+    DType *params;
+    DType *rets;
+};
+
 class TypeRegistry
 {
 public:
@@ -146,8 +152,8 @@ public:
     // Get some infos about a type and resolve the base type (without vararg, optional, or subtyping)
     TypeInfo getinfo(Type t);
 
-    Type mkvariadic(Type t);
-    Type mkoptional(Type t);
+    Type mkvariadic(Type t); // T -> T...
+    Type mkoptional(Type t); // T -> T?
 
     Type mkstruct(const StructMember *m, size_t n, size_t numdefaults);
     Type mkstruct(const Table& t); // makes a struct from t (named)
@@ -157,7 +163,7 @@ public:
 
 
 
-    // Helper to create a function type
+    // Helper to create a function type. Both params must be type lists (created via mklist())
     Type mkfunc(Type argt, Type rett);
 
     // Create a subtype of an existing internal type (eg. Table<string, Any>)
@@ -167,6 +173,15 @@ public:
 
     const TDesc *lookupDesc(Type t) const; // get type descriptor
     DType *lookup(Type t);
+    FuncDTypes lookupFunc(Type t);
+
+    // Compares whether sub fits inside a bigger type. Considers variadics and optionals.
+    // Some examples:
+    // (A, B) is compatible with (A, B...)
+    // A is compatible with (A, B...) since B is variadic (ie. 0 or more)
+    // (A, B, B) is compatible with (A, B...)
+    // (A, nil) is compatible with (A, B?)
+    bool isListCompatible(Type sub, Type bigger) const;
 
     FORCEINLINE void mark(Type t) { if(t > PRIMTYPE_MAX) _tt.mark(t - PRIMTYPE_MAX); }
 

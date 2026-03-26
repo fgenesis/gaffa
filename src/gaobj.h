@@ -73,13 +73,14 @@ inline Type DObj::dynamicType() const { return dtype->tid; }
 // - Read args from inout[0..], write return values to inout[0..]
 // - Must NOT call back into the VM (no call frame is pushed)
 // - Can not reallocate the VM stack
+// - Can't have upvalues
 // - You need to know the number of parameters and return values,
 //   and the function must be registered correctly so the VM
 //   and type system know this too.
 // - Stack space is limited; up to MINSTACK usable slots total
-// - Return RTE_OK if all went well
+// - Return how many values the function should return, or any RTError to throw a runtime error
 // - To cause a runtime error, return any of RTError < 0
-typedef RTError (*LeafFunc)(VM *vm, Val inout[]);
+typedef int (*LeafFunc)(VM *vm, Val inout[]);
 
 
 
@@ -87,6 +88,7 @@ typedef RTError (*LeafFunc)(VM *vm, Val inout[]);
 // - May or may not be variadic (params, return values, or both)
 // - Calling back into the VM is allowed
 // - Can grow the stack
+// - Can have upvalues
 // ---- C function call protocol: ----
 // - Parameters are in inout[0..nargs)
 // - Write return values to inout[0..N), then return N (there will be enough space pre-allocated)
@@ -94,13 +96,14 @@ typedef RTError (*LeafFunc)(VM *vm, Val inout[]);
 //     inout = vm->stack_ensure(inout, N);
 //   Then proceed as above.
 // - To cause a runtime error, return a RTError value < 0
-typedef int (*CFunc)(VM *vm, size_t nargs, Val *inout);
+typedef int (*CFunc)(VM *vm, size_t nargs, Val *inout, Val *upvals);
 
 
 struct FuncInfo
 {
     Type rettype; // type list of return values
     Type paramtype; // type list of parameter values
+    // TODO: param struct type? with names and everything
     Type functype; // All combined: func(argtype) -> rettype
     u32 nargs; // Minimal number. If variadic, there may be more.
     u32 nrets;
@@ -146,18 +149,21 @@ struct InstChunk
     // Optional: Debug info follows
 };
 
+// Callable function representation. May have upvalues.
 struct DFunc : public GCobj
 {
     static DFunc *GCNew(GC& gc);
 
     inline bool isPure() const { return info.flags & FuncInfo::Pure; }
 
-    FuncInfo info;
-    // TODO: (DType: Func(Args, Ret))
     union
     {
-        CFunc cfunc;
         LeafFunc lfunc;
+        struct
+        {
+            CFunc f;
+
+        } cfunc;
         struct
         {
             HLNode *node; // Cloned from original parse tree as a single block of memory
@@ -170,11 +176,25 @@ struct DFunc : public GCobj
         } gfunc;
     } u;
 
+    Val *upvals;
+
+    FuncInfo info;
+    // TODO: (DType: Func(Args, Ret))
+
     const OpDef *opdef; // Infos for codegen, if this function can be implemented as VM opcode directly
 
     DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
 
     // Slow path for compile-time eval and such
-    void call(VM *vm, Val *a) const;
+    int call(VM *vm, Val *a) const;
+};
+
+//
+struct DClosure : public GCobj
+{
+    static DClosure *GCNew(GC& gc);
+
+    DFunc *func;
+
 };
 

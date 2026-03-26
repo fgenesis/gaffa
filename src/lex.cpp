@@ -257,6 +257,7 @@ const char* Lexer::GetTokenText(TokenType tt)
         case TOK_IDENT: return "identifier";
         case TOK_LITNUM: return "number literal";
         case TOK_LITSTR: return "string literal";
+        case TOK_SYNTHETIC: return "synthetic";
         default: ;
     }
     return NULL;

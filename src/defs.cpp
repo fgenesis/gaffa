@@ -7,6 +7,7 @@
 
 #include "symtable.h"
 #include "gaobj.h"
+#include "gacoro.h"
 
 
 Val::Val(DType *t)       { _init(PRIMTYPE_TYPE);   u.obj = t; }
@@ -59,12 +60,14 @@ static const unsigned char TypeElementSizes[] =
     /* PRIMTYPE_STRING */ sizeof(sref),
     /* PRIMTYPE_TYPE   */ sizeof(Type),
     /* PRIMTYPE_FUNC   */ sizeof(DFunc*), // TODO
+    /* PRIMTYPE_CORO   */ sizeof(DCoro*), // TODO
     /* PRIMTYPE_TABLE  */ sizeof(GCobj*), // table/array/object are always dynamically allocated
     /* PRIMTYPE_ARRAY  */ sizeof(GCobj*),
     /* PRIMTYPE_SYMTAB */ sizeof(SymTable*),
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
     /* PRIMTYPE_ANY    */ sizeof(ValU), // both type + opaque
     /* PRIMTYPE_AUTO   */ sizeof(ValU),
+    /* PRIMTYPE_NOTYPE */ 0,
     /* _PRIMTYPE_X_VARIADIC, */ 0,
     /* _PRIMTYPE_X_OPTIONAL, */ 0,
     /* _PRIMTYPE_X_SUBTYPE,  */ 0

@@ -68,6 +68,7 @@ enum PrimType
     PRIMTYPE_STRING, // T  R     g   //
     PRIMTYPE_TYPE,   // T  R     g   //
     PRIMTYPE_FUNC,   // T  o  S  G   //
+    PRIMTYPE_CORO,   // T  o  S  G   //
     PRIMTYPE_TABLE,  // T  o  S  G   //
     PRIMTYPE_ARRAY,  // T  o  S  G   //
     PRIMTYPE_SYMTAB, // T  o     G   //
@@ -76,6 +77,7 @@ enum PrimType
     PRIMTYPE_ANY,    // can hold any value. must be after specific types.
 
     PRIMTYPE_AUTO,     // special marker for type analysis
+    PRIMTYPE_NOTYPE,   // special marker for type analysis
     _PRIMTYPE_X_VARIADIC, // special marker for type lists
     _PRIMTYPE_X_OPTIONAL, // special marker for optionals
     _PRIMTYPE_X_SUBTYPE,  // special marker for subtype specialization

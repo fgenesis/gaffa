@@ -11,8 +11,8 @@ struct FuncTypes
     // Each of these needs a template specialization struct below
     typedef bool (*CompBin)(T a, T b);
     typedef bool (*CompUn)(T a);
-    typedef RTError (*Binary)(T& a, T b);
-    typedef RTError (*Unary)(T& a);
+    typedef int (*Binary)(T& a, T b);
+    typedef int (*Unary)(T& a);
 };
 
 template<typename T>
@@ -83,18 +83,18 @@ template<typename T> static FORCEINLINE bool C_Lt (T a, T b) { return  (a <  b);
 template<typename T> static FORCEINLINE bool C_Gt (T a, T b) { return  (b <  a); }
 template<typename T> static FORCEINLINE bool C_Lte(T a, T b) { return !(b <  a); }
 template<typename T> static FORCEINLINE bool C_Gte(T a, T b) { return !(a <  b); }
-template<typename T> static FORCEINLINE RTError Add(T& a, T b) { a += b; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError Sub(T& a, T b) { a -= b; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError Mul(T& a, T b) { a *= b; return RTE_OK; }
-                     static FORCEINLINE RTError FDiv(widereal& a, widereal b) { if(!b) return RTE_DIV_BY_ZERO; a /= b; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError Div(T& a, T b) { if(!b) return RTE_DIV_BY_ZERO; a /= b; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError Mod(T& a, T b) { if(!b) return RTE_DIV_BY_ZERO; a %= b; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError UPos(T& a) { a = +a; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError UNeg(T& a) { a = -a; return RTE_OK; } // TODO: overflow check
+template<typename T> static FORCEINLINE int Add(T& a, T b) { a += b; return 1; }
+template<typename T> static FORCEINLINE int Sub(T& a, T b) { a -= b; return 1; }
+template<typename T> static FORCEINLINE int Mul(T& a, T b) { a *= b; return 1; }
+                     static FORCEINLINE int FDiv(widereal& a, widereal b) { if(!b) return RTE_DIV_BY_ZERO; a /= b; return 1; }
+template<typename T> static FORCEINLINE int Div(T& a, T b) { if(!b) return RTE_DIV_BY_ZERO; a /= b; return 1; }
+template<typename T> static FORCEINLINE int Mod(T& a, T b) { if(!b) return RTE_DIV_BY_ZERO; a %= b; return 1; }
+template<typename T> static FORCEINLINE int UPos(T& a) { a = +a; return 1; }
+template<typename T> static FORCEINLINE int UNeg(T& a) { a = -a; return 1; } // TODO: overflow check
 
 // integer variant of wrapping mod returns T(-1) aka all bits set
-//template<typename T> static FORCEINLINE RTError WrapDiv(real& a, real b) { a = b ? a / b : T(-1); return RTE_OK; }
-//template<typename T> static FORCEINLINE RTError WrapWMod(real& a, real b) { a = b ? a % b : T(-1); return RTE_OK; }
+//template<typename T> static FORCEINLINE int WrapDiv(real& a, real b) { a = b ? a / b : T(-1); return 1; }
+//template<typename T> static FORCEINLINE int WrapWMod(real& a, real b) { a = b ? a % b : T(-1); return 1; }
 
 // NB: On some archs (ARM), shifts by >= register size is UB
 template<typename T>
@@ -104,23 +104,23 @@ struct Bit
 };
 
 // shif-left overflow is an error
-template<typename T> static FORCEINLINE RTError Shl(T& a, T b) { a = b <= Bit<T>::ShMask ? a << b : 0; return RTE_OK; } // TODO: check overflow
-template<typename T> static FORCEINLINE RTError Shr(T& a, T b) { a = b <= Bit<T>::ShMask ? a >> b : 0; return RTE_OK; }
+template<typename T> static FORCEINLINE int Shl(T& a, T b) { a = b <= Bit<T>::ShMask ? a << b : 0; return 1; } // TODO: check overflow
+template<typename T> static FORCEINLINE int Shr(T& a, T b) { a = b <= Bit<T>::ShMask ? a >> b : 0; return 1; }
 
 // rotation is always modulo bitsize
-template<typename T> static FORCEINLINE RTError Rol(T& a, T b) { b &= Bit<T>::ShMask; a = (a << b) | (a >> (Bit<T>::Bits-b)); return RTE_OK; }
-template<typename T> static FORCEINLINE RTError Ror(T& a, T b) { b &= Bit<T>::ShMask; a = (a >> b) | (a << (Bit<T>::Bits-b)); return RTE_OK; }
+template<typename T> static FORCEINLINE int Rol(T& a, T b) { b &= Bit<T>::ShMask; a = (a << b) | (a >> (Bit<T>::Bits-b)); return 1; }
+template<typename T> static FORCEINLINE int Ror(T& a, T b) { b &= Bit<T>::ShMask; a = (a >> b) | (a << (Bit<T>::Bits-b)); return 1; }
 
-template<typename T> static FORCEINLINE RTError BAnd(T& a, T b) { a &= b; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError BOr (T& a, T b) { a |= b; return RTE_OK; }
-template<typename T> static FORCEINLINE RTError BXor(T& a, T b) { a ^= b; return RTE_OK; }
+template<typename T> static FORCEINLINE int BAnd(T& a, T b) { a &= b; return 1; }
+template<typename T> static FORCEINLINE int BOr (T& a, T b) { a |= b; return 1; }
+template<typename T> static FORCEINLINE int BXor(T& a, T b) { a ^= b; return 1; }
 
-template<typename T> static FORCEINLINE RTError UCpl(T& a) { a = ~a; return RTE_OK; }
+template<typename T> static FORCEINLINE int UCpl(T& a) { a = ~a; return 1; }
 
 // --- Overloads ---
-//static FORCEINLINE RTError WrapDiv(real& a, real b) { a /= b; return RTE_OK; }
-//static FORCEINLINE RTError WrapMod(real& a, real b) { a = std::fmod(a, b); return RTE_OK; }
-static FORCEINLINE RTError Mod(real& a, real b) { a = std::fmod(a, b); return RTE_OK; }
+//static FORCEINLINE int WrapDiv(real& a, real b) { a /= b; return 1; }
+//static FORCEINLINE int WrapMod(real& a, real b) { a = std::fmod(a, b); return 1; }
+static FORCEINLINE int Mod(real& a, real b) { a = std::fmod(a, b); return 1; }
 
 // This is only evaluated for primitive types;
 // describes whether a = a * b is the same as a = b * a,
@@ -184,10 +184,10 @@ struct WrappedBase
 template<typename RT, typename IT, typename ST, typename TDef<IT>::Binary F, Lexer::TokenType tt>
 struct WrappedBinOp : WrappedBase<RT, IT, ST>
 {
-    static FORCEINLINE RTError Doit(Val *dst, Val *a, Val *b)
+    static FORCEINLINE int Doit(Val *dst, Val *a, Val *b)
     {
         IT x = LoadChecked(*a);
-        const RTError e = F(x, LoadChecked(*b));
+        const int e = F(x, LoadChecked(*b));
         StoreChecked(*dst, x);
         return e;
     }
@@ -196,7 +196,8 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
     {
         Val *d = LOCAL(imm->a);
         Val *a = LOCAL(imm->b);
-        if(RTError e = Doit(d, d, a))
+        int e = Doit(d, d, a);
+        if(e < 0);
             FAIL(e);
         NEXT();
     }
@@ -206,20 +207,21 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
         Val *d = LOCAL(imm->a);
         Val *a = LOCAL(imm->b);
         Val *b = LOCAL(imm->c);
-        if(RTError e = Doit(d, a, b))
+        int e = Doit(d, a, b);
+        if(e < 0)
             FAIL(e);
         NEXT();
     }
 
     // Fallback function for compile-time evaluation
-    // Protocol: Read params from v[0..], write return values to v[0..]
-    static NOINLINE RTError Func(VM *vm, Val *v)
+    // Protocol: Read params from v[0..], write return values to v[0]
+    static NOINLINE int Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
         vm->state = F(x, LoadChecked(v[1]));
         Store(v[0], x);
         assert(vm->state || v[0].type == TDef<RT>::Prim);
-        return RTE_OK;
+        return 1;
     }
 
     static size_t GenOp(void *dst, const u32 *argslots)
@@ -252,10 +254,10 @@ template<typename RT, typename IT, typename ST, typename TDef<IT>::Unary F, Lexe
 struct WrappedUnOp : WrappedBase<RT, IT, ST>
 {
 
-    static FORCEINLINE RTError Doit(Val *dst, Val *a)
+    static FORCEINLINE int Doit(Val *dst, Val *a)
     {
         IT x = LoadChecked(*a);
-        RTError e = F(x);
+        int e = F(x);
         StoreChecked(*dst, x);
         return e;
     }
@@ -263,7 +265,8 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
     static VMFUNC_MTH_IMM(OpInplace, Imm_2xu32)
     {
         Val *d = LOCAL(imm->a);
-        if(RTError e = Doit(d, d))
+        int e = Doit(d, d);
+        if(e < 0)
             FAIL(e);
         NEXT();
     }
@@ -272,18 +275,19 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
     {
         Val *d = LOCAL(imm->a);
         Val *a = LOCAL(imm->b);
-        if(RTError e = Doit(d, a))
+        int e = Doit(d, a);
+        if(e < 0)
             FAIL(e);
         NEXT();
     }
 
-    static RTError Func(VM *vm, Val *v)
+    static int Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
         vm->state = F(x);
         Store(v[0], x);
         assert(vm->state || v[0].type == TDef<RT>::Prim);
-        return RTE_OK;
+        return 1;
     }
 
     static size_t GenOp(void *dst, const u32 *argslots)
@@ -331,13 +335,13 @@ struct WrappedBinComp : WrappedBase<bool, bool, T>
 
     // Fallback function for compile-time evaluation
     // Protocol: Read params from v[0..], write return values to v[0..]
-    static NOINLINE RTError Func(VM *vm, Val *v)
+    static NOINLINE int Func(VM *vm, Val *v)
     {
         T a = LoadChecked(v[0]);
         T b = LoadChecked(v[1]);
         bool x =  F(a, b);
         Store(v[0], x);
-        return RTE_OK;
+        return 1;
     }
 
     static size_t GenOp(void *dst, const u32 *argslots)

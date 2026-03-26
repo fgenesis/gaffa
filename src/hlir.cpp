@@ -17,21 +17,34 @@ HLIRBuilder::~HLIRBuilder()
 {
 }
 
+HLNode* HLIRBuilder::list(GC& gc, size_t prealloc)
+{
+    HLNode *ls = this->list();
+    return ls->u.list.resize(gc, prealloc) ? ls : NULL;
+}
+
 HLNode *HLList::add(HLNode* node, GC& gc)
 {
     if(used == cap)
     {
         const size_t newcap = 4 + (2 * cap);
-
-        HLNode **newlist = gc_alloc_unmanaged_T<HLNode*>(gc, list, cap, newcap);
-        if(!newlist)
+        if(!resize(gc, newcap))
             return NULL;
-        list = newlist;
-        cap = newcap;
     }
 
     list[used++] = node;
     return node;
+}
+
+HLNode **HLList::resize(GC& gc, size_t n)
+{
+    HLNode **newlist = gc_alloc_unmanaged_T<HLNode*>(gc, list, cap, n);
+    if(newlist)
+    {
+        list = newlist;
+        cap = n;
+    }
+    return newlist;
 }
 
 HLNode::~HLNode()
@@ -53,38 +66,39 @@ bool HLNode::iscall() const
 static bool isvariadic(const HLList *list)
 {
     // Check if the last list element has the variadic flag set
-    return list->used && list->list[list->used - 1]->flags & HLFLAG_VARIADIC;
+    return list->used && (list->list[list->used - 1]->flags & HLFLAG_VARIADIC);
 }
 
-static int variadicsize(const HLList *list)
+static HLFunctionHdr::Values variadicsize(const HLList *list)
 {
-    int n = (int)list->used;
-    if(isvariadic(list))
-        n = -n; // Note that the last list element is the variadic indicator element;
-    return n;   // to get the size without it, use abs(n) - (n < 0)
+    HLFunctionHdr::Values ret;
+    ret.variadic = isvariadic(list);
+    // Note that the last list element is the variadic indicator element, so the actual number is one less
+    ret.n = list->used - ret.variadic;
+    return ret;
 }
 
 
-int HLFunctionHdr::nargs() const
+HLFunctionHdr::Values HLFunctionHdr::nargs() const
 {
-    int n = 0;
+    Values ret = {};
     if(paramlist)
     {
         const HLList *list = paramlist->as<HLList>();
-        n = variadicsize(list);
+        ret = variadicsize(list);
     }
-    return n;
+    return ret;
 }
 
-int HLFunctionHdr::nrets() const
+HLFunctionHdr::Values HLFunctionHdr::nrets() const
 {
-    int n = 0;
+    Values ret = {};
     if(rettypes)
     {
         const HLList *list = rettypes->as<HLList>();
-        n = variadicsize(list);
+        ret = variadicsize(list);
     }
-    return n;
+    return ret;
 }
 
 
@@ -98,13 +112,12 @@ HLNode *HLNode::fold(HLFoldTracker& ft, HLFoldStep step)
     _foldRec(ft, step);
 
     // Chop functions into separate memory blocks so that they can be specialized individually
-    HLNode *cp = clone(ft.vm.rt->gc);
-
+    HLNode *cp = clone(ft);
     return cp;
 }
 
 
-HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
+void HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
 {
     if(_nch)
     {
@@ -236,23 +249,21 @@ HLFoldResult HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             u.list.used = w;
         }
     }
-
-    return FOLD_OK;
 }
 
-void HLNode::setknowntype(sref tid)
+void HLNode::setknowntype(Type tid)
 {
     assert(!(flags & HLFLAG_KNOWNTYPE));
     flags |= HLFLAG_KNOWNTYPE;
     mytype = tid;
 }
 
-HLFoldResult HLNode::makeconst(GC& gc, const Val& val)
+void HLNode::makeconst(GC& gc, const Val& val)
 {
-    HLNode *me = morph<HLConstantValue>(gc);
-    me->u.constant.val = val;
-    me->setknowntype(val.type);
-    return FOLD_OK;
+    morph<HLConstantValue>(gc);
+    u.constant.val = val;
+    setknowntype(val.type);
+    tok = Lexer::TOK_SYNTHETIC;
 }
 
 void HLNode::clear(GC& gc)
@@ -274,20 +285,7 @@ void HLNode::clear(GC& gc)
     type = HLNODE_NONE;
 }
 
-HLFoldResult HLNode::_foldfunc(HLFoldTracker& ft)
-{
-    HLFoldResult fr = _tryfoldfunc(ft);
-    if(fr == FOLD_LATER)
-    {
-        assert(false); // TODO: emit as proto
-        fr = FOLD_OK;
-    }
-
-    return fr;
-}
-
-
-HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
+void HLNode::_tryfoldfunc(HLFoldTracker& ft)
 {
     assert(type == HLNODE_FUNCTION);
 
@@ -371,8 +369,7 @@ HLFoldResult HLNode::_tryfoldfunc(HLFoldTracker& ft)
     //f->u.gfunc.vmcode = ...
     // TODO: populate func body
 
-
-    return makeconst(ft.vm.rt->gc, Val(f));
+    makeconst(ft.vm.rt->gc, Val(f));
 }
 
 size_t HLNode::memoryNeeded() const
@@ -396,20 +393,71 @@ size_t HLNode::memoryNeeded() const
     return bytes;
 }
 
-// Clone one function into its own memory block.
-HLNode * HLNode::clone(GC & gc) const
+struct ReturnTypeDeductorVisitor
 {
+    HLFoldTracker& ft;
+    HLNode *first;
+    Type rettype;
+    size_t n;
+};
+
+static HLVisitResult nodeReturnVisitor(HLNode *node, void *ud)
+{
+    ReturnTypeDeductorVisitor *vis = (ReturnTypeDeductorVisitor*)ud;
+
+    if(node->type == HLNODE_FUNCTION || node->type == HLNODE_FUNCDECL || node->type == HLNODE_FUNC_PROTO)
+        return VISIT_NOREC;
+
+    // TODO: could also use norec for things that are known to be expressions
+    // and therefore can't contain a return statement -- probably faster
+
+    if(node->type != HLNODE_RETURNYIELD || node->tok != Lexer::TOK_RETURN)
+        return VISIT_CONTINUE;
+
+    // It's a return statement
+    assert(node->mytype != PRIMTYPE_AUTO);
+
+    ++vis->n;
+
+    if(!vis->first) // First one we find defines the type
+        vis->first = node;
+
+    if(vis->rettype == PRIMTYPE_AUTO)
+        vis->rettype = node->mytype;
+    else // Any further ones must have the same type
+    {
+        if(vis->rettype != node->mytype) // FIXME: This should be a type compat check
+        {
+            vis->ft.error(node, "Return statement has mismatching type");
+            vis->ft.error(vis->first, "(originally obtained from here)");
+        }
+    }
+
+    return VISIT_NOREC;
+}
+
+// Clone one function into its own memory block.
+HLNode * HLNode::clone(HLFoldTracker& ft) const
+{
+    Runtime& rt = *ft.vm.rt;
     assert(type == HLNODE_FUNCTION); // There's little reason to call this for anything else
-    const size_t sizeForSubtree = memoryNeeded();
+    const HLFunction * const hf = this->as<HLFunction>();
+    const HLFunctionHdr * const hh = hf->hdr->as<HLFunctionHdr>();
+    const HLNode * const body = hf->body;
+
+    // We're going to dissect the header later. For now, clone the body.
+    // (The header isn't needed later, extract everything needed here)
+    // This all goes into one memory block behind the FuncProto.
+    const size_t sizeForSubtree = body->memoryNeeded();
     const size_t totalbytes = sizeForSubtree + sizeof(FuncProto) + sizeof(HLNode);
     printf("DEBUG: Cloning function in line %u using %u bytes\n", this->line, (unsigned)totalbytes);
-    byte *mem = (byte*)gc_alloc_unmanaged(gc, NULL, 0, totalbytes);
+    byte *mem = (byte*)gc_alloc_unmanaged(rt.gc, NULL, 0, totalbytes);
 
     HLNode *funcroot = (HLNode*)mem;
-    memcpy(funcroot, this, sizeof(HLNode)); // Copy metadata like line number; this copies some more but whatev
+    memcpy(funcroot, body, sizeof(HLNode)); // Copy metadata like line number; this copies some more but whatev
     mem += sizeof(*funcroot);
 
-    FuncProto *proto = (FuncProto*)mem;
+    FuncProto * const proto = (FuncProto*)mem;
     mem += sizeof(*proto);
 
     funcroot->unsafemorph<HLFuncProto>();
@@ -417,22 +465,139 @@ HLNode * HLNode::clone(GC & gc) const
 
     proto->refcount = 1;
     proto->memsize = totalbytes;
-    proto->node = _clone(mem, sizeForSubtree, gc);
+
+    // Clone all local functions first.
+    proto->body = body->_clone(mem, sizeForSubtree, ft);
+
+    // Clone done. Now figure out the parameter and return types.
+
+    // These are NULL if there are no parameters or return values specified
+    HLList *paramlist = hh->paramlist ? hh->paramlist->aslist(HLNODE_LIST) : NULL;
+    HLList *retlist = hh->rettypes ? hh->rettypes->aslist(HLNODE_LIST) : NULL;
+    //const int nargs = hh->nargs();
+    //const int nrets = hh->nrets();
+
+    FuncInfo info = {};
+    Type paramt = {};
+    if(paramlist)
+    {
+        StructMember sm[256];
+        Type ts[256];
+        assert(paramlist->used < Countof(ts));
+
+        const size_t n = paramlist->used;
+        for(size_t i = 0; i < n; ++i)
+        {
+            StructMember& m = sm[i];
+            const HLVarDef *vd = paramlist->list[i]->as<HLVarDef>();
+            m.defaultval = _Xnil();
+            m.name = vd->ident->as<HLIdent>()->nameStrId;
+            const Val& thetype = vd->type->as<HLConstantValue>()->val;
+            m.t = thetype.asDType()->tid;
+            ts[i] = m.t;
+            assert(m.t == PRIMTYPE_TYPE);
+            assert(false && "wat");
+        }
+
+        HLFunctionHdr::Values args = hh->nargs();
+        info.nargs = args.n;
+        if(args.variadic)
+            info.flags |= FuncInfo::VarArgs;
+        // TODO make sure last type in the list is variadic
+
+        //info.paramtype = rt.tr.mkstruct(&sm[0], n, 0); // HMM: if we really make a struct here, and it's variadic,
+        //   then the last entry must be an Array<T>?
+        info.paramtype = rt.tr.mklist(&ts[0], n);
+    }
+    else // No params -- that means we're most likely the file-scope root function, which is f(any?...) aka f(...)
+    {
+        Type anyopt = rt.tr.mkoptional(PRIMTYPE_ANY);
+        Type anyvar = rt.tr.mkvariadic(anyopt); // TODO: Cache this type in runtime or so
+        Type varlist = rt.tr.mklist(&anyvar, 1);
+        info.paramtype = anyopt;
+        info.flags |= FuncInfo::VarArgs;
+        info.nargs = 0;
+    }
+
+    info.rettype = PRIMTYPE_AUTO;
+
+    if(retlist) // Return types specified?
+    {
+        Type ts[256];
+        assert(retlist->used < Countof(ts));
+        const size_t n = retlist->used;
+        for(size_t i = 0; i < n; ++i)
+        {
+            const Val& thetype = retlist->list[i]->as<HLConstantValue>()->val;
+            ts[i] = thetype.asDType()->tid;
+            assert(0);
+            //assert(m.t == PRIMTYPE_TYPE);
+        }
+
+        HLFunctionHdr::Values rets = hh->nrets();
+        info.nrets = rets.n;
+        if(rets.variadic)
+            info.flags |= FuncInfo::VarRets;
+
+        info.rettype = rt.tr.mklist(&ts[0], n);
+    }
+
+    // Search for return statements and see what they return
+    {
+        ReturnTypeDeductorVisitor vis = { ft, hh->rettypes, info.rettype };
+        funcroot->visit(nodeReturnVisitor, &vis); // This will uncover type clashes if we already have a type
+        Type rettype = vis.first->mytype;
+
+        if(rettype == PRIMTYPE_AUTO && !vis.n) // No return type specified, no return found -> void aka nil
+            rettype = PRIMTYPE_NIL;
+
+        assert(rettype != PRIMTYPE_AUTO);
+
+        info.rettype = rettype;
+    }
+
+    info.functype = rt.tr.mkfunc(info.paramtype, info.rettype);
+
+    proto->info = info;
+
+
+    //FuncDTypes ft = rt.tr.lookupFunc(hh->nrets);
+    //assert(dt);
+
+    //proto->paramtype = rt.tr.lookup(funcroot->mytype);
 
     return funcroot;
 }
 
-HLNode* HLNode::_clone(void* mem, size_t bytes, GC& gc) const
+void HLNode::visit(HLNodeVisitor visitor, void* ud)
 {
-    assert(_nch <= Countof(u.aslist)); // This is only called on functions, which are no lists
+    switch(visitor(this, ud))
+    {
+        case VISIT_CONTINUE:
+        {
+            const size_t N = numchildren();
+            HLNode **ch = children();
+
+            for(size_t i = 0; i < N; ++i)
+                ch[i]->visit(visitor, ud);
+        }
+        break;
+
+        case VISIT_NOREC:
+            break;
+    }
+}
+
+HLNode* HLNode::_clone(void* mem, size_t bytes, HLFoldTracker& ft) const
+{
     byte * const begin = (byte*)mem;
     HLNode * const target = (HLNode*)begin;
-    byte *end = this->_cloneRec(begin + sizeof(*this), target, gc);
+    byte *end = this->_cloneRec(begin + sizeof(*this), target, ft);
     assert(end - begin == bytes);
     return target;
 }
 
-byte *HLNode::_cloneRec(byte *m, HLNode *target, GC& gc) const
+byte *HLNode::_cloneRec(byte *m, HLNode *target, HLFoldTracker& ft) const
 {
     memcpy(target, this, sizeof(*this));
 
@@ -472,11 +637,11 @@ byte *HLNode::_cloneRec(byte *m, HLNode *target, GC& gc) const
                     // fall through
                 default:
                     d = &ch[i];
-                    m = s->_cloneRec(m, d, gc); // Advances in our block
+                    m = s->_cloneRec(m, d, ft); // Advances in our block
                     break;
 
                 case HLNODE_FUNCTION:
-                    d = s->clone(gc); // Allocates its own memory
+                    d = s->clone(ft); // Allocates its own memory
                     break;
             }
         }
@@ -488,9 +653,9 @@ byte *HLNode::_cloneRec(byte *m, HLNode *target, GC& gc) const
 
 
 
-HLFoldResult HLNode::_foldUnop(HLFoldTracker& ft)
+void HLNode::_foldUnop(HLFoldTracker& ft)
 {
-    return HLFoldResult();
+    assert(false);
 }
 
 #if 0
@@ -542,32 +707,18 @@ void HLNode::_applyTypeFromList(HLFoldTracker& ft, HLNode* from)
 }
 
 // Sets my own type and propagates to children
-HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
+void HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
 {
     assert(typesrc->isknowntype());
 
     if(this->isknowntype())
     {
-        // FIXME: This needs to be a proper subtype check
-        if(typesrc->mytype == mytype)
-        {
-            return FOLD_OK;
-        }
-        else
-        {
-            std::ostringstream os;
-            // TODO: get source location if possible, and show it
-            const char *toktxt = Lexer::GetTokenText(Lexer::TokenType(this->tok));
-            os << "(" << line << ":" << column << ") '" << toktxt << "': mismatched types, found " << mytype << ", expected " << typesrc->mytype;
-            ft.errors.push_back(os.str());
-            puts(os.str().c_str());
-            return FOLD_FAILED;
-        }
+        const char *toktxt = Lexer::GetTokenText(Lexer::TokenType(this->tok));
+        ft.checktype(mytype, typesrc->mytype, toktxt, this, typesrc);
+        return;
     }
 
     this->setknowntype(typesrc->mytype);
-
-    HLFoldResult res = FOLD_OK;
 
     switch(type)
     {
@@ -601,12 +752,8 @@ HLFoldResult HLNode::propagateMyType(HLFoldTracker& ft, const HLNode *typesrc)
 
     for(size_t i = 0; i < numch; ++i)
     {
-        res = u.aslist[i]->propagateMyType(ft, typesrc);
-        if(res != FOLD_OK)
-            return res;
+        u.aslist[i]->propagateMyType(ft, typesrc);
     }
-
-    return FOLD_OK;
 }
 
 void HLNode::_deductMyType(HLFoldTracker &ft)
@@ -665,7 +812,7 @@ void HLNode::_inheritType(HLFoldTracker &ft, HLNode* from)
 
 }
 
-HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
+void HLNode::_foldBinop(HLFoldTracker& ft)
 {
     assert(type == HLNODE_BINARY);
 
@@ -692,7 +839,7 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
         std::ostringstream os;
         os << "type has no operator '" << opname << "'";
         ft.error(this, os.str().c_str());
-        return FOLD_FAILED;
+        return;
     }
     const DFunc *fopr = opr->asFunc();
     if(!fopr)
@@ -700,18 +847,20 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
         std::ostringstream os;
         os << "type's '" << opname << "' is not a function";
         ft.error(this, os.str().c_str());
-        return FOLD_FAILED;
+        return;
     }
 
     if(L->isconst() && R->isconst() && fopr->isPure())
     {
         Val stk[] = { L->u.constant.val, R->u.constant.val };
-        fopr->call(&ft.vm, stk);
+        int status = fopr->call(&ft.vm, stk); // FIXME: typecheck this
+        assert(status == 1);
+        // FIXME: handle error when call failed
         makeconst(gc, stk[0]);
-        return FOLD_OK;
+        return;
     }
 
-    HLNode *params = ft.hlir.list(); // TOOD: prealloc, known to be 2 elems
+    HLNode *params = ft.hlir.list(gc, 2); // prealloc 2 elems
     params->u.list.add(L, gc);
     params->u.list.add(R, gc);
 
@@ -719,8 +868,6 @@ HLFoldResult HLNode::_foldBinop(HLFoldTracker& ft)
     me->u.resolvedcall.paramlist = params;
     me->u.resolvedcall.func = fopr;
     me->setknowntype(fopr->info.rettype);
-
-    return FOLD_OK;
 }
 
 void HLFoldTracker::error(const HLNode* where, const char *msg)
@@ -731,4 +878,17 @@ void HLFoldTracker::error(const HLNode* where, const char *msg)
 void HLFoldTracker::warn(const HLNode* where, const char *msg)
 {
     printf("(%s:%u): Warning: %s\n", filename.c_str(), where->line, msg);
+}
+
+bool HLFoldTracker::checktype(Type sub, Type reference, const char *what, const HLNode* where, const HLNode* decl)
+{
+    if(vm.rt->tr.isListCompatible(sub, reference))
+        return true; // all good
+
+    // oh no. it's error time
+    std::ostringstream os;
+    os << what << " has mismatched type";
+    error(where, os.str().c_str());
+    error(decl, "(type should be same as here)");
+    return false;
 }
