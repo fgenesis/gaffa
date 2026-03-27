@@ -101,11 +101,11 @@
 
 uint x = 1
 uint y = 2
-return x+y
+--return x+y, "hi"
 
 --func int.+(int a, int b) {}
 
---func tiny() { return x+y+z }
+func tiny() { return x+y+z }
 
 --func addi(int a, b, ...) -> int... { int c = a+b int d = x+y int e = c+d return e }
 

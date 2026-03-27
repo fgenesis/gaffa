@@ -8,20 +8,9 @@
 
 enum
 {
-    _TLIST_BIT = 1u << (sizeof(Type) * 8 - 1),
-
      // Currently there are 1 (Array<T>) or 2 (Table<K, V>, Func<P, R>) subtypes
     MAX_SUBTYPES = 2
 };
-
-/* HMM:
-some bits directly in the type id?
-optional
-variadic
--> limit of 2^30 distinct types (that much doesn't fit in ram on a 32 bit machine!)
-
-also: type lists of length 1 should be the type itself?
-*/
 
 static const Val XNil = _Xnil();
 
@@ -37,7 +26,7 @@ TDesc *TDesc_New(GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize)
     size_t dsz = numdefaults * sizeof(_FieldDefault);
 
     size_t sz = defaultsOffset + dsz + extrasize;
-    TDesc *td = (TDesc*)gc_alloc_unmanaged(gc, NULL, 0, sz);
+    TDesc *td = (TDesc*)gc_alloc_unmanaged_zero(gc, sz);
     if(td)
     {
         td->h.dtype = NULL;
@@ -151,49 +140,51 @@ Type TypeRegistry::mkstruct(const Table& t)
 
 Type TypeRegistry::mklist(const Type* ts, size_t n)
 {
-    assert(ts);
+    Type dummy = PRIMTYPE_NIL;
+    if(!ts)
+        ts = &dummy;
+
     sref id = _tl.putCopy(ts, sizeof(*ts) * n);
+    if(!id)
+        id = 1;
     assert(id && id != -1); // FIXME: handle OOM
-    return (Type)(id | _TLIST_BIT);
+    return (Type)(id | TYPEBIT_TYPELIST);
 }
 
 Type TypeRegistry::lookuplist(const Type* ts, size_t n) const
 {
-    assert(ts);
+    Type dummy = PRIMTYPE_NIL;
+    if(!ts)
+        ts = &dummy;
+
     sref id = _tl.find(ts, sizeof(*ts) * n);
     if(id)
-        id |= _TLIST_BIT;
+        id |= TYPEBIT_TYPELIST;
     return (Type)id;
 }
 
-TypeIdList TypeRegistry::getlist(Type t)
+TypeIdList TypeRegistry::getlist(Type t) const
 {
-    assert(!t || (t & _TLIST_BIT));
-    MemBlock mb = _tl.get(t & ~_TLIST_BIT);
-    TypeIdList tl = { (const Type*)mb.p, (tsize)mb.n };
+    assert(!t || (t & TYPEBIT_TYPELIST));
+    t &= TYPEBASE_MASK;
+    MemBlock mb = _tl.get(t & ~TYPEBIT_TYPELIST);
+    TypeIdList tl = { (const Type*)mb.p, (tsize)mb.n / sizeof(Type) };
     return tl;
 }
 
-TypeInfo TypeRegistry::getinfo(Type t)
+// FIXME: this looks like wtf...
+TypeInfo TypeRegistry::getinfo(Type t) const
 {
     unsigned flags = 0;
-    while(t & _TLIST_BIT)
+    while(t & TYPEBIT_TYPELIST)
     {
         TypeIdList tl = getlist(t);
         if(tl.n != 2)
             flags |= TYPEFLAG_TYPELIST;
         else
         {
-            switch(tl.ptr[0])
+            switch(tl.ptr[0] & TYPEBASE_MASK)
             {
-                case _PRIMTYPE_X_OPTIONAL:
-                    flags |= TYPEFLAG_OPTIONAL;
-                    t = tl.ptr[1];
-                    break;
-                case _PRIMTYPE_X_VARIADIC:
-                    flags |= TYPEFLAG_VARIADIC;
-                    t = tl.ptr[1];
-                    break;
                 case _PRIMTYPE_X_SUBTYPE:
                     flags |= TYPEFLAG_SUBTYPE;
                     t = tl.ptr[1];
@@ -221,20 +212,6 @@ next:
     return ret;
 }
 
-Type TypeRegistry::mkvariadic(Type t)
-{
-    assert(!(getinfo(t).flags & (TYPEFLAG_VARIADIC)));
-    Type tmp[] = { _PRIMTYPE_X_VARIADIC, t };
-    return mklist(tmp, Countof(tmp));
-}
-
-Type TypeRegistry::mkoptional(Type t)
-{
-    assert(!(getinfo(t).flags & (TYPEFLAG_OPTIONAL | TYPEFLAG_VARIADIC)));
-    Type tmp[] = { _PRIMTYPE_X_OPTIONAL, t };
-    return mklist(tmp, Countof(tmp));
-}
-
 Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
 {
     assert(prim < PRIMTYPE_ANY);
@@ -251,8 +228,12 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
 
 Type TypeRegistry::mkfunc(Type argt, Type rett)
 {
-    assert(argt & _TLIST_BIT);
-    assert(rett & _TLIST_BIT);
+    // Make sure that these are always type lists, even if it's 1 element
+    if(argt != PRIMTYPE_NIL && !(argt & TYPEBIT_TYPELIST))
+        argt = mklist(&argt, 1);
+    if(rett != PRIMTYPE_NIL && !(rett & TYPEBIT_TYPELIST))
+        rett = mklist(&rett, 1);
+
     Type ts[] = { argt, rett };
     return mksub(PRIMTYPE_FUNC, &ts[0], Countof(ts));
 }
@@ -286,6 +267,11 @@ DType* TypeRegistry::mkprim(PrimType t)
 
 const TDesc *TypeRegistry::lookupDesc(Type t) const
 {
+    if(t & TYPEBIT_TYPELIST)
+        return NULL;
+
+    t &= TYPEBASE_MASK;
+
     if(t < PRIMTYPE_MAX)
         return _builtins[t];
 
@@ -297,17 +283,16 @@ const TDesc *TypeRegistry::lookupDesc(Type t) const
 DType* TypeRegistry::lookup(Type t)
 {
     const TDesc *td = lookupDesc(t);
-    assert(td);
-    return td->h.dtype;
+    return td ? td->h.dtype : NULL;
 }
 
 FuncDTypes TypeRegistry::lookupFunc(Type t)
 {
+    TypeIdList list = getlist(t);
+    assert(list.n == 4 && list.ptr[0] == _PRIMTYPE_X_SUBTYPE && list.ptr[1] == PRIMTYPE_FUNC);
     FuncDTypes ret = {};
-    const TDesc *td = lookupDesc(t);
-    size_t sz = td->size();
-    const Type *ts = td->types();
-    assert(false);
+    ret.params = lookup(list.ptr[2]);
+    ret.rets = lookup(list.ptr[3]);
     return ret;
 }
 

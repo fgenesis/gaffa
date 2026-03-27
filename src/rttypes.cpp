@@ -56,6 +56,7 @@ struct RTReg
         DType *table;
         DType *symtab;
         DType *any;
+        DType *noreturn;
     } types;
 
     struct
@@ -172,7 +173,8 @@ void reg_type_type(RTReg& r)
 
 static void reg_type_func(RTReg& r)
 {
-    r.tids.empty = r.tr.mklist(NULL, 0);
+    Type dummy[1] = {};
+    r.tids.empty = r.tr.mklist(dummy, 0);
 
     DType *d = r.tr.mkprim(PRIMTYPE_FUNC);
     r.types.func = d;
@@ -337,6 +339,13 @@ static void reg_type_any(RTReg& r)
     }*/
 }
 
+static void reg_types_special(RTReg& r)
+{
+    DType *noret = r.tr.mkprim(PRIMTYPE_NORETURN);
+    r.types.noreturn = noret;
+    r.regclass("noreturn", noret);
+}
+
 static void reg_constants(RTReg& r)
 {
     // nil is kinda special. It exists as a keyword for the parser (in particular, '-> nil' for void function returns),
@@ -371,6 +380,7 @@ void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
 {
     RTReg r = { gc, sp, tr, syms };
     reg_type_type(r);
+    reg_types_special(r);
     reg_type_func(r);
     reg_type_sint(r);
     reg_type_uint(r);

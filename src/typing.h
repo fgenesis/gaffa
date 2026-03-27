@@ -8,6 +8,12 @@ class Table;
 
 class DType;
 
+// Some rules:
+// T... is variadic (0 or more)
+// T? is an optional<T>
+// (A, B) is a type list with 2 types
+//
+
 
 // Structs have no defined field order.
 // But for the sake of making types comparable, the order of member types is sorted by ID.
@@ -21,16 +27,27 @@ class DType;
 
 */
 
+// Combine type id with these bits to modify the meaning
+// ie. (PRIMTYPE_STRING | TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC) is a string?...
+enum TypeBits
+{
+    TYPEBIT_OPTIONAL = 1u << (sizeof(Type) * 8 - 1), // T -> T?
+    TYPEBIT_VARIADIC = 1u << (sizeof(Type) * 8 - 2), // T -> T...
+
+    // Upper 2 bits are used for optional and variadic, this is an internal flag not exposed
+    // So in total, the upper 3 bits are needed as marker bits
+    TYPEBIT_TYPELIST = 1u << (sizeof(Type) * 8 - 3),
+
+    TYPEBASE_MASK = ~(TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC)
+};
+
 enum TypeFlags
 {
     TYPEFLAG_TYPELIST = 1u << 0u, //  > always up to 1 of these bits set, never more
     TYPEFLAG_STRUCT   = 1u << 1u, //
     TYPEFLAG_UNION    = 1u << 2u, //
 
-    TYPEFLAG_OPTIONAL = 1u << 3u,
-    TYPEFLAG_VARIADIC = 1u << 4u,
-
-    TYPEFLAG_SUBTYPE  = 1u << 5u
+    TYPEFLAG_SUBTYPE  = 1u << 3u
 };
 
 struct TypeInfo
@@ -147,13 +164,10 @@ public:
     Type lookuplist(const Type *ts, size_t n) const;
 
     // Use this if you need the type list back. if .ptr is NULL, the ID was not registered.
-    TypeIdList getlist(Type t);
+    TypeIdList getlist(Type t) const;
 
     // Get some infos about a type and resolve the base type (without vararg, optional, or subtyping)
-    TypeInfo getinfo(Type t);
-
-    Type mkvariadic(Type t); // T -> T...
-    Type mkoptional(Type t); // T -> T?
+    TypeInfo getinfo(Type t) const;
 
     Type mkstruct(const StructMember *m, size_t n, size_t numdefaults);
     Type mkstruct(const Table& t); // makes a struct from t (named)

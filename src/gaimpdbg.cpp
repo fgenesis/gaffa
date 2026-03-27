@@ -1,5 +1,6 @@
 #include "gaimpdbg.h"
 #include "hlir.h"
+#include "runtime.h"
 
 
 static const char *getLabel(HLNodeType t)
@@ -44,7 +45,68 @@ static const char *getLabel(HLNodeType t)
 
 #include <stdio.h>
 #include "strings.h"
+#include <sstream>
 
+
+static void buildTypeName(std::ostringstream& os, const Runtime& rt, Type t)
+{
+    if(t < PRIMTYPE_MAX)
+    {
+        prim:
+        os << GetPrimTypeName(t);
+    }
+    else if(const TDesc *d = rt.tr.lookupDesc(t))
+    {
+        if(d->h.tid < PRIMTYPE_MAX)
+        {
+            os << GetPrimTypeName(d->h.tid);
+        }
+        else
+        {
+            os << "TODO:TDesc";
+        }
+    }
+    else
+    {
+        TypeIdList tl = rt.tr.getlist(t);
+        if(tl.n > 2 && tl.ptr[0] == _PRIMTYPE_X_SUBTYPE)
+        {
+            buildTypeName(os, rt, tl.ptr[1]);
+
+            os << "<";
+            for(size_t i = 2; i < tl.n; ++i)
+            {
+                buildTypeName(os, rt, tl.ptr[i]);
+                if(i < tl.n - 1)
+                    os << ",";
+            }
+            os << ">";
+        }
+        else
+        {
+            os << "(";
+            for(size_t i = 0; i < tl.n; ++i)
+            {
+                buildTypeName(os, rt, tl.ptr[i]);
+                if(i < tl.n - 1)
+                    os << ",";
+            }
+            os << ")";
+        }
+    }
+
+    if(t & TYPEBIT_OPTIONAL)
+        os << "?";
+    if(t & TYPEBIT_VARIADIC)
+        os << "...";
+}
+
+static std::string getTypeName(const Runtime& rt, Type t)
+{
+    std::ostringstream os;
+    buildTypeName(os, rt, t);
+    return os.str();
+}
 
 
 static void indent(size_t n)
@@ -53,13 +115,13 @@ static void indent(size_t n)
         printf("  ");
 }
 
-static void dumprec(const StringPool& p, const HLNode *n, unsigned level);
+static void dumprec(const Runtime& rt, const HLNode *n, unsigned level);
 
-static bool dump(const StringPool& p, const HLNode *n, unsigned level)
+static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
 {
     const char *label = getLabel((HLNodeType)n->type);
     indent(level);
-    printf("%s [T:%d]", label, n->mytype);
+    printf("%s [%s]", label, getTypeName(rt, n->mytype).c_str());
 
     if(n->_nch == HLList::Children)
     {
@@ -71,7 +133,7 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
         unsigned strid = n->u.ident.nameStrId;
         if(strid)
         {
-            const char *s = p.lookup(strid);
+            const char *s = rt.sp.lookup(strid);
             printf(" \"%s\"", s);
         }
     }
@@ -91,8 +153,9 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
     }
     else if(n->type == HLNODE_FUNC_PROTO)
     {
-        printf(" -> Packaged function:\n");
-        dumprec(p, n->u.funcproto.proto->body, level+1);
+        const FuncProto *fp = n->u.funcproto.proto;
+        printf(" -- Packaged function %s -> %s:\n", getTypeName(rt, fp->info.paramtype).c_str(), getTypeName(rt, fp->info.rettype).c_str());
+        dumprec(rt, fp->body, level+1);
     }
     else
     {
@@ -110,7 +173,7 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
                 case PRIMTYPE_SINT: printf("%zi", v.u.si); break;
                 case PRIMTYPE_BOOL: printf("%s", v.u.ui ? "true" : "false"); break;
                 case PRIMTYPE_FLOAT: printf("%f", v.u.f); break;
-                case PRIMTYPE_STRING: printf("\"%s\"", p.lookup(v.u.str).s); break;
+                case PRIMTYPE_STRING: printf("\"%s\"", rt.sp.lookup(v.u.str).s); break;
                 //case PRIMTYPE_FUNCTION: { const DFunc *df = v.asFunc(); printf("function %s in line %d", df->dbg ? p.get(df->dbg->name).s : "?", df->dbg ? df->dbg->linestart : -1); break; }
                 default: printf("%08p, type=%d", v.u.p, v.type); break;
             }
@@ -121,24 +184,24 @@ static bool dump(const StringPool& p, const HLNode *n, unsigned level)
     return false;
 }
 
-static void dumprec(const StringPool& p, const HLNode *n, unsigned level)
+static void dumprec(const Runtime& rt, const HLNode *n, unsigned level)
 {
     if(!n || n->type == HLNODE_NONE)
         return;
 
-    if(dump(p, n, level))
+    if(dump(rt, n, level))
     {}//return;
 
     unsigned N = n->numchildren();
     const HLNode * const *ch = n->children();
 
     for(unsigned i = 0; i < N; ++i)
-        dumprec(p, ch[i], level+1);
+        dumprec(rt, ch[i], level+1);
 }
 
-void hlirDebugDump(const StringPool& p, const HLNode *root)
+void hlirDebugDump(const Runtime& rt, const HLNode *root)
 {
-    dumprec(p, root, 0);
+    dumprec(rt, root, 0);
 }
 
 // -----------------------------

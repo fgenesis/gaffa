@@ -48,7 +48,7 @@ static unsigned lookup(const UintPair a[], size_t N, unsigned val, unsigned def)
     return def;
 }
 
-static const unsigned char TypeElementSizes[] =
+static const byte TypeElementSizes[] =
 {
     /* PRIMTYPE_NIL    */ sizeof(u32),
     /* PRIMTYPE_ERROR  */ sizeof(sref),
@@ -67,16 +67,43 @@ static const unsigned char TypeElementSizes[] =
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
     /* PRIMTYPE_ANY    */ sizeof(ValU), // both type + opaque
     /* PRIMTYPE_AUTO   */ sizeof(ValU),
-    /* PRIMTYPE_NOTYPE */ 0,
-    /* _PRIMTYPE_X_VARIADIC, */ 0,
-    /* _PRIMTYPE_X_OPTIONAL, */ 0,
-    /* _PRIMTYPE_X_SUBTYPE,  */ 0
+    /* _PRIMTYPE_X_SUBTYPE,  */ 0,
+    /* PRIMTYPE_NORETURN */ 0
 };
 
 size_t GetPrimTypeStorageSize(unsigned t)
 {
-    static_assert(sizeof(TypeElementSizes) == PRIMTYPE_MAX, "size mismatch");
+    static_assert(Countof(TypeElementSizes) == PRIMTYPE_MAX, "size mismatch");
     return t < Countof(TypeElementSizes) ? TypeElementSizes[t] : sizeof(ValU);
+}
+
+static const char *TypeNames[] =
+{
+    /* PRIMTYPE_NIL    */ "nil",
+    /* PRIMTYPE_ERROR  */ "error",
+    /* PRIMTYPE_OPAQUE */ "opaque",
+    /* PRIMTYPE_BOOL   */ "bool",
+    /* PRIMTYPE_UINT   */ "uint",
+    /* PRIMTYPE_SINT   */ "sint",
+    /* PRIMTYPE_FLOAT  */ "float",
+    /* PRIMTYPE_STRING */ "string",
+    /* PRIMTYPE_TYPE   */ "type",
+    /* PRIMTYPE_FUNC   */ "func",
+    /* PRIMTYPE_CORO   */ "coro",
+    /* PRIMTYPE_TABLE  */ "table",
+    /* PRIMTYPE_ARRAY  */ "array",
+    /* PRIMTYPE_SYMTAB */ "symtab",
+    /* PRIMTYPE_OBJECT */ "object",
+    /* PRIMTYPE_ANY    */ "any",
+    /* PRIMTYPE_AUTO   */ "auto",
+    /* _PRIMTYPE_X_SUBTYPE,  */ "_x_subtype",
+    /* PRIMTYPE_NORETURN */ "noreturn"
+};
+
+const char *GetPrimTypeName(unsigned t)
+{
+    static_assert(Countof(TypeNames) == PRIMTYPE_MAX, "size mismatch");
+    return t < Countof(TypeNames) ? TypeNames[t] : NULL;
 }
 
 void* valcpy(void* dst, const void* src, tsize bytes)

@@ -78,7 +78,7 @@ enum HLTypeFlags
 struct HLNode;
 struct HLNodeBase
 {
-    enum { DefaultValType = PRIMTYPE_NOTYPE };
+    enum { DefaultValType = PRIMTYPE_NIL };
 };
 
 // Important: Any children must be the FIRST struct members!
@@ -90,26 +90,26 @@ struct HLDummy : HLNodeBase
 
 struct HLConstantValue : HLNodeBase
 {
-    enum { EnumType = HLNODE_CONSTANT_VALUE, Children = 0, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_CONSTANT_VALUE, Children = 0, DefaultValType = PRIMTYPE_AUTO };
     ValU val;
 };
 
 struct HLUnary : HLNodeBase
 {
-    enum { EnumType = HLNODE_UNARY, Children = 1, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_UNARY, Children = 1, DefaultValType = PRIMTYPE_AUTO };
     HLNode *a;
 };
 
 struct HLBinary : HLNodeBase
 {
-    enum { EnumType = HLNODE_BINARY, Children = 2, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_BINARY, Children = 2, DefaultValType = PRIMTYPE_AUTO };
     HLNode *a;
     HLNode *b;
 };
 
 struct HLTernary : HLNodeBase
 {
-    enum { EnumType = HLNODE_TERNARY, Children = 3, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_TERNARY, Children = 3, DefaultValType = PRIMTYPE_AUTO };
     HLNode *a;
     HLNode *b;
     HLNode *c;
@@ -179,7 +179,8 @@ struct HLAssignment : HLNodeBase
 
 struct HLReturnYield : HLNodeBase
 {
-    enum { EnumType = HLNODE_RETURNYIELD, Children = 1, DefaultValType = PRIMTYPE_ANY };
+    // Note: return/yield are statements, NOT expressions, and therefore have no type of their own
+    enum { EnumType = HLNODE_RETURNYIELD, Children = 1 };
     HLNode *what;
 };
 
@@ -191,14 +192,14 @@ struct HLBranchAlways : HLNodeBase
 
 struct HLFnCall : HLNodeBase
 {
-    enum { EnumType = HLNODE_CALL, Children = 2, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_CALL, Children = 2, DefaultValType = PRIMTYPE_AUTO };
     HLNode *callee;
     HLNode *paramlist;
 };
 
 struct HLMthCall : HLNodeBase
 {
-    enum { EnumType = HLNODE_MTHCALL, Children = 3, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_MTHCALL, Children = 3, DefaultValType = PRIMTYPE_AUTO };
     HLNode *obj;
     HLNode *mth; // name or expr
     HLNode *paramlist; // HLList
@@ -206,7 +207,7 @@ struct HLMthCall : HLNodeBase
 
 struct HLIdent : HLNodeBase
 {
-    enum { EnumType = HLNODE_IDENT, Children = 0, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_IDENT, Children = 0, DefaultValType = PRIMTYPE_AUTO };
     sref nameStrId;
     sref symid;
 };
@@ -224,7 +225,7 @@ struct HLSink : HLNodeBase
 
 struct HLIndex : HLNodeBase
 {
-    enum { EnumType = HLNODE_INDEX, Children = 2, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_INDEX, Children = 2, DefaultValType = PRIMTYPE_AUTO };
     HLNode *lhs;
     HLNode *idx; // name or expr
 };
@@ -257,7 +258,7 @@ struct HLFunction : HLNodeBase
 // generated during folding when function calls are resolved
 struct HLResolvedCall : HLNodeBase
 {
-    enum { EnumType = HLNODE_FUNCTION, Children = 1, DefaultValType = PRIMTYPE_ANY };
+    enum { EnumType = HLNODE_FUNCTION, Children = 1, DefaultValType = PRIMTYPE_AUTO };
     HLNode *paramlist;
     const DFunc *func;
 };
@@ -273,8 +274,6 @@ struct FuncProto
 {
     FuncProto *New(GC& gc, size_t nodemem);
     HLNode *body; // points to the AST behind the struct
-    DType *paramtype;
-    DType *rettype;
     FuncInfo info;
     size_t refcount;
     size_t memsize;
@@ -414,7 +413,7 @@ struct HLNode
         return this->unsafemorph<T>();
     }
 
-    HLNode *fold(HLFoldTracker &ft, HLFoldStep step);
+    HLNode *fold(HLFoldTracker &ft);
 
     size_t memoryNeeded() const;
     HLNode *clone(HLFoldTracker& ft) const;
@@ -423,8 +422,7 @@ struct HLNode
 
 private:
     DType *getDType();
-    void _tryfoldfunc(HLFoldTracker &ft);
-    void _foldRec(HLFoldTracker &ft, HLFoldStep step);
+    void _foldRec(HLFoldTracker &ft);
     void _foldUnop(HLFoldTracker &ft);
     void _foldBinop(HLFoldTracker &ft);
     void _applyTypeFrom(HLFoldTracker& ft, HLNode *from);
@@ -494,8 +492,13 @@ struct HLFoldTracker
     SymTable &env;
     HLIRBuilder& hlir;
 
+    unsigned stage;
+
     std::vector<std::string> errors;
     std::string filename;
+
+    inline bool isAutoToAny() const { return stage >= FOLD_SPECIALIZE; }
+    inline bool isPackageFunctions() const { return stage >= FOLD_SPECIALIZE; }
 
 
     void error(const HLNode *where, const char *msg);

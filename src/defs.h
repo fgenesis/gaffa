@@ -77,10 +77,8 @@ enum PrimType
     PRIMTYPE_ANY,    // can hold any value. must be after specific types.
 
     PRIMTYPE_AUTO,     // special marker for type analysis
-    PRIMTYPE_NOTYPE,   // special marker for type analysis
-    _PRIMTYPE_X_VARIADIC, // special marker for type lists
-    _PRIMTYPE_X_OPTIONAL, // special marker for optionals
     _PRIMTYPE_X_SUBTYPE,  // special marker for subtype specialization
+    PRIMTYPE_NORETURN, // special type that can't be constructed -> can't return this, ever
     // These are the engine-level types. Runtime-created types are any IDs after this.
     PRIMTYPE_MAX,
 
@@ -206,6 +204,8 @@ struct Val : public ValU
 
 // Size of an element of type t, when multiple elements of this type are stored in an array
 size_t GetPrimTypeStorageSize(unsigned t);
+
+const char *GetPrimTypeName(unsigned t);
 
 
 // Small-size memcpy() that's wired specifially to copy any values a ValU may contain.

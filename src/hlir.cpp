@@ -102,14 +102,85 @@ HLFunctionHdr::Values HLFunctionHdr::nrets() const
 }
 
 
+typedef Type (*TypeExtractor)(HLFoldTracker& ft, const HLNode *node);
+
+static Type nodeValueAsType(HLFoldTracker& ft, const HLNode *node)
+{
+    if(!node->isconst())
+    {
+        ft.error(node, "Expected type constant");
+        return PRIMTYPE_NIL;
+    }
+
+    Val v = node->as<HLConstantValue>()->val;
+    if(v.type != PRIMTYPE_TYPE)
+    {
+        ft.error(node, "Expected type");
+        return PRIMTYPE_NIL;
+    }
+
+    return v.asDType()->tid;
+}
+
+static Type nodeKnownType(HLFoldTracker& ft, const HLNode *node)
+{
+    if(node->mytype == PRIMTYPE_NIL)
+    {
+        ft.error(node, "Attempt to get type of typeless expression");
+        return PRIMTYPE_NIL;
+    }
+
+    if(node->isknowntype())
+        return node->mytype;
+
+    ft.warn(node, "Unable to deduce type, assuming any");
+    return PRIMTYPE_ANY;
+}
+
+static Type typeOfVarDef(HLFoldTracker& ft, const HLNode *node)
+{
+    return nodeValueAsType(ft, node->as<HLVarDef>()->type);
+}
+
+
+// Generates a list type from a HLList containing nodes of types
+// for example: func f(...) -> int, float, string
+// intended for function params and return values
+// if you have more than 256 entries actually written out you're doing it wrong
+static Type typelistFromTypes(HLFoldTracker& ft, const HLNode *node, TypeExtractor extr)
+{
+    Type ts[256];
+    size_t n = node->numchildren();
+    const HLNode * const *ch = node->children();
+    if(n > Countof(ts))
+    {
+        ft.error(node, "List too long, can't generate type");
+        return PRIMTYPE_NIL;
+    }
+
+    for(size_t i = 0; i < n; ++i)
+    {
+        const HLNode *child = ch[i];
+        ts[i] = extr(ft, child);
+        if(ts[i] == PRIMTYPE_NIL)
+            ft.error(child, "Got unexpected nil entry in type list");
+    }
+
+    return ft.vm.rt->tr.mklist(ts, n);
+}
+
+
 // This is the entry point of the tree folding. MUST start at a function node.
-HLNode *HLNode::fold(HLFoldTracker& ft, HLFoldStep step)
+HLNode *HLNode::fold(HLFoldTracker& ft)
 {
     assert(type == HLNODE_FUNCTION);
 
     // Recursively fold everything as a first step so that anything that can be eliminated
     // is already  eliminated before the next steps start
-    _foldRec(ft, step);
+    _foldRec(ft);
+
+    if(!ft.isPackageFunctions())
+        return NULL;
 
     // Chop functions into separate memory blocks so that they can be specialized individually
     HLNode *cp = clone(ft);
@@ -117,7 +188,7 @@ HLNode *HLNode::fold(HLFoldTracker& ft, HLFoldStep step)
 }
 
 
-void HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
+void HLNode::_foldRec(HLFoldTracker& ft)
 {
     if(_nch)
     {
@@ -125,7 +196,7 @@ void HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
         HLNode **ch = children();
         for(size_t i = 0; i < N; ++i)
             if(ch[i])
-                ch[i]->_foldRec(ft, step);
+                ch[i]->_foldRec(ft);
     }
 
     switch(type)
@@ -210,12 +281,14 @@ void HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
             break;
 
         case HLNODE_RETURNYIELD:
-            _applyTypeFromList(ft, u.retn.what);
+            //_applyTypeFromList(ft, u.retn.what); // return HAS NO TYPE ON ITS OWN
+            if(!u.retn.what->isknowntype())
+                u.retn.what->setknowntype(typelistFromTypes(ft, u.retn.what, nodeKnownType));
             break;
 
 
         /*case HLNODE_FUNCTION:
-            return _foldfunc(ft);
+            return _foldfunc(ft);node
 
         case HLNODE_FUNCDECL:
         {
@@ -227,7 +300,7 @@ void HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
     }
 
     // Compact children if we have any
-     if(_nch)
+    if(_nch)
     {
         const size_t N = numchildren();
         HLNode **ch = children();
@@ -253,6 +326,7 @@ void HLNode::_foldRec(HLFoldTracker& ft, HLFoldStep step)
 
 void HLNode::setknowntype(Type tid)
 {
+    assert(tid != PRIMTYPE_AUTO);
     assert(!(flags & HLFLAG_KNOWNTYPE));
     flags |= HLFLAG_KNOWNTYPE;
     mytype = tid;
@@ -283,93 +357,6 @@ void HLNode::clear(GC& gc)
 
     _nch = 0;
     type = HLNODE_NONE;
-}
-
-void HLNode::_tryfoldfunc(HLFoldTracker& ft)
-{
-    assert(type == HLNODE_FUNCTION);
-
-    HLFunctionHdr *h = u.func.hdr->as<HLFunctionHdr>();
-
-    Type t = { PRIMTYPE_ANY };
-    Table params(t, t);
-
-    // These are NULL if there are no parameters or return values specified
-    HLList *paramlist = h->paramlist ? h->paramlist->aslist(HLNODE_LIST) : NULL;
-    HLList *retlist = h->rettypes ? h->rettypes->aslist(HLNODE_LIST) : NULL;
-
-    HLList *body = u.func.body->aslist(HLNODE_BLOCK);
-    // Precondition: Anything in body has been folded already
-
-    // TODO: support default parameters at some point?
-    // StructMember is already equipped for this.
-    // Also, named params?
-
-    FuncInfo info = {};
-
-    // Fold params
-    Type paramt = {};
-    if(paramlist)
-    {
-        StructMember sm[256];
-        assert(paramlist->used < Countof(sm));
-
-        const size_t n = paramlist->used;
-        for(size_t i = 0; i < n; ++i)
-        {
-            StructMember& m = sm[i];
-            const HLVarDef *vd = paramlist->list[i]->as<HLVarDef>();
-            m.defaultval = _Xnil();
-            m.name = vd->ident->as<HLIdent>()->nameStrId;
-            const Val& thetype = vd->type->as<HLConstantValue>()->val;
-            m.t = thetype.asDType()->tid;
-            assert(m.t == PRIMTYPE_TYPE);
-        }
-
-        // TODO: variadic?
-
-        info.nargs = n;
-        info.paramtype = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
-    }
-
-
-    // TODO: autodetect return types
-
-    // Fold return types
-    if(retlist)
-    {
-        StructMember sm[256];
-        assert(retlist->used < Countof(sm));
-        const size_t n = retlist->used;
-        for(size_t i = 0; i < n; ++i)
-        {
-            StructMember& m = sm[i];
-            m.defaultval = _Xnil();
-            m.name = 0;
-            const Val& thetype = retlist->list[i]->as<HLConstantValue>()->val;
-            m.t = thetype.asDType()->tid;
-            assert(m.t == PRIMTYPE_TYPE);
-        }
-
-        // TODO: variadic?
-
-        info.nrets = n;
-        info.rettype = ft.vm.rt->tr.mkstruct(&sm[0], n, 0);
-    }
-
-    const Type subs[] = { info.paramtype, info.rettype };
-    info.functype = ft.vm.rt->tr.mksub(PRIMTYPE_FUNC, &subs[0], Countof(subs));
-
-
-
-    DFunc *f = (DFunc*)gc_new(ft.vm.rt->gc, sizeof(DFunc), PRIMTYPE_FUNC);
-
-    f->info = info;
-
-    //f->u.gfunc.vmcode = ...
-    // TODO: populate func body
-
-    makeconst(ft.vm.rt->gc, Val(f));
 }
 
 size_t HLNode::memoryNeeded() const
@@ -415,20 +402,22 @@ static HLVisitResult nodeReturnVisitor(HLNode *node, void *ud)
         return VISIT_CONTINUE;
 
     // It's a return statement
-    assert(node->mytype != PRIMTYPE_AUTO);
+    assert(node->mytype == PRIMTYPE_NIL); // return is a statement, not an expr
+
+    HLNode *rets = node->u.retn.what;
 
     ++vis->n;
 
     if(!vis->first) // First one we find defines the type
-        vis->first = node;
+        vis->first = rets;
 
     if(vis->rettype == PRIMTYPE_AUTO)
-        vis->rettype = node->mytype;
+        vis->rettype = rets->mytype;
     else // Any further ones must have the same type
     {
-        if(vis->rettype != node->mytype) // FIXME: This should be a type compat check
+        if(vis->ft.vm.rt->tr.isListCompatible(rets->mytype, vis->rettype))
         {
-            vis->ft.error(node, "Return statement has mismatching type");
+            vis->ft.error(rets, "Return statement has mismatching type");
             vis->ft.error(vis->first, "(originally obtained from here)");
         }
     }
@@ -472,17 +461,14 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
     // Clone done. Now figure out the parameter and return types.
 
     // These are NULL if there are no parameters or return values specified
-    HLList *paramlist = hh->paramlist ? hh->paramlist->aslist(HLNODE_LIST) : NULL;
-    HLList *retlist = hh->rettypes ? hh->rettypes->aslist(HLNODE_LIST) : NULL;
-    //const int nargs = hh->nargs();
-    //const int nrets = hh->nrets();
+    //HLList *paramlist = hh->paramlist ? hh->paramlist->aslist(HLNODE_LIST) : NULL;
 
     FuncInfo info = {};
     Type paramt = {};
-    if(paramlist)
+    if(hh->paramlist)
     {
         StructMember sm[256];
-        Type ts[256];
+        /*
         assert(paramlist->used < Countof(ts));
 
         const size_t n = paramlist->used;
@@ -498,6 +484,7 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
             assert(m.t == PRIMTYPE_TYPE);
             assert(false && "wat");
         }
+        */
 
         HLFunctionHdr::Values args = hh->nargs();
         info.nargs = args.n;
@@ -507,46 +494,33 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
 
         //info.paramtype = rt.tr.mkstruct(&sm[0], n, 0); // HMM: if we really make a struct here, and it's variadic,
         //   then the last entry must be an Array<T>?
-        info.paramtype = rt.tr.mklist(&ts[0], n);
+        info.paramtype = typelistFromTypes(ft, hh->rettypes, typeOfVarDef);
     }
     else // No params -- that means we're most likely the file-scope root function, which is f(any?...) aka f(...)
     {
-        Type anyopt = rt.tr.mkoptional(PRIMTYPE_ANY);
-        Type anyvar = rt.tr.mkvariadic(anyopt); // TODO: Cache this type in runtime or so
-        Type varlist = rt.tr.mklist(&anyvar, 1);
-        info.paramtype = anyopt;
+        Type varany = PRIMTYPE_ANY | TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC;
+        info.paramtype = rt.tr.mklist(&varany, 1); // TODO: Cache this somewhere
         info.flags |= FuncInfo::VarArgs;
         info.nargs = 0;
     }
 
     info.rettype = PRIMTYPE_AUTO;
 
-    if(retlist) // Return types specified?
+    if(hh->rettypes) // Return types specified?
     {
-        Type ts[256];
-        assert(retlist->used < Countof(ts));
-        const size_t n = retlist->used;
-        for(size_t i = 0; i < n; ++i)
-        {
-            const Val& thetype = retlist->list[i]->as<HLConstantValue>()->val;
-            ts[i] = thetype.asDType()->tid;
-            assert(0);
-            //assert(m.t == PRIMTYPE_TYPE);
-        }
-
         HLFunctionHdr::Values rets = hh->nrets();
         info.nrets = rets.n;
         if(rets.variadic)
             info.flags |= FuncInfo::VarRets;
 
-        info.rettype = rt.tr.mklist(&ts[0], n);
+        info.rettype = typelistFromTypes(ft, hh->rettypes, nodeValueAsType);
     }
 
     // Search for return statements and see what they return
     {
         ReturnTypeDeductorVisitor vis = { ft, hh->rettypes, info.rettype };
-        funcroot->visit(nodeReturnVisitor, &vis); // This will uncover type clashes if we already have a type
-        Type rettype = vis.first->mytype;
+        proto->body->visit(nodeReturnVisitor, &vis); // This will uncover type clashes if we already have a type
+        Type rettype = vis.rettype;
 
         if(rettype == PRIMTYPE_AUTO && !vis.n) // No return type specified, no return found -> void aka nil
             rettype = PRIMTYPE_NIL;
@@ -554,17 +528,22 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
         assert(rettype != PRIMTYPE_AUTO);
 
         info.rettype = rettype;
+
+        if(rettype == PRIMTYPE_NIL)
+            info.nrets = 0;
+        else
+        {
+            TypeIdList tl = rt.tr.getlist(rettype);
+            assert(tl.ptr);
+            info.nrets = tl.n;
+        }
     }
 
     info.functype = rt.tr.mkfunc(info.paramtype, info.rettype);
 
     proto->info = info;
 
-
-    //FuncDTypes ft = rt.tr.lookupFunc(hh->nrets);
-    //assert(dt);
-
-    //proto->paramtype = rt.tr.lookup(funcroot->mytype);
+    funcroot->setknowntype(info.functype);
 
     return funcroot;
 }
@@ -825,8 +804,14 @@ void HLNode::_foldBinop(HLFoldTracker& ft)
     GC &gc = ft.vm.rt->gc;
 
     Type ns = L->mytype;
+    if(ns == PRIMTYPE_AUTO) // FIXME: not sure if this is ok
+        ns = R->mytype;
+
     if(ns == PRIMTYPE_AUTO)
     {
+        if(!ft.isAutoToAny())
+            return; // Do not fold
+
         ns = PRIMTYPE_ANY;
         std::ostringstream os;
         os << "unknown argument type for operator '" << opname << "', assuming 'any'";

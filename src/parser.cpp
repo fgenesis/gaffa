@@ -92,7 +92,7 @@ const char* Parser::symbolname(const Symstore::Sym* sym) const
 
 Val Parser::makestr(const char *s, const char *end)
 {
-    Str q = strpool.put(s, end - s + 1);
+    Str q = strpool.put(s, end - s);
     return Val(q);
 }
 

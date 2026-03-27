@@ -197,21 +197,24 @@ int main(int argc, char **argv)
     if(!node)
         return 1;
 
-    hlirDebugDump(rt.sp, node);
+    hlirDebugDump(rt, node);
 
     SymTable *env = SymTable::GCNew(rt.gc);
-    rtinit(*env, rt.gc, rt.sp, rt.tr);
 
     VM vm;
     vm.rt = &rt;
+    rtinit(*env, rt.gc, rt.sp, rt.tr);
 
-    HLFoldTracker ft = { vm, pp.syms, *env, hb };
+    HLFoldTracker ft = { vm, pp.syms, *env, hb, 0 };
 
-    HLNode *folded = node->fold(ft, FOLD_INITIAL);
+    puts("\n####### AFTER EARLY FOLDING #######\n");
+    node->fold(ft);
+    hlirDebugDump(rt, node);
 
-    puts("\n####### AFTER FOLDING #######\n");
 
-    hlirDebugDump(rt.sp, folded);
+    /*ft.stage = FOLD_SPECIALIZE;
+    HLNode *folded = node->fold(ft);
+    puts("\n####### AFTER EARLY FOLDING #######\n");*/
 
 
     //MLIRContainer mc(gc);
