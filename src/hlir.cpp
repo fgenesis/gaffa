@@ -849,10 +849,10 @@ void HLNode::_foldBinop(HLFoldTracker& ft)
     params->u.list.add(L, gc);
     params->u.list.add(R, gc);
 
-    HLNode *me = morph<HLResolvedCall>(gc);
-    me->u.resolvedcall.paramlist = params;
-    me->u.resolvedcall.func = fopr;
-    me->setknowntype(fopr->info.rettype);
+    unsafemorph<HLResolvedCall>();
+    u.resolvedcall.paramlist = params;
+    u.resolvedcall.func = fopr;
+    setknowntype(fopr->info.rettype);
 }
 
 void HLFoldTracker::error(const HLNode* where, const char *msg)

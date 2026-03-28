@@ -278,4 +278,11 @@ struct LocalTracker
     // Alloc contiguous array of slots, returns first index
     u32 allocSlots(u32 n);
     void freeSlots(u32 first, u32 n);
+
+private:
+    Heap<u32> _h;
+    u32 _max;
+    GC& gc;
+
+    void _shorten();
 };

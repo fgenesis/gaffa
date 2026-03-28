@@ -66,7 +66,8 @@ enum HLNodeType
     HLNODE_EXPORT,
 
     // Intermediates; not produced by the parser
-    HLNODE_FUNC_PROTO
+    HLNODE_FUNC_PROTO,
+    HLNODE_RESOLVED_CALL
 };
 
 enum HLTypeFlags
@@ -258,7 +259,7 @@ struct HLFunction : HLNodeBase
 // generated during folding when function calls are resolved
 struct HLResolvedCall : HLNodeBase
 {
-    enum { EnumType = HLNODE_FUNCTION, Children = 1, DefaultValType = PRIMTYPE_AUTO };
+    enum { EnumType = HLNODE_RESOLVED_CALL, Children = 1, DefaultValType = PRIMTYPE_AUTO };
     HLNode *paramlist;
     const DFunc *func;
 };

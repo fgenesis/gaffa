@@ -28,10 +28,6 @@ FuncInfo prepareFuncInfo(const HLNode* node)
     info.nargs = nargs < 0 ? -nargs+1 : nargs;
     info.nrets = nrets < 0 ? -nrets+1 : nrets;
 
-    // These are filled later
-    info.fixedstack = 0;
-    info.nupvals = 0;
-
     return info;
 }
 

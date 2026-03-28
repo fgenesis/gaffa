@@ -166,6 +166,24 @@ void testtype()
 
 extern void vmtest(GC& gc);
 
+void heaptest()
+{
+    Runtime rt;
+    rt.init(myalloc);
+
+    Heap<unsigned> h;
+    for(size_t i = 0; i < 100; ++i)
+    {
+        h.push(rt.gc, rand());
+    }
+    while(h.size())
+    {
+        printf("%u\n", h.pop());
+    }
+
+    h.dealloc(rt.gc);
+}
+
 int main(int argc, char **argv)
 {
     Runtime rt;

@@ -149,7 +149,6 @@ static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, Lexer::Toke
     df->info.nargs = nparams;
     df->info.nrets = nrets;
     df->info.flags = FuncInfo::LFunc | FuncInfo::Pure;
-    df->info.fixedstack = 0; // TODO: do C functions need anything here?
     df->info.nupvals = 0;
     df->u.lfunc = lfunc;
     df->dbg = NULL;

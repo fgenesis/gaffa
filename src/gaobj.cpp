@@ -65,3 +65,64 @@ int DFunc::call(VM *vm, Val* a) const
     assert(r < 0 || r == info.nrets);
     return r;
 }
+
+
+#if 0
+Val *DFunc::call(VM *vm, Val* a, int *psz) const
+{
+    assert(*psz >= 0);
+
+    const unsigned functype = info.flags & FuncInfo::FuncTypeMask;
+    const size_t nargs = *psz;
+    if(nargs < info.nargs)
+    {
+        assert(false && "Not enough parameters");
+        return NULL;
+    }
+    if(nargs > info.nargs && !(info.flags & FuncInfo::VarArgs))
+    {
+        assert(false && "Too many parameters to non-variadic function");
+        return NULL;
+    }
+
+    int nret = 0;
+    if(functype == FuncInfo::LFunc)
+    {
+        RTError err = u.lfunc(vm, a);
+        nret = err < 0 ? err : info.nrets;
+        return a;
+    }
+
+    // FIXME: make vm not yieldable
+
+    vm->pushFrame();
+
+    const size_t req = info.nlocals + nargs;
+    const VmStackAlloc sa = vm->stack_ensure(vm->cur.sp, req);
+    vm->cur.sp = sa.p;
+    vm->cur.sbase += sa.diff;
+    Val *p = sa.p;
+    if(functype == FuncInfo::GFunc)
+        p += info.nrets;
+    memcpy(p, a, nargs);
+    if(functype == FuncInfo::GFunc)
+    {
+        // TODO: push frame that yields when returned to
+        vm->cur.ins = u.gfunc.chunk->begin();
+        nret = vm->resume();
+        // TODO: *psz = actual nrets
+    }
+    else
+    {
+        nret = u.cfunc(vm, nargs, p);
+    }
+
+    Val *rets = vm->cur.sbase;
+
+    vm->popFrame();
+    vm->err = RTE_OK;
+
+    *psz = nret;
+    return nret >= 0 ? rets : NULL;
+}
+#endif

@@ -131,3 +131,84 @@ public:
 
     static void *AllocStorage(GC& gc, void *p, Type type, tsize oldelems, tsize newelems); // size in elements
 };
+
+
+template<typename T>
+struct Heap
+{
+    void push(GC& gc, T e)
+    {
+        size_t sz = a.size();
+        a.push_back(gc, e);
+        _percolateUp(sz);
+    }
+
+    T pop()
+    {
+        size_t sz = a.size();
+        assert(sz);
+        const T root = a[0];
+        a[0] = a[--sz];
+        a.pop_back();
+        if(sz > 1)
+            _percolateDown(0);
+        return root;
+    }
+
+    inline size_t size() const { return a.size(); }
+    inline void clear() const { a.clear(); }
+    void dealloc(GC& gc) { a.dealloc(gc); }
+
+    PodArray<T> a;
+
+private:
+    void _percolateUp(size_t i)
+    {
+        const T e = a[i];
+        while(i)
+        {
+            const size_t p = (i - 1u) >> 1u;
+            const T c = a[p];
+            if(!(e < c))
+                break;
+            a[i] = c; // parent is smaller, move it down
+            i = p; // continue with parent
+        }
+        a[i] = e;
+    }
+
+    void _percolateDown(size_t i)
+    {
+        const T e = a[i];
+        const size_t sz = a.size();
+        size_t child;
+        goto start;
+        do
+        {
+            {
+                // pick smaller child
+                T c = a[child];
+                if(++child < sz) // do we have a right child?
+                {
+                    const T r = a[child];
+                    if(r < c)
+                    {
+                        c = r;
+                        goto cmp; // yep, keep that child
+                    }
+                }
+                --child; // nope, child wasn't there or not smaller
+cmp:
+                if(!(c < e))
+                    break;
+                a[i] = c;
+                i = child;
+            }
+start:
+            child = (i << 1u) + 1u;
+        }
+        while(child < sz);
+        a[i] = e;
+        _percolateUp(i);
+    }
+};

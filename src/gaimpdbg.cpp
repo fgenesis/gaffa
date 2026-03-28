@@ -38,6 +38,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_SINK:           return "sink";
         case HLNODE_EXPORT:         return "export";
         case HLNODE_FUNC_PROTO:     return "funcproto";
+        case HLNODE_RESOLVED_CALL:  return "rcall";
     }
     return NULL;
 }
@@ -119,8 +120,14 @@ static void dumprec(const Runtime& rt, const HLNode *n, unsigned level);
 
 static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
 {
-    const char *label = getLabel((HLNodeType)n->type);
+    printf("%p ", n);
     indent(level);
+    if(!n)
+    {
+        printf("(NULL)\n");
+        return false;
+    }
+    const char *label = getLabel((HLNodeType)n->type);
     printf("%s [%s]", label, getTypeName(rt, n->mytype).c_str());
 
     if(n->_nch == HLList::Children)
@@ -186,11 +193,11 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
 
 static void dumprec(const Runtime& rt, const HLNode *n, unsigned level)
 {
-    if(!n || n->type == HLNODE_NONE)
-        return;
-
     if(dump(rt, n, level))
     {}//return;
+
+    if(!n)
+        return;
 
     unsigned N = n->numchildren();
     const HLNode * const *ch = n->children();

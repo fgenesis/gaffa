@@ -6,6 +6,8 @@
 #include "gc.h"
 #include "runtime.h"
 
+#include <algorithm> // FIXME
+
 struct DFunc;
 
 #define RETVAL(idx) (*(vals+(retidx)))
@@ -491,13 +493,13 @@ VMFUNC_IMM(callany, Imm_3xu32)
             }
 
             case FuncInfo::GFunc:
-                pushFrame(VMARGS, imm, df->info.fixedstack);
+                pushFrame(VMARGS, imm, df->u.gfunc.maxstack);
                 sbase = fbase;
                 ins = df->u.gfunc.chunk->begin();
                 return finishGCall(VMARGS, df->u.gfunc.maxstack, df->info.nrets, nargs);
 
             case FuncInfo::CFunc:
-                pushFrame(VMARGS, imm, df->info.fixedstack);
+                pushFrame(VMARGS, imm, 0);
                 sbase = fbase;
                 return finishCCall(VMARGS, df->u.cfunc.f, nargs, df->upvals);
 
@@ -1126,4 +1128,55 @@ Val* VM::prepareArgs(size_t n)
 const Val* VM::getReturns()
 {
     return state >= 0 ? cur.sbase : NULL;
+}
+
+u32 LocalTracker::allocSlot()
+{
+    u32 x = _h.size() ? _h.pop() : _max + 1;
+    if(x > _max)
+        _max = x;
+    return x;
+}
+
+void LocalTracker::freeSlot(u32 x)
+{
+    assert(x < _max);
+    if(x == _max-1) // Need to find a new maximum?
+    {
+        _shorten();
+        return;
+    }
+    _h.push(gc, x);
+}
+
+u32 LocalTracker::allocSlots(u32 n)
+{
+    u32 x = _max;
+    _max += n;
+    return x;
+}
+
+void LocalTracker::freeSlots(u32 first, u32 n)
+{
+    assert(n && n <= _h.size());
+    u32 end = first + n;
+    if(end == _max) // Need to find a new maximum?
+    {
+        _shorten();
+        return;
+    }
+    for(size_t i = 0; i < n; ++i)
+        _h.push(gc, first + i);
+}
+
+void LocalTracker::_shorten()
+{
+    u32 maxval = 0;
+    for(size_t i = 0; i < _h.size(); ++i)
+    {
+        u32 v = _h.a[i];
+        if(maxval < v)
+            maxval = v;
+    }
+    _max = maxval;
 }
