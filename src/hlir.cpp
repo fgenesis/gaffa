@@ -166,6 +166,9 @@ static Type typelistFromTypes(HLFoldTracker& ft, const HLNode *node, TypeExtract
             ft.error(child, "Got unexpected nil entry in type list");
     }
 
+    if(n == 1 && (ts[0] & TYPEBIT_TYPELIST))
+        return ts[0];
+
     return ft.vm.rt->tr.mklist(ts, n);
 }
 
@@ -286,17 +289,35 @@ void HLNode::_foldRec(HLFoldTracker& ft)
                 u.retn.what->setknowntype(typelistFromTypes(ft, u.retn.what, nodeKnownType));
             break;
 
-
-        /*case HLNODE_FUNCTION:
-            return _foldfunc(ft);node
-
         case HLNODE_FUNCDECL:
         {
             HLIdent *ident = u.funcdecl.ident->as<HLIdent>();
-            HLIdent *ns = u.funcdecl.namespac->as<HLIdent>();
+            HLIdent *ns = u.funcdecl.namespac ? u.funcdecl.namespac->as<HLIdent>() : NULL;
             // This was already folded from HLFunction
-            HLConstantValue *func = u.funcdecl.value->as<HLConstantValue>();
-        }*/
+            HLFuncProto *fp = u.funcdecl.value->as<HLFuncProto>();
+
+            DebugInfo *d = gc_alloc_unmanaged_zero_T<DebugInfo>(ft.vm.rt->gc, 1);
+            d->linestart = this->line;
+            d->lineend = 0; // TODO
+            d->name = ident->nameStrId;
+
+            DFunc *df = DFunc::GCNew(ft.vm.rt->gc);
+            df->dbg = d;
+            df->info = fp->proto->info;
+            df->u.proto = fp->proto;
+
+            assert(!ns && "FIXME");
+
+            Symstore::Sym *sym = ft.syms.getsym(ident->symid);
+            assert(!sym->isMutable());
+
+            {
+                sym->setValue(Val(df));
+                //u.funcdecl.ident->clear(ft.vm.rt->gc); // These are removed during child compaction
+                //rhs->clear(ft.vm.rt->gc);
+                //continue;
+            }
+        }
     }
 
     // Compact children if we have any
@@ -498,9 +519,10 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
     }
     else // No params -- that means we're most likely the file-scope root function, which is f(any?...) aka f(...)
     {
-        Type varany = PRIMTYPE_ANY | TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC;
+        /*Type varany = PRIMTYPE_ANY | TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC;
         info.paramtype = rt.tr.mklist(&varany, 1); // TODO: Cache this somewhere
-        info.flags |= FuncInfo::VarArgs;
+        info.flags |= FuncInfo::VarArgs;*/
+        info.paramtype = PRIMTYPE_NIL;
         info.nargs = 0;
     }
 

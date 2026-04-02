@@ -200,6 +200,8 @@ public:
     FORCEINLINE void mark(Type t) { if(t > PRIMTYPE_MAX) _tt.mark(t - PRIMTYPE_MAX); }
 
 private:
+    Type _mklist(const Type *ts, size_t n);
+
     Type _store(TDesc *);
     Dedup _tl; // for simple type lists (Type[] arrays only)
     Dedup _tt; // for structs and such (TDesc based)

@@ -225,15 +225,15 @@ int main(int argc, char **argv)
 
     HLFoldTracker ft = { vm, pp.syms, *env, hb, 0 };
 
-    puts("\n####### AFTER EARLY FOLDING #######\n");
+    /*puts("\n####### AFTER EARLY FOLDING #######\n");
     node->fold(ft);
-    hlirDebugDump(rt, node);
+    hlirDebugDump(rt, node);*/
 
 
-    /*ft.stage = FOLD_SPECIALIZE;
+    ft.stage = FOLD_SPECIALIZE;
     HLNode *folded = node->fold(ft);
-    puts("\n####### AFTER EARLY FOLDING #######\n");*/
-
+    puts("\n####### AFTER LATE FOLDING #######\n");
+    hlirDebugDump(rt, folded);
 
     //MLIRContainer mc(gc);
     //mc.import(node, strtab, fn);

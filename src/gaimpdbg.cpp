@@ -163,6 +163,21 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
         const FuncProto *fp = n->u.funcproto.proto;
         printf(" -- Packaged function %s -> %s:\n", getTypeName(rt, fp->info.paramtype).c_str(), getTypeName(rt, fp->info.rettype).c_str());
         dumprec(rt, fp->body, level+1);
+        return false;
+    }
+    else if(n->type == HLNODE_RESOLVED_CALL)
+    {
+        const HLResolvedCall& rc = n->u.resolvedcall;
+        const DFunc *f = rc.func;
+        const char *ft = NULL;
+        switch(f->info.flags & FuncInfo::FuncTypeMask)
+        {
+            case FuncInfo::LFunc: ft = "Lfunc"; break;
+            case FuncInfo::CFunc: ft = "Cfunc"; break;
+            case FuncInfo::GFunc: ft = "Gfunc"; break;
+            case FuncInfo::Proto: ft = "Proto"; break;
+        }
+        printf(" -- %s %s at %u", ft, getTypeName(rt, f->info.functype).c_str(), f->dbg ? f->dbg->linestart : 0);
     }
     else
     {

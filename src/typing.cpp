@@ -144,6 +144,15 @@ Type TypeRegistry::mklist(const Type* ts, size_t n)
     if(!ts)
         ts = &dummy;
 
+    for(size_t i = 0; i < n; ++i)
+        assert(!(ts[i] & TYPEBIT_TYPELIST));
+
+    return _mklist(ts, n);
+}
+
+Type TypeRegistry::_mklist(const Type* ts, size_t n)
+{
+    assert(ts);
     sref id = _tl.putCopy(ts, sizeof(*ts) * n);
     if(!id)
         id = 1;
@@ -223,7 +232,7 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
     for(size_t i = 0; i < n; ++i)
         tmp[w++] = sub[i];
 
-    return mklist(&tmp[0], w);
+    return _mklist(&tmp[0], w);
 }
 
 Type TypeRegistry::mkfunc(Type argt, Type rett)

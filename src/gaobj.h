@@ -22,6 +22,7 @@ class DType;
 struct VM;
 struct HLNode;
 struct OpDef;
+struct FuncProto;
 
 // Base for any object instance.
 // Beware, variable sized! Do NOT derive from this class!
@@ -163,11 +164,7 @@ struct DFunc : public GCobj
             CFunc f;
 
         } cfunc;
-        struct
-        {
-            HLNode *node; // Cloned from original parse tree as a single block of memory
-            size_t bytesToFree;
-        } proto;
+        FuncProto *proto; // Cloned from original parse tree as a single block of memory
         struct
         {
             InstChunk *chunk;
