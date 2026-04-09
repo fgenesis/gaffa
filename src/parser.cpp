@@ -610,6 +610,8 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     f->u.func.hdr = h;
     f->u.func.body = functionbody();
 
+    h->u.fhdr.lineend = prevtok.line;
+
     _endFunction();
 
     const HLFunctionHdr::Values args = h->u.fhdr.nargs();
@@ -812,7 +814,7 @@ HLNode* Parser::_restassign(HLNode* firstLhs, const Lexer::Token& lhsTok)
 
 // Check that any symbol directly assigned to is mutable and a local or upvalue.
 // Don't allow assignment to external symbols.
-void Parser::_checkAssignTarget(const HLNode* node, const Lexer::Token& nodetok)
+void Parser::_checkAssignTarget(HLNode* node, const Lexer::Token& nodetok)
 {
     if(node->type == HLNODE_IDENT)
     {
@@ -867,6 +869,10 @@ void Parser::_checkAssignTarget(const HLNode* node, const Lexer::Token& nodetok)
                 errorAt(sym->tok, "(Previously declared here)", diag);
             }
         }
+    }
+    else if(node->type == HLNODE_INDEX)
+    {
+        node->type = HLNODE_INDEXASSIGN;
     }
 }
 
@@ -1148,11 +1154,19 @@ HLNode* Parser::_suffixed(HLNode *prefix)
         switch(curtok.tt)
         {
             case Lexer::TOK_DOT:
-                advance();
-                next = hlir->index();
-                next->u.index.lhs = node;
-                next->u.index.idx = name("field"); // eats the name and advances
-                break;
+            advance();
+            next = hlir->index();
+            next->u.index.lhs = node;
+            if(HLNode *rhs = name("field")) // eats the name and advances
+            {
+                // Convert t.x to t["x"]
+                sref str = rhs->u.name.nameStrId;
+                rhs->unsafemorph<HLConstantValue>();
+                rhs->u.constant.val.u.str = str;
+                rhs->u.constant.val.type = PRIMTYPE_STRING;
+                next->u.index.idx = rhs;
+            }
+            break;
 
             case Lexer::TOK_LSQ:
                 advance();

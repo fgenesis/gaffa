@@ -186,13 +186,16 @@ HLNode *HLNode::fold(HLFoldTracker& ft)
         return NULL;
 
     // Chop functions into separate memory blocks so that they can be specialized individually
-    HLNode *cp = clone(ft);
-    return cp;
+    //HLNode *cp = clone(ft);
+    //return cp;
+    return this;
 }
 
 
 void HLNode::_foldRec(HLFoldTracker& ft)
 {
+    GC& gc = ft.vm.rt->gc;
+
     if(_nch)
     {
         const size_t N = numchildren();
@@ -289,34 +292,41 @@ void HLNode::_foldRec(HLFoldTracker& ft)
                 u.retn.what->setknowntype(typelistFromTypes(ft, u.retn.what, nodeKnownType));
             break;
 
-        case HLNODE_FUNCDECL:
+        case HLNODE_FUNCTION:
         {
-            HLIdent *ident = u.funcdecl.ident->as<HLIdent>();
-            HLIdent *ns = u.funcdecl.namespac ? u.funcdecl.namespac->as<HLIdent>() : NULL;
-            // This was already folded from HLFunction
-            HLFuncProto *fp = u.funcdecl.value->as<HLFuncProto>();
+            HLNode *me = this->clone(ft);
+            HLFuncProto *fp = me->as<HLFuncProto>();
 
             DebugInfo *d = gc_alloc_unmanaged_zero_T<DebugInfo>(ft.vm.rt->gc, 1);
             d->linestart = this->line;
-            d->lineend = 0; // TODO
-            d->name = ident->nameStrId;
+            d->lineend = fp->proto->lineend;
 
             DFunc *df = DFunc::GCNew(ft.vm.rt->gc);
             df->dbg = d;
             df->info = fp->proto->info;
             df->u.proto = fp->proto;
+       
+            this->makeconst(gc, Val(df));
+        }
+        break;
+
+        case HLNODE_FUNCDECL:
+        {
+            HLIdent *ident = u.funcdecl.ident->as<HLIdent>();
+            HLIdent *ns = u.funcdecl.namespac ? u.funcdecl.namespac->as<HLIdent>() : NULL;
+            // This was already folded from HLFunction
+            Val fv = u.funcdecl.value->as<HLConstantValue>()->val;
+            DFunc *df = fv.asFunc();
+            const FuncProto *proto = df->u.proto;
+            if(df->dbg)
+                df->dbg->name = ident->nameStrId;
 
             assert(!ns && "FIXME");
 
             Symstore::Sym *sym = ft.syms.getsym(ident->symid);
             assert(!sym->isMutable());
 
-            {
-                sym->setValue(Val(df));
-                //u.funcdecl.ident->clear(ft.vm.rt->gc); // These are removed during child compaction
-                //rhs->clear(ft.vm.rt->gc);
-                //continue;
-            }
+           sym->setValue(Val(df));
         }
     }
 
@@ -367,7 +377,8 @@ void HLNode::clear(GC& gc)
     {
         HLNode **ch = children();
         for(size_t i = 0; i < nch; ++i)
-            ch[i]->clear(gc);
+            if(ch[i])
+                ch[i]->clear(gc);
     }
 
     if(!(flags & HLFLAG_NOEXTMEM))
@@ -378,6 +389,36 @@ void HLNode::clear(GC& gc)
 
     _nch = 0;
     type = HLNODE_NONE;
+}
+
+static bool hasNulls(const HLNode * const *p, size_t n)
+{
+    for(size_t i = 0; i < n; ++i)
+        if(!p[i])
+            return true;
+    return false;
+}
+
+static HLVisitResult funcMemSizeVisitor(HLNode *node, void *ud)
+{
+    // Still need to account for current node even if we don't recurse
+    size_t add = sizeof(*node);
+    if(node->_nch == HLList::Children)
+    {
+        // Also store children memory block inline with the rest
+        assert(!hasNulls(node->u.list.list, node->u.list.used));
+        add += node->u.list.used * sizeof(HLNode*);
+    }
+
+    *(size_t*)ud += add;
+
+    switch(node->type)
+    {
+        case HLNODE_FUNCTION:
+        case HLNODE_FUNC_PROTO:
+            return VISIT_NOREC;
+    }
+    return VISIT_CONTINUE;
 }
 
 size_t HLNode::memoryNeeded() const
@@ -409,18 +450,22 @@ struct ReturnTypeDeductorVisitor
     size_t n;
 };
 
-static HLVisitResult nodeReturnVisitor(HLNode *node, void *ud)
+static HLPreVisitResult nodeReturnVisitor(HLNode *node, void *ud)
 {
+    HLPreVisitResult res = { VISIT_CONTINUE, 0 };
     ReturnTypeDeductorVisitor *vis = (ReturnTypeDeductorVisitor*)ud;
 
-    if(node->type == HLNODE_FUNCTION || node->type == HLNODE_FUNCDECL || node->type == HLNODE_FUNC_PROTO)
-        return VISIT_NOREC;
+    if(!node || node->type == HLNODE_FUNCTION || node->type == HLNODE_FUNCDECL || node->type == HLNODE_FUNC_PROTO)
+    {
+        res.res =  VISIT_NOREC;
+        return res;
+    }
 
     // TODO: could also use norec for things that are known to be expressions
     // and therefore can't contain a return statement -- probably faster
 
     if(node->type != HLNODE_RETURNYIELD || node->tok != Lexer::TOK_RETURN)
-        return VISIT_CONTINUE;
+        return res; // just continue
 
     // It's a return statement
     assert(node->mytype == PRIMTYPE_NIL); // return is a statement, not an expr
@@ -443,7 +488,8 @@ static HLVisitResult nodeReturnVisitor(HLNode *node, void *ud)
         }
     }
 
-    return VISIT_NOREC;
+    res.res = VISIT_NOREC;
+    return res;
 }
 
 // Clone one function into its own memory block.
@@ -475,6 +521,7 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
 
     proto->refcount = 1;
     proto->memsize = totalbytes;
+    proto->lineend = hh->lineend;
 
     // Clone all local functions first.
     proto->body = body->_clone(mem, sizeForSubtree, ft);
@@ -541,7 +588,7 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
     // Search for return statements and see what they return
     {
         ReturnTypeDeductorVisitor vis = { ft, hh->rettypes, info.rettype };
-        proto->body->visit(nodeReturnVisitor, &vis); // This will uncover type clashes if we already have a type
+        proto->body->visit(nodeReturnVisitor, NULL, &vis); // This will uncover type clashes if we already have a type
         Type rettype = vis.rettype;
 
         if(rettype == PRIMTYPE_AUTO && !vis.n) // No return type specified, no return found -> void aka nil
@@ -561,6 +608,8 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
         }
     }
 
+    info.flags |= FuncInfo::Proto;
+
     info.functype = rt.tr.mkfunc(info.paramtype, info.rettype);
 
     proto->info = info;
@@ -570,21 +619,26 @@ HLNode * HLNode::clone(HLFoldTracker& ft) const
     return funcroot;
 }
 
-void HLNode::visit(HLNodeVisitor visitor, void* ud)
+void HLNode::visit(HLPreVisitor pre, HLPostVisitor post, void* ud)
 {
-    switch(visitor(this, ud))
+    HLPreVisitResult r = { VISIT_CONTINUE, 0 };
+    if(pre)
+        r = pre(this, ud);
+    switch(r.res)
     {
         case VISIT_CONTINUE:
-        {
-            const size_t N = numchildren();
-            HLNode **ch = children();
-
-            for(size_t i = 0; i < N; ++i)
-                ch[i]->visit(visitor, ud);
-        }
-        break;
-
+            if(const size_t N = numchildren())
+            {
+                HLNode **ch = children();
+                for(size_t i = 0; i < N; ++i)
+                    ch[i]->visit(pre, post, ud);
+            }
+        // fall through
         case VISIT_NOREC:
+            if(post)
+                post(this, ud, r.aux);
+        // fall through
+        case VISIT_ABORT:
             break;
     }
 }
@@ -635,14 +689,17 @@ byte *HLNode::_cloneRec(byte *m, HLNode *target, HLFoldTracker& ft) const
             {
                 case HLNODE_FUNC_PROTO:
                     s->u.funcproto.proto->refcount++; // Don't clone already packaged functions
-                    // fall through
+                    d = &ch[i];
+                    break;
+
                 default:
                     d = &ch[i];
                     m = s->_cloneRec(m, d, ft); // Advances in our block
                     break;
 
                 case HLNODE_FUNCTION:
-                    d = s->clone(ft); // Allocates its own memory
+                    assert(false); // should have been folded to funcproto at this point
+                    //d = s->clone(ft); // Allocates its own memory
                     break;
             }
         }
@@ -652,10 +709,10 @@ byte *HLNode::_cloneRec(byte *m, HLNode *target, HLFoldTracker& ft) const
     return m;
 }
 
-
-
 void HLNode::_foldUnop(HLFoldTracker& ft)
 {
+    const Lexer::TokenType tt = Lexer::TokenType(tok);
+    u.unary.opid = Lexer::TokenToUnOp(tt);
     assert(false);
 }
 
@@ -822,6 +879,8 @@ void HLNode::_foldBinop(HLFoldTracker& ft)
     const Lexer::TokenType tt = Lexer::TokenType(tok);
     const char *opname = Lexer::GetTokenText(tt);
     Str name = ft.vm.rt->sp.put(opname);
+
+    u.binary.opid = Lexer::TokenToBinOp(tt);
 
     GC &gc = ft.vm.rt->gc;
 

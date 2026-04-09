@@ -28,8 +28,8 @@ set(src
     rtdata.cpp
     symstore.cpp
     symstore.h
-    #mlir.cpp
-    #mlir.h
+    mlir.cpp
+    mlir.h
     gaimpdbg.cpp
     gaimpdbg.h
     hashfunc.cpp

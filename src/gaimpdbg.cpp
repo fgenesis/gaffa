@@ -33,6 +33,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_ITER_DECLLIST:  return "iterdecllist";
         case HLNODE_ITER_EXPRLIST:  return "iterexprlist";
         case HLNODE_INDEX:          return "index";
+        case HLNODE_INDEXASSIGN:    return "indexassign";
         case HLNODE_FUNCTION:       return "function";
         case HLNODE_FUNCTIONHDR:    return "functionhdr";
         case HLNODE_SINK:           return "sink";
@@ -137,11 +138,20 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
 
     if(n->type == HLNODE_IDENT)
     {
-        unsigned strid = n->u.ident.nameStrId;
+        sref strid = n->u.ident.nameStrId;
         if(strid)
         {
             const char *s = rt.sp.lookup(strid);
             printf(" \"%s\"", s);
+        }
+    }
+    if(n->type == HLNODE_NAME)
+    {
+        sref strid = n->u.name.nameStrId;
+        if(strid)
+        {
+            const char *s = rt.sp.lookup(strid);
+            printf(" %s", s);
         }
     }
     else if(n->type == HLNODE_RETURNYIELD)
@@ -196,7 +206,18 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
                 case PRIMTYPE_BOOL: printf("%s", v.u.ui ? "true" : "false"); break;
                 case PRIMTYPE_FLOAT: printf("%f", v.u.f); break;
                 case PRIMTYPE_STRING: printf("\"%s\"", rt.sp.lookup(v.u.str).s); break;
-                //case PRIMTYPE_FUNCTION: { const DFunc *df = v.asFunc(); printf("function %s in line %d", df->dbg ? p.get(df->dbg->name).s : "?", df->dbg ? df->dbg->linestart : -1); break; }
+                case PRIMTYPE_FUNC:
+                {
+                    const DFunc *df = v.asFunc();
+                    printf("function %s in line %d", df->dbg && df->dbg->name ? rt.sp.lookup(df->dbg->name).s : "?", df->dbg ? df->dbg->linestart : -1);
+                    if((df->info.flags & FuncInfo::FuncTypeMask) == FuncInfo::Proto)
+                    {
+                        printf(" -- Packaged function %s -> %s:\n", getTypeName(rt, df->info.paramtype).c_str(), getTypeName(rt, df->info.rettype).c_str());
+                        dumprec(rt, df->u.proto->body, level+1);
+                    }
+                }
+                break;
+
                 default: printf("%08p, type=%d", v.u.p, v.type); break;
             }
         }

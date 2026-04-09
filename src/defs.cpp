@@ -135,3 +135,63 @@ bool ValU::operator==(const ValU& o) const
 {
     return type == o.type && u.opaque == o.u.opaque;
 }
+
+static const char * s_OpNames[] =
+{
+    /* OP_ERROR    */ NULL,
+    /* OP_UPLUS    */ "__op_uplus",
+    /* OP_UNEG     */ "__op_uneg",
+    /* OP_UNOT     */ "__op_not",
+    /* OP_UBITNOT  */ "__op_bitnot",
+    /* OP_ULEN     */ "__op_len",
+    /* OP_ADD      */ "__op_add",
+    /* OP_SUB      */ "__op_sub",
+    /* OP_MUL      */ "__op_mul",
+    /* OP_FDIV     */ "__op_div",
+    /* OP_IDIV     */ "__op_idiv",
+    /* OP_MOD      */ "__op_mod",
+    /* OP_SHL      */ "__op_shl",
+    /* OP_SHR      */ "__op_shr",
+    /* OP_BITAND   */ "__op_bitand",
+    /* OP_BITOR    */ "__op_bitor",
+    /* OP_XOR      */ "__op_bitxor",
+    /* OP_EQ       */ "__op_eq",
+    /* OP_NEQ      */ "__op_neq",
+    /* OP_LT       */ "__op_lt",
+    /* OP_LTE      */ "__op_lte",
+    /* OP_GT       */ "__op_gt",
+    /* OP_GTE      */ "__op_gte",
+    /* OP_LOGAND   */ "__op_and",
+    /* OP_LOGOR    */ "__op_or",
+    /* OP_CONCAT   */ "__op_concat",
+    /* OP_GETINDEX */ "__op_getindex",
+    /* OP_SETINDEX */ "__op_setindex"
+};
+
+static bool IsOperatorPrefix(const char *s)
+{
+    return s[0] == '_'
+        && s[1] == '_'
+        && s[2] == 'o'
+        && s[3] == 'p'
+        && s[4] == '_';
+}
+
+const char *GetOperatorName(OperatorId op)
+{
+    static_assert(Countof(s_OpNames) == _OP_MAX, "mismatch");
+    return op < Countof(s_OpNames) ? s_OpNames[op] : NULL;
+}
+
+OperatorId GetOperatorFromName(const char *name)
+{
+    if(IsOperatorPrefix(name))
+    {
+        name += 5;
+        for(size_t i = 1; i < Countof(s_OpNames); ++i) // skip OP_ERROR
+            if(!strcmp(name, s_OpNames[i] + 5))
+                return (OperatorId)i;
+    }
+
+    return OP_ERROR;
+}

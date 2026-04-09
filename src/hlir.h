@@ -60,6 +60,7 @@ enum HLNodeType
     HLNODE_ITER_DECLLIST,
     HLNODE_ITER_EXPRLIST,
     HLNODE_INDEX,
+    HLNODE_INDEXASSIGN, // INdexing operation while being assigned to
     HLNODE_FUNCTION,
     HLNODE_FUNCTIONHDR,
     HLNODE_SINK,
@@ -99,6 +100,7 @@ struct HLUnary : HLNodeBase
 {
     enum { EnumType = HLNODE_UNARY, Children = 1, DefaultValType = PRIMTYPE_AUTO };
     HLNode *a;
+    OperatorId opid;
 };
 
 struct HLBinary : HLNodeBase
@@ -106,6 +108,7 @@ struct HLBinary : HLNodeBase
     enum { EnumType = HLNODE_BINARY, Children = 2, DefaultValType = PRIMTYPE_AUTO };
     HLNode *a;
     HLNode *b;
+    OperatorId opid;
 };
 
 struct HLTernary : HLNodeBase
@@ -237,6 +240,7 @@ struct HLFunctionHdr : HLNodeBase
     enum { EnumType = HLNODE_FUNCTIONHDR, Children = 2 };
     HLNode *paramlist; // list of HLVarDef // TODO: make this HLVarDeclList in the future when there are function default args?
     HLNode *rettypes; // OPTIONAL list of HLNode
+    u32 lineend;
 
     // # of args / return values and whether the last element is variadic
     struct Values
@@ -278,6 +282,7 @@ struct FuncProto
     FuncInfo info;
     size_t refcount;
     size_t memsize;
+    u32 lineend;
 
     // cloned AST follows after the struct
 };
@@ -299,9 +304,16 @@ enum HLFoldStep
 enum HLVisitResult
 {
     VISIT_CONTINUE, // Continue visiting children
-    VISIT_NOREC // Break recursion
+    VISIT_NOREC, // Break recursion, but call post
+    VISIT_ABORT, // Don't even call post
 };
-typedef HLVisitResult (*HLNodeVisitor)(HLNode *node, void *ud);
+struct HLPreVisitResult
+{
+    HLVisitResult res;
+    uintptr_t aux;
+};
+typedef HLPreVisitResult (*HLPreVisitor)(HLNode *node, void *ud);
+typedef void (*HLPostVisitor)(HLNode *node, void *ud, uintptr_t aux);
 
 // All of the node types intentionally occupy the same memory.
 // This is so that a node type can be easily mutated into another,
@@ -419,7 +431,7 @@ struct HLNode
     size_t memoryNeeded() const;
     HLNode *clone(HLFoldTracker& ft) const;
 
-    void visit(HLNodeVisitor visitor, void *ud);
+    void visit(HLPreVisitor pre, HLPostVisitor post, void *ud);
 
 private:
     DType *getDType();

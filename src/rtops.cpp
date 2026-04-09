@@ -126,21 +126,21 @@ static FORCEINLINE int Mod(real& a, real b) { a = std::fmod(a, b); return 1; }
 // describes whether a = a * b is the same as a = b * a,
 // which is used for deciding if a = b * a
 // can be transformed into a *= b (ie. assignment-combined operator)
-template<Lexer::TokenType tt> struct IsCommutative : CompileFalse {};
-template<> struct IsCommutative<Lexer::TOK_PLUS> : CompileTrue {};
-template<> struct IsCommutative<Lexer::TOK_STAR> : CompileTrue {};
-template<> struct IsCommutative<Lexer::TOK_BITAND> : CompileTrue {};
-template<> struct IsCommutative<Lexer::TOK_BITOR> : CompileTrue {};
-template<> struct IsCommutative<Lexer::TOK_HAT> : CompileTrue {};
+template<OperatorId opid> struct IsCommutative : CompileFalse {};
+template<> struct IsCommutative<OP_ADD> : CompileTrue {};
+template<> struct IsCommutative<OP_MUL> : CompileTrue {};
+template<> struct IsCommutative<OP_BITAND> : CompileTrue {};
+template<> struct IsCommutative<OP_BITOR> : CompileTrue {};
+template<> struct IsCommutative<OP_XOR> : CompileTrue {};
 
 
-static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, Lexer::TokenType tt, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
+static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, OperatorId op, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
 {
     const Type tp = rt.tr.mklist(params, nparams);
     const Type tret = rt.tr.mklist(rets, nrets);
     const Type tf = rt.tr.mkfunc(tp, tret);
-    const Lexer::OpName opname = Lexer::GetOperatorName(tt, nparams == 1);
-    const sref sname = rt.sp.put(opname.name).id;
+    const char *opname = GetOperatorName(op);
+    const sref sname = rt.sp.put(opname).id;
 
     DFunc * const df = DFunc::GCNew(rt.gc);
     df->info.paramtype = tp;
@@ -180,7 +180,7 @@ struct WrappedBase
     }
 };
 
-template<typename RT, typename IT, typename ST, typename TDef<IT>::Binary F, Lexer::TokenType tt>
+template<typename RT, typename IT, typename ST, typename TDef<IT>::Binary F, OperatorId opid>
 struct WrappedBinOp : WrappedBase<RT, IT, ST>
 {
     static FORCEINLINE int Doit(Val *dst, Val *a, Val *b)
@@ -225,7 +225,7 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
 
     static size_t GenOp(void *dst, const u32 *argslots)
     {
-        const bool commutative = IsCommutative<tt>::value;
+        const bool commutative = IsCommutative<opid>::value;
         if(argslots[0] == argslots[1] || (commutative && argslots[0] == argslots[2]))
         {
             Imm_2xu32 imm { argslots[0], argslots[0] == argslots[1] ? argslots[2] : argslots[1] };
@@ -245,11 +245,11 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
 
         const Type params[] = { TDef<ST>::Prim, TDef<ST>::Prim };
         const Type rets[] = { TDef<RT>::Prim };
-        _Register(syms, rt, &opdef, tt, Func, params, Countof(params), rets, Countof(rets));
+        _Register(syms, rt, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
     }
 };
 
-template<typename RT, typename IT, typename ST, typename TDef<IT>::Unary F, Lexer::TokenType tt>
+template<typename RT, typename IT, typename ST, typename TDef<IT>::Unary F, OperatorId opid>
 struct WrappedUnOp : WrappedBase<RT, IT, ST>
 {
 
@@ -292,7 +292,7 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
     static size_t GenOp(void *dst, const u32 *argslots)
     {
         // float +x is a nop
-        if(TDef<ST>::Prim == PRIMTYPE_FLOAT && tt == Lexer::TOK_PLUS)
+        if(TDef<ST>::Prim == PRIMTYPE_FLOAT && opid == OP_UPLUS)
         {
             return 0;
         }
@@ -314,12 +314,12 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
         };
         const Type params[] = { TDef<ST>::Prim };
         const Type rets[] = { TDef<RT>::Prim };
-        _Register(syms, rt, &opdef, tt, Func, params, Countof(params), rets, Countof(rets));
+        _Register(syms, rt, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
     }
 };
 
 
-template<typename T, typename TDef<T>::CompBin F, Lexer::TokenType tt>
+template<typename T, typename TDef<T>::CompBin F, OperatorId opid>
 struct WrappedBinComp : WrappedBase<bool, bool, T>
 {
     static VMFUNC_MTH_IMM(Op, Imm_3xu32)
@@ -359,7 +359,7 @@ struct WrappedBinComp : WrappedBase<bool, bool, T>
         const Type params[] = { TDef<T>::Prim, TDef<T>::Prim };
         const Type rets[] = { PRIMTYPE_BOOL };
         // FIXME: These don't ever fail
-        _Register(syms, rt, &opdef, tt, Func, params, Countof(params), rets, Countof(rets));
+        _Register(syms, rt, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
     }
 };
 
@@ -377,8 +377,8 @@ template<> struct MakeInt<sint> { typedef sint Type; };
 template<typename T>
 struct Equality
 {
-    typedef WrappedBinComp<T, C_Eq, Lexer::TOK_EQ> _Eq;
-    typedef WrappedBinComp<T, C_Neq, Lexer::TOK_NEQ> _Neq;
+    typedef WrappedBinComp<T, C_Eq, OP_EQ> _Eq;
+    typedef WrappedBinComp<T, C_Neq, OP_NEQ> _Neq;
 
     static void Register(SymTable& syms, Runtime& rt)
     {
@@ -392,15 +392,15 @@ struct Arithmetic
 {
     typedef typename MakeSigned<T>::Type S;
     typedef typename MakeInt<T>::Type I;
-    typedef WrappedBinOp<T, T, T, Add<T>, Lexer::TOK_PLUS> _Add;
-    typedef WrappedBinOp<T, T, T, Sub<T>, Lexer::TOK_MINUS> _Sub;
-    typedef WrappedBinOp<T, T, T, Mul<T>, Lexer::TOK_STAR> _Mul;
-    typedef WrappedBinOp<real, widereal, T, FDiv, Lexer::TOK_SLASH> _FDiv;
-    typedef WrappedBinOp<T, T, T, Div, Lexer::TOK_SLASH2X> _Div;
-    typedef WrappedBinOp<T, T, T, Mod, Lexer::TOK_PERC> _Mod;
+    typedef WrappedBinOp<T, T, T, Add<T>, OP_ADD> _Add;
+    typedef WrappedBinOp<T, T, T, Sub<T>, OP_SUB> _Sub;
+    typedef WrappedBinOp<T, T, T, Mul<T>, OP_MUL> _Mul;
+    typedef WrappedBinOp<real, widereal, T, FDiv, OP_FDIV> _FDiv;
+    typedef WrappedBinOp<T, T, T, Div, OP_IDIV> _Div;
+    typedef WrappedBinOp<T, T, T, Mod, OP_MOD> _Mod;
     // Unary + or minus always converts to signed
-    typedef WrappedUnOp<S, S, T, UPos<S>, Lexer::TOK_PLUS> _UPlus;
-    typedef WrappedUnOp<S, S, T, UNeg<S>, Lexer::TOK_MINUS> _UNeg;
+    typedef WrappedUnOp<S, S, T, UPos<S>, OP_UPLUS> _UPlus;
+    typedef WrappedUnOp<S, S, T, UNeg<S>, OP_UNEG> _UNeg;
 
     static void Register(SymTable& syms, Runtime& rt)
     {
@@ -430,12 +430,12 @@ struct Orderable
 template<typename T>
 struct Bitwise
 {
-    typedef WrappedBinOp<T, T, T, BAnd<T>, Lexer::TOK_PLUS> _BAnd;
-    typedef WrappedBinOp<T, T, T, BOr<T>, Lexer::TOK_MINUS> _BOr;
-    typedef WrappedBinOp<T, T, T, BXor<T>, Lexer::TOK_STAR> _BXor;
-    typedef WrappedBinOp<T, T, T, Shl<T>, Lexer::TOK_SHL> _Shl;
-    typedef WrappedBinOp<T, T, T, Shr<T>, Lexer::TOK_SHR> _Shr;
-    typedef WrappedUnOp<T, T, T, UCpl<T>, Lexer::TOK_SHR> _UCpl;
+    typedef WrappedBinOp<T, T, T, BAnd<T>, OP_BITAND> _BAnd;
+    typedef WrappedBinOp<T, T, T, BOr<T>, OP_BITOR> _BOr;
+    typedef WrappedBinOp<T, T, T, BXor<T>, OP_XOR> _BXor;
+    typedef WrappedBinOp<T, T, T, Shl<T>, OP_SHL> _Shl;
+    typedef WrappedBinOp<T, T, T, Shr<T>, OP_SHR> _Shr;
+    typedef WrappedUnOp<T, T, T, UCpl<T>, OP_UBITNOT> _UCpl;
 
 
     static void Register(SymTable& syms, Runtime& rt)

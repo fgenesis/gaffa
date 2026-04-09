@@ -105,7 +105,10 @@ uint y = 2
 
 --func int.+(int a, int b) {}
 
-func tiny() { return x+y+z }
+func tiny() { return x+y }
+
+var t = {}
+t.a.b.c["d"] = 123
 
 --func addi(int a, b, ...) -> int... { int c = a+b int d = x+y int e = c+d return e }
 

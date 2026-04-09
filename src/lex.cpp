@@ -271,21 +271,6 @@ bool Lexer::IsKeyword(TokenType tt)
     return false;
 }
 
-// To be able to distinguish infix operators (a+b) from prefix ops (+a),
-// when the operator is used as a function name, append a _.
-// (There is no overloading so names must be different)
-Lexer::OpName Lexer::GetOperatorName(TokenType tt, bool prefix)
-{
-    OpName ret = {0};
-    char *dst = ret.name;
-    const char *text = GetTokenText(tt);
-    for(size_t i = 0; text[i]; ++i)
-        *dst++ = text[i];
-    if(prefix)
-        *dst++ = '_';
-    return ret;
-}
-
 Lexer::Token Lexer::tok(TokenType tt, const char *where, const char *end)
 {
     assert(where <= end);
@@ -358,3 +343,48 @@ Lexer::Token Lexer::litnum(const char* where)
     return tok(TOK_LITNUM, where, end);
 }
 
+OperatorId Lexer::TokenToBinOp(TokenType tok)
+{
+    switch(tok)
+    {
+        case TOK_PLUS: return OP_ADD;
+        case TOK_MINUS: return OP_SUB;
+        case TOK_STAR: return OP_MUL;
+        case TOK_SLASH: return OP_FDIV;
+        case TOK_SLASH2X: return OP_IDIV;
+        case TOK_PERC: return OP_MOD;
+        case TOK_SHL: return OP_SHL;
+        case TOK_SHR: return OP_SHR;
+        case TOK_AND: return OP_BITAND;
+        case TOK_OR: return OP_BITOR;
+        case TOK_HAT: return OP_XOR;
+        case TOK_EQ: return OP_EQ;
+        case TOK_NEQ: return OP_NEQ;
+        case TOK_LT: return OP_LT;
+        case TOK_LTE: return OP_LTE;
+        case TOK_GT: return OP_GT;
+        case TOK_GTE: return OP_GTE;
+        case TOK_LOGAND: return OP_LOGAND;
+        case TOK_LOGOR: return OP_LOGOR;
+        case TOK_CONCAT: return OP_CONCAT;
+        case TOK_LSQ: return OP_GETINDEX;
+        //case TOK_LSQ: return OP_SETINDEX; // This is set on demand by the parser
+    }
+    assert(false);
+    return OP_ERROR;
+}
+
+OperatorId Lexer::TokenToUnOp(TokenType tok)
+{
+    switch(tok)
+    {
+        case TOK_PLUS: return OP_UPLUS;
+        case TOK_MINUS: return OP_UNEG;
+        case TOK_EXCL: return OP_UNOT;
+        case TOK_TILDE: return OP_UBITNOT;
+        case TOK_HASH: return OP_ULEN;
+    }
+
+    assert(false);
+    return OP_ERROR;
+}

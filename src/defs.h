@@ -211,3 +211,49 @@ const char *GetPrimTypeName(unsigned t);
 // Small-size memcpy() that's wired specifially to copy any values a ValU may contain.
 // Assumes both pointers are aligned to 4 bytes.
 void *valcpy(void *dst, const void *src, tsize bytes);
+
+// Some token have multiple meanings (unary vs binary).
+// This is the actual operation behind a token in its intended role.
+enum OperatorId
+{
+    OP_ERROR,
+
+    // unary
+    OP_UPLUS,
+    OP_UNEG,
+    OP_UNOT,
+    OP_UBITNOT,
+    OP_ULEN,
+
+    // binary
+    OP_ADD,
+    OP_SUB,
+    OP_MUL,
+    OP_FDIV,
+    OP_IDIV,
+    OP_MOD,
+    OP_SHL,
+    OP_SHR,
+    OP_BITAND,
+    OP_BITOR,
+    OP_XOR,
+
+    OP_EQ,
+    OP_NEQ,
+    OP_LT,
+    OP_LTE,
+    OP_GT,
+    OP_GTE,
+    OP_LOGAND,
+    OP_LOGOR,
+
+    OP_CONCAT,
+    OP_GETINDEX,
+    OP_SETINDEX,
+
+    _OP_MAX,
+};
+
+static bool IsOperatorPrefix(const char *s);
+const char *GetOperatorName(OperatorId op);
+OperatorId GetOperatorFromName(const char *name);

@@ -108,13 +108,8 @@ public:
     static const char *GetTokenText(TokenType tt);
     static bool IsKeyword(TokenType tt);
 
-    union OpName
-    {
-        char name[4];
-        u32 _pad;
-    };
-
-    static OpName GetOperatorName(TokenType tt, bool prefix);
+    static OperatorId TokenToBinOp(TokenType tok);
+    static OperatorId TokenToUnOp(TokenType tok);
 
 private:
     const char *skipws();
@@ -129,3 +124,5 @@ private:
     const char *_linebegin;
     unsigned _line;
 };
+
+
