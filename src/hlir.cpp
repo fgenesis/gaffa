@@ -305,7 +305,7 @@ void HLNode::_foldRec(HLFoldTracker& ft)
             df->dbg = d;
             df->info = fp->proto->info;
             df->u.proto = fp->proto;
-       
+
             this->makeconst(gc, Val(df));
         }
         break;

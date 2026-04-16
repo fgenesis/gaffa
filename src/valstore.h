@@ -20,6 +20,5 @@ public:
 
     PodArray<ValU> vals;
 
-private:
-    GC& _gc;
+    GC& gc;
 };

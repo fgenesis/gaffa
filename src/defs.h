@@ -44,6 +44,12 @@ enum Constants
     INT_BITS =  sizeof(uint) * CHAR_BIT,
 };
 
+#define MAGIC_FILE_ID_BYTES      0x1b, 'g', 'A', 0x1c
+
+/*enum MagicID
+{
+}*/
+
 
 typedef tsize Type;
 
@@ -166,6 +172,11 @@ struct ValU
     bool operator==(const ValU& o) const;
 };
 
+enum
+{
+    VALU_STORAGE_SIZE = sizeof(((ValU*)NULL)->u) +  sizeof(((ValU*)NULL)->type)
+};
+
 struct Val : public ValU
 {
     inline Val(const _AnyValU u, PrimType t) { this->type = t; this->u = u; }
@@ -257,3 +268,4 @@ enum OperatorId
 static bool IsOperatorPrefix(const char *s);
 const char *GetOperatorName(OperatorId op);
 OperatorId GetOperatorFromName(const char *name);
+size_t GetOperatorArity(OperatorId op);

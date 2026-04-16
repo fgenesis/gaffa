@@ -84,10 +84,17 @@
 #  endif
 #endif
 
-#define STATIC_ASSERT(cond) switch((int)!!(cond)){case 0:;case(!!(cond)):;}
+#define STATIC_ASSERT(cond) do { switch((int)!!(cond)){case 0:;case(!!(cond)):;} } while(0)
 
+#if __has_builtin(__builtin_offsetof)
+#  define STATIC_OFFSETOF(strct, member) __builtin_offsetof(strct, member)
+#else
+#  define STATIC_OFFSETOF(strct, member) ((size_t)&reinterpret_cast<char const volatile&>((((strct*)0)->member)))
+#endif
 
+#define STATIC_SIZEOF(strct, member) (sizeof(((strct*)NULL)->member))
 
+#define STATIC_END_OF(strct, member) (STATIC_OFFSETOF(strct, member) + STATIC_SIZEOF(strct, member))
 
 namespace detail
 {

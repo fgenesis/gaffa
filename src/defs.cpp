@@ -195,3 +195,22 @@ OperatorId GetOperatorFromName(const char *name)
 
     return OP_ERROR;
 }
+
+size_t GetOperatorArity(OperatorId op)
+{
+    if(op == OP_ERROR || op >= _OP_MAX)
+        return 0;
+
+    switch(op)
+    {
+        case OP_UPLUS:
+        case OP_UNEG:
+        case OP_UNOT:
+        case OP_UBITNOT:
+        case OP_ULEN:
+            return 1;
+        default: ;
+    }
+
+    return 2;
+}

@@ -7,7 +7,7 @@
 
 
 
-class StringPool : private Dedup
+class StringPool : public Dedup
 {
 public:
     StringPool(GC& gc);

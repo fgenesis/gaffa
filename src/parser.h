@@ -162,7 +162,7 @@ private:
     Str _identStr(const Lexer::Token& tok);
     bool _checkname(const Lexer::Token& tok, const char *whatfor);
     void _applyUsage(const Lexer::Token& tok, HLNode *node, IdentUsage usage, SymbolRefContext symref);
-    void _checkAssignTarget(const HLNode *node, const Lexer::Token& nodetok);
+    void _checkAssignTarget(HLNode *node, const Lexer::Token& nodetok);
     const char *symbolname(const HLNode *node) const;
     const char *symbolname(const Symstore::Sym *sym) const;
     void _beginFunction(ScopeType scope = SCOPE_FUNCTION);

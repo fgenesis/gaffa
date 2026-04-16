@@ -54,18 +54,33 @@ public:
     FORCEINLINE const T& back() const { assert(sz); return arr[sz-1]; }
 
     // Returns pointer to n free slots
-    FORCEINLINE T *alloc_n(GC& gc, tsize n)
+    FORCEINLINE T *alloc_n_exact(GC& gc, tsize n)
     {
         T *a = data();
-        const tsize N = sz;
-        if(N == cap)
+        tsize newsz = sz + n;
+        if(newsz > cap)
         {
-            a = this->_chsize(gc, N + n);
+            a = this->_chsize(gc, newsz);
             if(!a)
                 return NULL;
         }
-        sz = N + n;
-        return a + N;
+        sz = newsz;
+        return a + newsz - n;
+    }
+
+    FORCEINLINE T *alloc_n(GC& gc, tsize n)
+    {
+        T *a = data();
+        tsize newsz = sz + n;
+        if(newsz > cap)
+        {
+            newsz *= 2; // alloc some more to amortize re-allocations
+            a = this->_chsize(gc, newsz);
+            if(!a)
+                return NULL;
+        }
+        sz = newsz;
+        return a + newsz - n;
     }
 
     FORCEINLINE T *push_back(GC& gc, T x)
@@ -211,4 +226,81 @@ start:
         a[i] = e;
         _percolateUp(i);
     }
+};
+
+template<typename T>
+class Queue // FIFO, circular, POD only
+{
+public:
+    Queue() : w(0), r(0), elems(NULL), mask(0)
+    {
+    }
+
+    ~Queue()
+    {
+        assert(!elems);
+    }
+
+    inline bool empty() const
+    {
+        return w == r;
+    }
+
+
+    T *push(GC& gc, T x)
+    {
+        if(((w + 1) & mask) == r)
+            if(!_realloc(gc, mask ? 2 * (mask + 1) : 16))
+                return NULL;
+
+        T *p = &elems[w];
+        w = (w + 1) & mask;
+        *p = x;
+        return p;
+    }
+
+    T pop()
+    {
+        assert(!empty());
+        T *p = &elems[r];
+        r = (r + 1) & mask;
+        return *p;
+
+    }
+
+    void dealloc(GC& gc)
+    {
+        if(elems)
+            gc_alloc_unmanaged_T<T>(gc, elems, mask + 1, 0);
+        elems = NULL;
+        mask = 0;
+        r = 0;
+        w = 0;
+    }
+
+private:
+
+    T *_realloc(GC& gc, size_t newcap)
+    {
+        T *e = gc_alloc_unmanaged_T<T>(gc, NULL, 0, newcap);
+        if(!e)
+            return NULL;
+
+        size_t i = 0;
+        for(; !empty(); ++i)
+            e[i] = pop();
+
+        dealloc(gc);
+
+        r = 0;
+        w = i;
+        elems = e;
+        mask = newcap - 1;
+        return e;
+    }
+
+    size_t r; // the next pop will read the element from this index
+    size_t w; // always the next index to be written when pushed to
+    size_t mask; // always power of 2 minus 1; 0 if empty; mask+1 == capacity
+    T *elems;
 };

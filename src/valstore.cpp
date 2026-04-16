@@ -9,7 +9,7 @@ enum
 };
 
 ValStore::ValStore(GC& gc)
-    : _gc(gc)
+    : gc(gc)
 {
     vals.push_back(gc, Val());
     vals.push_back(gc, Val(false));
@@ -19,7 +19,7 @@ ValStore::ValStore(GC& gc)
 
 ValStore::~ValStore()
 {
-    vals.dealloc(_gc);
+    vals.dealloc(gc);
 }
 
 u32 ValStore::put(ValU v)
@@ -31,7 +31,7 @@ u32 ValStore::put(ValU v)
             return i;
     }
 
-    ValU *p = vals.push_back(_gc, v);
+    ValU *p = vals.push_back(gc, v);
     assert(p); // TODO: handle OOM
     return N;
 }
@@ -78,7 +78,7 @@ void ValStore::serialize(BufSink* sk, const StringPool& sp) const
                 assert(false);
         }
 
-        sk->Write(sk, &buf, 1);
+        sk->Write(sk, &buf, n);
         if(s.len)
         {
             sk->Write(sk, s.s, s.len);
