@@ -2,6 +2,7 @@
 
 #include "defs.h"
 #include "array.h"
+#include "typing.h"
 
 struct HLNode;
 
@@ -18,9 +19,7 @@ enum MLCmd
                         // kind (#params) [#children]
 
     ML_CONST = 40,      // expr (1, const table idx)
-    ML_LOCAL,           // expr (1, local table idx)
-    ML_UPVAL,           // expr (1, upval table idx)
-    ML_EXTVAL,          // expr (1, import table idx)
+    ML_VAR,             // expr (1, local table idx) -- local, upval, or extval
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
     ML_DECL,            // stmt (2, local start, N) [2, typeexprs, exprs]
     ML_CLOSE,           // stmt (2, local start, N)
@@ -124,6 +123,13 @@ class MLVarStore
 {
 };
 
+struct MLFoldTracker
+{
+};
+
+typedef uintptr_t (*MLVisitorPre)(MLNode *node, MLNode *parent);
+typedef void (*MLVisitorPost)(MLNode *node, MLNode *parent, uintptr_t aux);
+
 class MLIRBuilder
 {
 public:
@@ -137,13 +143,18 @@ public:
     // The HLNode tree is no longer needed after this call.
     void convert();
 
+    // Typecheck and optimize the tree. 
+    void fold(MLFoldTracker& ft);
+
     size_t indexOf(MLNode *node) const;
+
+    void visit(MLVisitorPre pre, MLVisitorPost post);
 
     PodArray<MLNode> nodes;
     PodArray<MLInfo> infos;
 
 
-    MLVarStore locals, upvals, ext;
+    MLVarStore vars;
 
     GC& gc;
 

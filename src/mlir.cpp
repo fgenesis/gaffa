@@ -44,14 +44,33 @@ struct MLDumper
     MLWriter dbg;
 };
 
+// statements have no associated type
+static bool mlirIsStmt(MLCmd cmd)
+{
+    if(cmd < _ML_OP_MAX)
+        return true;
+
+    switch(cmd)
+    {
+    case ML_CONST:
+    case ML_VAR:
+    case ML_FNCALL:
+    case ML_MTHCALL:
+    case ML_FUNC:
+    case ML_NEW_ARRAY:
+    case ML_NEW_TABLE:
+        return true;
+    default: ;
+    }
+    return false;
+}
+
 static size_t mlirNumParams(MLCmd cmd)
 {
     switch(cmd)
     {
         case ML_CONST:
-        case ML_LOCAL:
-        case ML_UPVAL:
-        case ML_EXTVAL:
+        case ML_VAR:
         case ML_NAMEDECL:
             return 1;
 
@@ -73,9 +92,7 @@ static size_t mlirNumChildren(MLCmd cmd)
     switch(cmd)
     {
         case ML_CONST:
-        case ML_LOCAL:
-        case ML_UPVAL:
-        case ML_EXTVAL:
+        case ML_VAR:
         case ML_CLOSE:
         case _ML_VAL:
             return 0;
@@ -208,6 +225,24 @@ size_t MLIRBuilder::indexOf(MLNode* node) const
     const MLNode *base = nodes.data();
     assert(base <= node && node < base + nodes.size());
     return node - base;
+}
+
+static void visitRec(MLVisitorPre pre, MLVisitorPost post, MLNode *node, MLNode *parent)
+{
+    const uintptr_t aux = pre ? pre(node, parent) : 0;
+    if(size_t nch = mlirNumChildren((MLCmd)node->m.cmd))
+    {
+        MLNode *ch = node->firstChild();
+        for(size_t i = 0; i < nch; ++i)
+            visitRec(pre, post, ch + i, node);
+    }
+    if(post)
+        post(node, parent, aux);
+}
+
+void MLIRBuilder::visit(MLVisitorPre pre, MLVisitorPost post)
+{
+    visitRec(pre, post, &nodes[0], NULL);
 }
 
 
