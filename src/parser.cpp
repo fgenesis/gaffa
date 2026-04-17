@@ -264,19 +264,10 @@ HLNode *Parser::parse()
     advance();
 
     // The file's statements are parsed as a single block.
-    // Wrap that into a function that takes no parameters and has no speficied return values.
-    HLNode *root = ensure(hlir->func());
-    HLNode *hdr = ensure(hlir->fhdr());
-    if(root && hdr)
-    {
-        hdr->u.fhdr.paramlist = NULL;
-        hdr->u.fhdr.rettypes = NULL; // FIXME: Should probably make this a void return?
-        root->u.func.hdr = hdr;
-
-        _beginFunction();
-        root->u.func.body = stmtlist(Lexer::TOK_E_EOF);
-        _endFunction();
-    }
+    // Much later this will eventually become a function, so we track variables etc in an initial function scope.
+    _beginFunction();
+    HLNode *root = stmtlist(Lexer::TOK_E_EOF);
+    _endFunction();
 
     if(hadError)
     {

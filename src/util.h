@@ -107,7 +107,7 @@ namespace detail
 #ifdef __GNUC__
 static inline __attribute__((always_inline, noreturn)) void unreachable() { __builtin_unreachable(); }
 #elif defined(_MSC_VER)
-static __forceinline __declspec(noreturn) void unreachable() { __assume(false); }
+static __forceinline __declspec(noreturn) void unreachable() { __assume(false); assert(false); }
 #else
 static inline void unreachable() { assert(false && "unreachable"); }
 #endif

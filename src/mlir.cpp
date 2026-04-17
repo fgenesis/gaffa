@@ -39,7 +39,7 @@ struct MLWriter
 struct MLDumper
 {
     MLDumper(GC& gc) : tree(gc), dbg(gc) {}
-    Queue<MLNode*> q;
+    Queue<const MLNode*> q;
     MLWriter tree;
     MLWriter dbg;
 };
@@ -116,6 +116,8 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_FUNC:
             return 3;
 
+        case ML_LIST:
+            assert(false && "use MLNode::numchildren()");
         default: ;
     }
 
@@ -123,7 +125,7 @@ static size_t mlirNumChildren(MLCmd cmd)
     return 0;
 }
 
-static void mlirDumpNode(MLDumper& dump, ValStore& vals, MLNode *node)
+static void mlirDumpNode(MLDumper& dump, ValStore& vals, const MLNode *node)
 {
     MLCmd cmd = (MLCmd)node->m.cmd;
 
@@ -165,18 +167,18 @@ static void mlirDumpNode(MLDumper& dump, ValStore& vals, MLNode *node)
     if(nch)
     {
 dochildren:
-        MLNode *c = node->firstChild();
+        const MLNode *c = node->firstChild();
         for(size_t i = 0; i < nch; ++i)
             dump.q.push(vals.gc, &c[i]);
     }
 }
 
-static void mlirDump(BufSink *sk, StringPool& sp, MLNode *root)
+static void mlirDump(BufSink *sk, StringPool& sp, const MLNode *root)
 {
     ValStore vals(sp.gc);
     MLDumper dump(sp.gc);
 
-    MLNode *node = root;
+    const MLNode *node = root;
     for(;;)
     {
         mlirDumpNode(dump, vals, node);
@@ -202,7 +204,13 @@ MLNode* MLNode::firstChild()
     return m.chOffs ? this + m.chOffs : NULL;
 }
 
-Val MLNode::asVal()
+const MLNode* MLNode::firstChild() const
+{
+    assert(m.cmd != _ML_VAL);
+    return m.chOffs ? this + m.chOffs : NULL;
+}
+
+Val MLNode::asVal() const
 {
     STATIC_ASSERT(STATIC_OFFSETOF(MLNode, m.cmd) >= STATIC_END_OF(MLNode, val.type));
 
@@ -210,17 +218,27 @@ Val MLNode::asVal()
     return val;
 }
 
+size_t MLNode::numchildren() const
+{
+    return m.cmd != ML_LIST ? mlirNumChildren((MLCmd)m.cmd) : list.len;
+}
 
 static void mlirGenerateNode(HLNode *root)
 {
 }
 
-MLIRBuilder::MLIRBuilder(GC& gc)
+MLIR::MLIR(GC& gc)
     : gc(gc)
 {
 }
 
-size_t MLIRBuilder::indexOf(MLNode* node) const
+MLIR::~MLIR()
+{
+    nodes.dealloc(gc);
+    infos.dealloc(gc);
+}
+
+size_t MLIR::indexOf(MLNode* node) const
 {
     const MLNode *base = nodes.data();
     assert(base <= node && node < base + nodes.size());
@@ -230,7 +248,7 @@ size_t MLIRBuilder::indexOf(MLNode* node) const
 static void visitRec(MLVisitorPre pre, MLVisitorPost post, MLNode *node, MLNode *parent)
 {
     const uintptr_t aux = pre ? pre(node, parent) : 0;
-    if(size_t nch = mlirNumChildren((MLCmd)node->m.cmd))
+    if(size_t nch = node->numchildren())
     {
         MLNode *ch = node->firstChild();
         for(size_t i = 0; i < nch; ++i)
@@ -240,13 +258,29 @@ static void visitRec(MLVisitorPre pre, MLVisitorPost post, MLNode *node, MLNode 
         post(node, parent, aux);
 }
 
-void MLIRBuilder::visit(MLVisitorPre pre, MLVisitorPost post)
+void MLIR::visit(MLVisitorPre pre, MLVisitorPost post)
 {
     visitRec(pre, post, &nodes[0], NULL);
 }
 
+void MLIR::dump(BufSink* sink, StringPool& sp) const
+{
+    mlirDump(sink, sp, nodes.data());
+}
 
-void MLIRBuilder::construct(const HLNode* root)
+static void invalidatePost(MLNode *node, MLNode *parent, uintptr_t aux)
+{
+    node->m.cmd = _ML_DEAD;
+}
+
+void MLNode::invalidate()
+{
+    visitRec(NULL, invalidatePost, this, NULL);
+}
+
+
+
+void MLIR::construct(const HLNode* root)
 {
     struct HLRef
     {
@@ -265,16 +299,17 @@ void MLIRBuilder::construct(const HLNode* root)
         {
             a.push_back(gc, r); // Keep all nodes around in the same order for the next step
 
-            if(size_t nch = r.node->numchildren())
-            {
-                r.parentidx = a.size();
-                const HLNode * const * const ch = r.node->children();
-                for(size_t i = 0; i < nch; ++i)
+            if(r.node)
+                if(size_t nch = r.node->numchildren())
                 {
-                    r.node = ch[i];
-                    q.push(gc, r);
+                    r.parentidx = a.size();
+                    const HLNode * const * const ch = r.node->children();
+                    for(size_t i = 0; i < nch; ++i)
+                    {
+                        r.node = ch[i]; // This may be NULL. Push it anyway to get the correct count; it's handled later
+                        q.push(gc, r);
+                    }
                 }
-            }
 
             if(q.empty())
                 break;
@@ -316,40 +351,72 @@ void MLIRBuilder::construct(const HLNode* root)
 static MLCmd convertNode(MLNode& m, const HLNode& h)
 {
     MLCmd cmd = ML_LIST;
-    switch(h.type)
+    HLNodeType hltype = (HLNodeType)h.type;
+
+    if(h._nch == HLList::Children)
+    {
+        // It's a list node. Make it a list.
+        m.list.len = h.u.list.used;
+    }
+
+    switch(hltype)
     {
 #define CASE(hltype, mltype) break; case hltype: cmd = mltype;
 
-        CASE(HLNODE_LIST, ML_LIST)
-            m.list.len = h.u.list.used;
         CASE(HLNODE_WHILELOOP, ML_WHILE)
         CASE(HLNODE_FORLOOP, ML_FOR)
+        CASE(HLNODE_RETURNYIELD, ML_RETURN)
+        //CASE(HLNODE_RETURNYIELD, ML_EMIT)
+        //CASE(HLNODE_RETURNYIELD, ML_YIELD)
 
 #undef CASE
         break;
         default:
-            m.list.len = h.numchildren(); // For testing only
             unreachable();
+
+        // These cases don't need further handling and can be ignored
+        case HLNODE_LIST:
+        case HLNODE_BLOCK:
+        ;
     }
+
+    m.m.cmd = cmd;
+
+    assert(m.numchildren() == h.numchildren());
+
     return cmd;
 }
 
-void MLIRBuilder::convert()
+void MLIR::convert()
 {
     infos.resize(gc, nodes.size());
 
+    // No need to do this recursively, just convert everything
     for(size_t i = 0; i < nodes.size(); ++i)
     {
         MLNode& m = nodes[i];
         if(m.m.cmd != _ML_HL_TODO)
             continue;
 
-        const HLNode& h = *m.hl.node;
-
+        const HLNode *h = m.hl.node;
         MLInfo& info = infos[i];
-        info.line = h.line;
-        info.column = h.column;
-
-        m.m.cmd = convertNode(m, h);
+        if(h)
+        {
+            info.line = h->line;
+            info.column = h->column;
+            m.m.cmd = convertNode(m, *h);
+        }
+        else // A NULL node becomes an empty list to indicate 'nothing there'
+        {
+            info.line = 0;
+            info.column = 0;
+            m.m.cmd = ML_LIST;
+            m.list.len = 0;
+        }
     }
 }
+
+/* Optimization ideas:
+- Any null-node in a list can get removed (there shouldn't be any?)
+- Any length-1 list can be replaced by its only child (simply forward parent's childOffs to new child)
+*/

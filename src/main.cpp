@@ -11,6 +11,7 @@
 #include "rttypes.h"
 #include "symtable.h"
 #include "runtime.h"
+#include "mlir.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -223,6 +224,17 @@ int main(int argc, char **argv)
     vm.rt = &rt;
     rtinit(*env, rt.gc, rt.sp, rt.tr);
 
+    MLIR ml(rt.gc);
+
+    ml.construct(node);
+
+    printf("ML nodes: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));
+
+    ml.convert();
+
+
+#if 0
+
     HLFoldTracker ft = { vm, pp.syms, *env, hb, 0 };
 
     /*puts("\n####### AFTER EARLY FOLDING #######\n");
@@ -238,6 +250,7 @@ int main(int argc, char **argv)
     //MLIRContainer mc(gc);
     //mc.import(node, strtab, fn);
 
+#endif
 
    return 0;
 }

@@ -5,6 +5,8 @@
 #include "typing.h"
 
 struct HLNode;
+struct BufSink;
+class StringPool;
 
 enum MLCmd
 {
@@ -64,23 +66,19 @@ MUL PLUS CALL 1 2 -3 PLUS a b 3 4
             +-----+
 */
 
-/* ALTERNATIVE
-u32 v0 -- large enough for indices
-u16 v1 -- large enough for counts
-byte cmd
-u32 chOffs
-- store values always in constant table
--- but 16b is a nice size, easy to index. this would be 12b
 
-OR
-add u16 typeidx
-each node that has a type but no space to store one should index into types array
-can store primtypes directly
-operators can store type in p[0]
-vars and values fetch types from their own table
-
+/* Design decisions:
+- Always stored in a single memory block that can me memmove()'d around
+- All children of a parent are consecutive as one block in memory
+- Children follow somewhere after parent
+- As small as possible, esp. when encoded to storage format
+- Must be fully reconstructible from storage format
+- Larger things are referenced by ID and stored externally, this is just for
+  keeping the original AST structure intact in a much more compact format than HLNode.
+- No dynamically aloccated memory in these nodes. Freeing the storage array must be enough.
+- No pointers stored in nodes
+- Can't reach parent from child nodes
 */
-
 union MLNode
 {
     ValU val;       // if _ML_VAL (known to not have children, no params)
@@ -89,7 +87,6 @@ union MLNode
         u32 p[2];
         u32 chOffs; // must be usable together with hl.node, HL_LIST, others. _ML_VAL conflicts.
         byte cmd;
-        // u16 typeidx
     } m;
     struct
     {
@@ -97,7 +94,7 @@ union MLNode
     } list;
     struct
     {
-        const HLNode *node;
+        const HLNode *node; // This is only used during construction
     } hl;
     struct
     {
@@ -106,7 +103,12 @@ union MLNode
     } x;
 
     MLNode *firstChild();
-    Val asVal();
+    const MLNode *firstChild() const;
+    Val asVal() const;
+    size_t numchildren() const;
+
+    // Invalidate this node and all its children
+    void invalidate();
 };
 
 struct MLInfo
@@ -117,6 +119,15 @@ struct MLInfo
 struct MLTypeInfo
 {
     Type t;
+};
+
+struct MLVar
+{
+    enum Kind { LOCAL, UPVAL, EXT, CONSTVAL };
+    Kind kind;
+    ValU val; // if kind == CONSTVAL, this is the value, otherwise only its type is used
+    u32 slot; // local slot, upvalue slot, etc.
+    sref name;
 };
 
 class MLVarStore
@@ -130,10 +141,11 @@ struct MLFoldTracker
 typedef uintptr_t (*MLVisitorPre)(MLNode *node, MLNode *parent);
 typedef void (*MLVisitorPost)(MLNode *node, MLNode *parent, uintptr_t aux);
 
-class MLIRBuilder
+class MLIR
 {
 public:
-    MLIRBuilder(GC& gc);
+    MLIR(GC& gc);
+    ~MLIR();
 
     // Construct a MLNode tree out of a HLNode tree.
     // The generated MLNodes are unresolved (cmd == _ML_HL_TODO) and still point to their HLNode.
@@ -143,12 +155,13 @@ public:
     // The HLNode tree is no longer needed after this call.
     void convert();
 
-    // Typecheck and optimize the tree. 
+    // Typecheck and optimize the tree.
     void fold(MLFoldTracker& ft);
 
     size_t indexOf(MLNode *node) const;
 
     void visit(MLVisitorPre pre, MLVisitorPost post);
+    void dump(BufSink *sink, StringPool& sp) const;
 
     PodArray<MLNode> nodes;
     PodArray<MLInfo> infos;
