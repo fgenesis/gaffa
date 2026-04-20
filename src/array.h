@@ -232,7 +232,7 @@ template<typename T>
 class Queue // FIFO, circular, POD only
 {
 public:
-    Queue() : w(0), r(0), elems(NULL), mask(0)
+    Queue() : r(0), w(0), mask(0), elems(NULL)
     {
     }
 
@@ -245,7 +245,6 @@ public:
     {
         return w == r;
     }
-
 
     T *push(GC& gc, T x)
     {

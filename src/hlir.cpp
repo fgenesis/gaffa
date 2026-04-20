@@ -399,7 +399,7 @@ static bool hasNulls(const HLNode * const *p, size_t n)
     return false;
 }
 
-static HLVisitResult funcMemSizeVisitor(HLNode *node, void *ud)
+static VisitResult funcMemSizeVisitor(HLNode *node, void *ud)
 {
     // Still need to account for current node even if we don't recurse
     size_t add = sizeof(*node);

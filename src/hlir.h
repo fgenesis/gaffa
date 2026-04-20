@@ -301,15 +301,9 @@ enum HLFoldStep
     FOLD_SPECIALIZE, // At this point, all external symbols need to be defined
 };
 
-enum HLVisitResult
-{
-    VISIT_CONTINUE, // Continue visiting children
-    VISIT_NOREC, // Break recursion, but call post
-    VISIT_ABORT, // Don't even call post
-};
 struct HLPreVisitResult
 {
-    HLVisitResult res;
+    VisitResult res;
     uintptr_t aux;
 };
 typedef HLPreVisitResult (*HLPreVisitor)(HLNode *node, void *ud);

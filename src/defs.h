@@ -269,3 +269,10 @@ static bool IsOperatorPrefix(const char *s);
 const char *GetOperatorName(OperatorId op);
 OperatorId GetOperatorFromName(const char *name);
 size_t GetOperatorArity(OperatorId op);
+
+enum VisitResult
+{
+    VISIT_CONTINUE, // Continue visiting children
+    VISIT_NOREC, // Break recursion, but call post
+    VISIT_ABORT, // Don't even call post
+};

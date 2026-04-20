@@ -7,6 +7,7 @@
 struct HLNode;
 struct BufSink;
 class StringPool;
+class Symstore;
 
 enum MLCmd
 {
@@ -138,8 +139,15 @@ struct MLFoldTracker
 {
 };
 
-typedef uintptr_t (*MLVisitorPre)(MLNode *node, MLNode *parent);
-typedef void (*MLVisitorPost)(MLNode *node, MLNode *parent, uintptr_t aux);
+
+
+struct MLPreVisitResult
+{
+    VisitResult res;
+    uintptr_t aux;
+};
+typedef MLPreVisitResult (*MLVisitorPre)(MLNode *node, MLNode *parent, void *ud);
+typedef void (*MLVisitorPost)(MLNode *node, MLNode *parent, void *ud, uintptr_t aux);
 
 class MLIR
 {
@@ -151,6 +159,8 @@ public:
     // The generated MLNodes are unresolved (cmd == _ML_HL_TODO) and still point to their HLNode.
     void construct(const HLNode *root);
 
+    void importSymbols(const Symstore& syms);
+
     // Convert each node with cmd == _ML_HL_TODO fully into an MLNode.
     // The HLNode tree is no longer needed after this call.
     void convert();
@@ -160,7 +170,7 @@ public:
 
     size_t indexOf(MLNode *node) const;
 
-    void visit(MLVisitorPre pre, MLVisitorPost post);
+    void visit(MLVisitorPre pre, MLVisitorPost post, void *ud);
     void dump(BufSink *sink, StringPool& sp) const;
 
     PodArray<MLNode> nodes;
@@ -171,5 +181,7 @@ public:
 
     GC& gc;
 
-
+    void convertNode(MLNode& m, const HLNode& h, MLNode *parent);
+    void convertList(HLNode& list);
+    void convertVarDef(MLNode& m, HLNode& h);
 };

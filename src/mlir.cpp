@@ -245,22 +245,24 @@ size_t MLIR::indexOf(MLNode* node) const
     return node - base;
 }
 
-static void visitRec(MLVisitorPre pre, MLVisitorPost post, MLNode *node, MLNode *parent)
+static void visitRec(MLVisitorPre pre, MLVisitorPost post, void *ud, MLNode *node, MLNode *parent)
 {
-    const uintptr_t aux = pre ? pre(node, parent) : 0;
+    MLPreVisitResult vis { VISIT_CONTINUE, 0 };
+    if(pre)
+        vis = pre(node, parent, ud);
     if(size_t nch = node->numchildren())
     {
         MLNode *ch = node->firstChild();
         for(size_t i = 0; i < nch; ++i)
-            visitRec(pre, post, ch + i, node);
+            visitRec(pre, post, ud, ch + i, node);
     }
     if(post)
-        post(node, parent, aux);
+        post(node, parent, ud, vis.aux);
 }
 
-void MLIR::visit(MLVisitorPre pre, MLVisitorPost post)
+void MLIR::visit(MLVisitorPre pre, MLVisitorPost post, void *ud)
 {
-    visitRec(pre, post, &nodes[0], NULL);
+    visitRec(pre, post, ud, &nodes[0], NULL);
 }
 
 void MLIR::dump(BufSink* sink, StringPool& sp) const
@@ -268,14 +270,14 @@ void MLIR::dump(BufSink* sink, StringPool& sp) const
     mlirDump(sink, sp, nodes.data());
 }
 
-static void invalidatePost(MLNode *node, MLNode *parent, uintptr_t aux)
+static void invalidatePost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     node->m.cmd = _ML_DEAD;
 }
 
 void MLNode::invalidate()
 {
-    visitRec(NULL, invalidatePost, this, NULL);
+    visitRec(NULL, invalidatePost, NULL, this, NULL);
 }
 
 
@@ -348,7 +350,24 @@ void MLIR::construct(const HLNode* root)
     }
 }
 
-static MLCmd convertNode(MLNode& m, const HLNode& h)
+void MLIR::importSymbols(const Symstore& syms)
+{
+}
+
+typedef void (*ConvertFunc)(MLNode& m, HLNode& h);
+
+void MLIR::convertVarDef(MLNode& m, HLNode& h)
+{
+    HLVarDef *def = h.as<HLVarDef>();
+    //def->ident->as<HLIdent>()->
+}
+
+void MLIR::convertList(HLNode& list)
+{
+    const HLNode *const * ch = list.children();
+}
+
+void MLIR::convertNode(MLNode& m, const HLNode& h, MLNode *parent)
 {
     MLCmd cmd = ML_LIST;
     HLNodeType hltype = (HLNodeType)h.type;
@@ -361,59 +380,71 @@ static MLCmd convertNode(MLNode& m, const HLNode& h)
 
     switch(hltype)
     {
-#define CASE(hltype, mltype) break; case hltype: cmd = mltype;
+        case HLNODE_WHILELOOP: cmd = ML_WHILE; break;
+        case HLNODE_FORLOOP: cmd = ML_FOR; break;
+        case HLNODE_RETURNYIELD:
+            switch(h.tok)
+            {
+                case Lexer::TOK_RETURN: cmd = ML_RETURN; break;
+                case Lexer::TOK_YIELD: cmd = ML_YIELD; break;
+                case Lexer::TOK_EMIT: cmd = ML_EMIT; break;
+                default: unreachable();
+            }
+            break;
+        case HLNODE_CONSTANT_VALUE:
+            cmd = _ML_VAL;
+            m.val = h.u.constant.val;
+            break;
+        case HLNODE_DECLLIST:
+            ; //h.u.vardecllist.decllist
 
-        CASE(HLNODE_WHILELOOP, ML_WHILE)
-        CASE(HLNODE_FORLOOP, ML_FOR)
-        CASE(HLNODE_RETURNYIELD, ML_RETURN)
-        //CASE(HLNODE_RETURNYIELD, ML_EMIT)
-        //CASE(HLNODE_RETURNYIELD, ML_YIELD)
-
-#undef CASE
-        break;
         default:
             unreachable();
 
         // These cases don't need further handling and can be ignored
         case HLNODE_LIST:
         case HLNODE_BLOCK:
+            assert(h._nch == HLList::Children);
         ;
     }
 
-    m.m.cmd = cmd;
-
+    assert(cmd != ML_LIST || h._nch == HLList::Children);
     assert(m.numchildren() == h.numchildren());
 
-    return cmd;
+    m.m.cmd = cmd;
+}
+
+static MLPreVisitResult convertPre(MLNode *node, MLNode *parent, void *ud)
+{
+    MLPreVisitResult res { VISIT_CONTINUE, 0 };
+
+    MLIR& mlir = *(MLIR*)ud;
+    if(node->m.cmd != _ML_HL_TODO)
+        return res;
+
+    const size_t idx = mlir.indexOf(node);
+    const HLNode *h = node->hl.node;
+    MLInfo& info = mlir.infos[idx];
+    if(h)
+    {
+        info.line = h->line;
+        info.column = h->column;
+        mlir.convertNode(*node, *h, parent);
+    }
+    else // A NULL node becomes an empty list to indicate 'nothing there'
+    {
+        info.line = 0;
+        info.column = 0;
+        node->m.cmd = ML_LIST;
+        node->list.len = 0;
+    }
+    return res;
 }
 
 void MLIR::convert()
 {
     infos.resize(gc, nodes.size());
-
-    // No need to do this recursively, just convert everything
-    for(size_t i = 0; i < nodes.size(); ++i)
-    {
-        MLNode& m = nodes[i];
-        if(m.m.cmd != _ML_HL_TODO)
-            continue;
-
-        const HLNode *h = m.hl.node;
-        MLInfo& info = infos[i];
-        if(h)
-        {
-            info.line = h->line;
-            info.column = h->column;
-            m.m.cmd = convertNode(m, *h);
-        }
-        else // A NULL node becomes an empty list to indicate 'nothing there'
-        {
-            info.line = 0;
-            info.column = 0;
-            m.m.cmd = ML_LIST;
-            m.list.len = 0;
-        }
-    }
+    visit(convertPre, NULL, this);
 }
 
 /* Optimization ideas:
