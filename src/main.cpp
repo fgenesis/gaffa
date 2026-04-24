@@ -227,6 +227,7 @@ int main(int argc, char **argv)
     MLIR ml(rt.gc);
 
     ml.construct(node);
+    ml.importSymbols(pp.syms, rt.sp);
 
     printf("ML nodes: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));
 

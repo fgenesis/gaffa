@@ -2,6 +2,7 @@
 #include "hlir.h"
 #include "serialio.h"
 #include "valstore.h"
+#include "symstore.h"
 
 
 struct MLWriter
@@ -281,6 +282,19 @@ void MLNode::invalidate()
 }
 
 
+bool constructSubLists(HLNode& n)
+{
+    size_t
+}
+
+bool prepareConversion(MLNode& m, HLNode& hl)
+{
+    MLCmd cmd = _ML_DEAD;
+    switch((HLNodeType)hl.type)
+    {
+
+    }
+}
 
 void MLIR::construct(const HLNode* root)
 {
@@ -350,8 +364,31 @@ void MLIR::construct(const HLNode* root)
     }
 }
 
-void MLIR::importSymbols(const Symstore& syms)
+void MLIR::importSymbols(const Symstore& syms, const StringPool& sp)
 {
+    const size_t N = syms.allsyms.size();
+    for(size_t i = 0; i < N; ++i)
+    {
+        const Symstore::Sym& sym = syms.allsyms[i];
+        const Strp name = sp.lookup(sym.nameStrId);
+        if(!(sym.usage & SYMUSE_USED))
+        {
+            printf("MLIR: Skip unused symbol [%s]\n", name.s);
+            continue;
+        }
+
+        MLVar v = {};
+        v.kind = MLVar::LOCAL;
+        v.slot = sym.slot;
+        v.name = sym.nameStrId;
+
+        if(sym.slot < 0)
+            v.kind = MLVar::EXT;
+        if(sym.usage & SYMUSE_UPVAL)
+            v.kind = MLVar::UPVAL;
+
+        printf("MLIR: Import symbol [%s], kind = %u, slot = %d\n", name.s, v.kind, v.slot);
+    }
 }
 
 typedef void (*ConvertFunc)(MLNode& m, HLNode& h);
@@ -362,9 +399,10 @@ void MLIR::convertVarDef(MLNode& m, HLNode& h)
     //def->ident->as<HLIdent>()->
 }
 
-void MLIR::convertList(HLNode& list)
+void MLIR::convertList(HLNode& listnode)
 {
-    const HLNode *const * ch = list.children();
+    const HLList *list = listnode.as<HLList>();
+    const HLNode *const * ch = list->list;
 }
 
 void MLIR::convertNode(MLNode& m, const HLNode& h, MLNode *parent)

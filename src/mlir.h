@@ -11,11 +11,9 @@ class Symstore;
 
 enum MLCmd
 {
-    // < 0: list of (-n + 1) children -- it's intentionally impossible to construct lists of length 1
-
     ML_LIST = 0,        // always stmt
 
-    // Operators first. These are known to be unary or binary, so either 1 or 2 child nodes follow.
+    // Operators first. These are known to be unary or binary, so either 1 or 2 child nodes follow. Never lists.
     _ML_OP_FIRST = 1,   // always expr
     _ML_OP_MAX = _OP_MAX,
 
@@ -38,13 +36,14 @@ enum MLCmd
     ML_EMIT,            // stmt (0) [1, exprs]
     ML_ITERPACK,        // expr (0) [1, exprs]
     ML_NEW_ARRAY,       // expr (0) [1, exprlist]
-    ML_NEW_TABLE,       // expr (0) [1, keylist, exprlist]
-    ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL following
+    ML_NEW_TABLE,       // expr (1) (numkv) [1, exprlist] // {a=1, b=2, 3, 4} -> [a, 1, b, 2, 3, 4], numkv=2
+    ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL or ML_VAR following
+    //ML_VALBLOCK,
 
     // (Trying to keep the 7th bit and up free for more efficient encoding)
 
     // Below: Internal, not serialized
-
+    _ML_EMPTY,
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
     _ML_HL_TODO // Refer to HLNode that must still be lowered
@@ -126,14 +125,14 @@ struct MLVar
 {
     enum Kind { LOCAL, UPVAL, EXT, CONSTVAL };
     Kind kind;
-    ValU val; // if kind == CONSTVAL, this is the value, otherwise only its type is used
-    u32 slot; // local slot, upvalue slot, etc.
     sref name;
+    union
+    {
+        ValU val; // if kind == CONSTVAL, this is the value, otherwise only its type is used
+        u32 slot; // local slot, upvalue slot, etc.
+    };
 };
 
-class MLVarStore
-{
-};
 
 struct MLFoldTracker
 {
@@ -159,7 +158,7 @@ public:
     // The generated MLNodes are unresolved (cmd == _ML_HL_TODO) and still point to their HLNode.
     void construct(const HLNode *root);
 
-    void importSymbols(const Symstore& syms);
+    void importSymbols(const Symstore& syms, const StringPool& sp);
 
     // Convert each node with cmd == _ML_HL_TODO fully into an MLNode.
     // The HLNode tree is no longer needed after this call.
@@ -175,9 +174,7 @@ public:
 
     PodArray<MLNode> nodes;
     PodArray<MLInfo> infos;
-
-
-    MLVarStore vars;
+    PodArray<MLVar> vars;
 
     GC& gc;
 
