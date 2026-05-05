@@ -1,6 +1,6 @@
 #pragma once
 
-// Symbol table -- handles symbol lookup and function overloading
+// Symbol table -- handles symbol lookup
 
 #include "table.h"
 #include "typing.h"

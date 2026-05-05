@@ -22,7 +22,7 @@ enum MLCmd
     ML_CONST = 40,      // expr (1, const table idx)
     ML_VAR,             // expr (1, local table idx) -- local, upval, or extval
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
-    ML_DECL,            // stmt (2, local start, N) [2, typeexprs, exprs]
+    ML_DECL,            // stmt (1, local start) [2, typeexprs, exprs] -- num of vars = #typeexprs
     ML_CLOSE,           // stmt (2, local start, N)
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
@@ -30,12 +30,12 @@ enum MLCmd
     ML_FOR,             // stmt (0) [2, decls, block]
     ML_FNCALL,          // expr (0) [2, funcexpr, paramexprs]
     ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs]
-    ML_FUNC,            // expr (0) [3, decls, rets, block]
+    ML_FUNC,            // expr (1, locals start) [3, argtypes, rettypes, block]
     ML_RETURN,          // stmt (0) [1, exprs]
     ML_YIELD,           // stmt (0) [1, exprs]
     ML_EMIT,            // stmt (0) [1, exprs]
     ML_ITERPACK,        // expr (0) [1, exprs]
-    ML_NEW_ARRAY,       // expr (0) [1, exprlist]
+    ML_NEW_ARRAY,       // expr (0) [1, exprs]
     ML_NEW_TABLE,       // expr (1) (numkv) [1, exprlist] // {a=1, b=2, 3, 4} -> [a, 1, b, 2, 3, 4], numkv=2
     ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL or ML_VAR following
     //ML_VALBLOCK,
@@ -67,6 +67,14 @@ MUL PLUS CALL 1 2 -3 PLUS a b 3 4
 */
 
 
+union MLNode;
+
+struct MLSub
+{
+    MLNode *ch; // index of first child
+    size_t n;
+};
+
 /* Design decisions:
 - Always stored in a single memory block that can me memmove()'d around
 - All children of a parent are consecutive as one block in memory
@@ -75,7 +83,7 @@ MUL PLUS CALL 1 2 -3 PLUS a b 3 4
 - Must be fully reconstructible from storage format
 - Larger things are referenced by ID and stored externally, this is just for
   keeping the original AST structure intact in a much more compact format than HLNode.
-- No dynamically aloccated memory in these nodes. Freeing the storage array must be enough.
+- No dynamically allocated memory in these nodes. Freeing the storage array must be enough.
 - No pointers stored in nodes
 - Can't reach parent from child nodes
 */
@@ -87,6 +95,7 @@ union MLNode
         u32 p[2];
         u32 chOffs; // must be usable together with hl.node, HL_LIST, others. _ML_VAL conflicts.
         byte cmd;
+        // 3 unused bytes
     } m;
     struct
     {
@@ -94,21 +103,24 @@ union MLNode
     } list;
     struct
     {
-        const HLNode *node; // This is only used during construction
+        const HLNode *node;
     } hl;
     struct
     {
-        u32 _do_not_use; // some exprs have a parameter, using this would clobber it
+        u32 _do_not_use; // same as p[0]; some exprs have a parameter, using this would clobber it
         Type exprtype; // any expr node stores its known type here. This is fine because no expr has 2 params.
     } x;
 
     MLNode *firstChild();
     const MLNode *firstChild() const;
     Val asVal() const;
+    void setVal(const ValU &v);
     size_t numchildren() const;
+    MLSub aslist(); // Returns children, or itself if not list (as if it was a list with 1 child)
 
     // Invalidate this node and all its children
     void invalidate();
+    void makedummy();
 };
 
 struct MLInfo
@@ -158,11 +170,9 @@ public:
     // The generated MLNodes are unresolved (cmd == _ML_HL_TODO) and still point to their HLNode.
     void construct(const HLNode *root);
 
-    void importSymbols(const Symstore& syms, const StringPool& sp);
-
     // Convert each node with cmd == _ML_HL_TODO fully into an MLNode.
     // The HLNode tree is no longer needed after this call.
-    void convert();
+    void convert(const Symstore& syms, const StringPool& sp);
 
     // Typecheck and optimize the tree.
     void fold(MLFoldTracker& ft);
@@ -181,4 +191,28 @@ public:
     void convertNode(MLNode& m, const HLNode& h, MLNode *parent);
     void convertList(HLNode& list);
     void convertVarDef(MLNode& m, HLNode& h);
+
+private:
+    struct Cons
+    {
+        const HLNode *hl;
+        size_t mlidx;
+    };
+
+    struct MLCh
+    {
+        size_t chIdx; // index of first child
+        size_t n;
+    };
+
+    void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl); // may reallocate dst
+    void _cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl);
+
+    MLNode *_add(size_t n); // add a couple nodes to the end as one block; points to first node.
+    MLCh _setupCh(MLNode *& node, MLCmd cmd); // assign children to node. may reallocate and invalidate note.
+    MLCh _setupList(MLNode *& node, size_t n); // makes node a list, returns ptr to start of list elems. may reallocate and invalidate note.
+    void _delayExpand(MLNode *node, const HLNode *hl);
+
+    sref _decllist(Queue<Cons>& q, MLNode *& dst, const HLNode *decllist);
+    void _opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl);
 };

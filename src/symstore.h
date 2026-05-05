@@ -127,7 +127,6 @@ public:
     unsigned getuid(const Sym *sym);
 
     std::vector<unsigned> missing;
-    std::vector<Sym> allsyms;
 
 private:
 
@@ -137,4 +136,5 @@ private:
     unsigned indexinframe(const unsigned *uids, size_t n, const Sym *sym);
 
     std::vector<Frame> frames;
+    std::vector<Sym> allsyms;
 };

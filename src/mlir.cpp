@@ -24,7 +24,7 @@ struct MLWriter
         if(oldsz + 8 > arr.cap)
             dst = arr.alloc_n(gc, 32);
         else
-            dst = &arr[arr.sz];
+            dst = arr.data() + arr.sz;
 
         u32 done = vu128enc(dst, x);
         arr.sz = oldsz + done;
@@ -40,6 +40,7 @@ struct MLWriter
 struct MLDumper
 {
     MLDumper(GC& gc) : tree(gc), dbg(gc) {}
+    ~MLDumper() { q.dealloc(tree.gc); }
     Queue<const MLNode*> q;
     MLWriter tree;
     MLWriter dbg;
@@ -73,9 +74,10 @@ static size_t mlirNumParams(MLCmd cmd)
         case ML_CONST:
         case ML_VAR:
         case ML_NAMEDECL:
+        case ML_DECL:
+        case ML_FUNC:
             return 1;
 
-        case ML_DECL:
         case ML_CLOSE:
             return 2;
 
@@ -102,6 +104,8 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_YIELD:
         case ML_EMIT:
         case ML_ITERPACK:
+        case ML_NEW_ARRAY:
+        case ML_NEW_TABLE:
             return 1;
 
         case ML_NAMEDECL:
@@ -188,7 +192,7 @@ static void mlirDump(BufSink *sk, StringPool& sp, const MLNode *root)
         node = dump.q.pop();
     }
 
-    byte hdr[] = { MAGIC_FILE_ID_BYTES, 'M', 0, 0, 0 };
+    byte hdr[] = MAGIC_FILE_VARIANT('M');
     sk->Write(sk, hdr, sizeof(hdr));
 
     vals.serialize(sk, sp);
@@ -205,6 +209,28 @@ MLNode* MLNode::firstChild()
     return m.chOffs ? this + m.chOffs : NULL;
 }
 
+MLSub MLNode::aslist()
+{
+    MLSub ret;
+    if(m.cmd == ML_LIST)
+    {
+        ret.ch = firstChild();
+        ret.n = list.len;
+    }
+    else
+    {
+        ret.ch = this;
+        ret.n = 1;
+    }
+    return ret;
+}
+
+void MLNode::makedummy()
+{
+    m.cmd = ML_LIST;
+    list.len = 0;
+}
+
 const MLNode* MLNode::firstChild() const
 {
     assert(m.cmd != _ML_VAL);
@@ -219,13 +245,15 @@ Val MLNode::asVal() const
     return val;
 }
 
+void MLNode::setVal(const ValU& v)
+{
+    val = v;
+    m.cmd = _ML_VAL; // Write this later in case the compiler decides to copy .val plus padding area
+}
+
 size_t MLNode::numchildren() const
 {
     return m.cmd != ML_LIST ? mlirNumChildren((MLCmd)m.cmd) : list.len;
-}
-
-static void mlirGenerateNode(HLNode *root)
-{
 }
 
 MLIR::MLIR(GC& gc)
@@ -241,6 +269,7 @@ MLIR::~MLIR()
 
 size_t MLIR::indexOf(MLNode* node) const
 {
+    assert(node);
     const MLNode *base = nodes.data();
     assert(base <= node && node < base + nodes.size());
     return node - base;
@@ -281,21 +310,246 @@ void MLNode::invalidate()
     visitRec(NULL, invalidatePost, NULL, this, NULL);
 }
 
-
-bool constructSubLists(HLNode& n)
+void MLIR::_delayExpand(MLNode * node, const HLNode * hl)
 {
-    size_t
+    node->hl.node = hl;
+    node->m.cmd = _ML_HL_TODO;
 }
 
-bool prepareConversion(MLNode& m, HLNode& hl)
+// does not reallocate nodes[]
+void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
 {
-    MLCmd cmd = _ML_DEAD;
-    switch((HLNodeType)hl.type)
+    if(hl)
     {
-
+        dst->m.cmd = 0xff; // For debugging: Mark as queued
+        Cons next { hl, indexOf(dst) };
+        q.push(gc, next);
     }
+    else
+        dst->makedummy();
 }
 
+sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist)
+{
+    if(!decllist || !decllist->numchildren())
+    {
+        dst->makedummy();
+        return 0;
+    }
+    const HLNode * const *dch = decllist->children();
+
+    MLCh s = _setupList(dst, decllist->numchildren());
+    assert(s.n);
+    MLNode *ch = &nodes[s.chIdx];
+
+    const HLIdent *firstIdent = dch[0]->as<HLVarDef>()->ident->as<HLIdent>();
+
+    for(size_t i = 0; i < s.n; ++i)
+    {
+        const HLVarDef *vd = dch[i]->as<HLVarDef>();
+        const HLIdent *id = vd->ident->as<HLIdent>();
+        printf("ML decl %u, symid %u, strid %u\n", (unsigned)i, id->symid, id->nameStrId);
+
+        // Symbols are declared in a row -> symbol IDs are given consecutively
+        assert(id->symid == firstIdent->symid + i);
+
+        _cons(q, &ch[i], vd->type);
+    }
+
+    return firstIdent->symid;
+}
+
+void MLIR::_opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl)
+{
+    assert(op != OP_ERROR && op < _OP_MAX);
+    MLCh s = _setupCh(dst, (MLCmd)op);
+    assert(s.n == GetOperatorArity(op));
+    assert(s.n == hl->numchildren());
+    const HLNode * const *hlch = hl->children();
+    MLNode *ch = &nodes[s.chIdx];
+    for(size_t i = 0; i < s.n; ++i)
+        _cons(q, &ch[i], hlch[i]);
+}
+
+// Don't call this recursively, call _cons() instead
+void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
+{
+    const HLNodeType hltype = (HLNodeType)hl->type;
+
+    switch(hltype)
+    {
+        case HLNODE_BLOCK:
+        case HLNODE_LIST:
+        {
+dolist:
+            const size_t myidx = indexOf(dst);
+            const MLCh s = _setupList(dst, hl->numchildren()); // add all children
+            const HLNode * const *hlch = hl->children();
+            MLNode *ch = &nodes[s.chIdx];
+            for(size_t i = 0; i < s.n; ++i)
+                _cons(q, &ch[i], hlch[i]);
+            return;
+        }
+
+        case HLNODE_CONSTANT_VALUE:
+            dst->setVal(hl->u.constant.val);
+            return;
+
+        case HLNODE_IDENT:
+            dst->m.cmd = ML_VAR;
+            dst->m.p[0] = hl->u.ident.symid;
+            return;
+
+        case HLNODE_VARDECLASSIGN:
+        {
+            MLCh s = _setupCh(dst, ML_DECL);
+            assert(s.n == 2);
+
+            const HLNode *decls = hl->u.vardecllist.decllist;
+            MLNode *ch = &nodes[s.chIdx];
+            dst->m.p[0] = _decllist(q, ch, decls); // may reallocate hlch
+
+            // Continue expanding RHS expressions
+            const HLNode *vals = hl->u.vardecllist.vallist;
+            _cons(q, &ch[1], vals);
+            return;
+        }
+
+        case HLNODE_FUNCDECL:
+        {
+            const HLFuncDecl& decl = hl->u.funcdecl;
+            HLIdent *hname = decl.ident->as<HLIdent>();
+            dst->m.p[0] = hname->nameStrId;
+
+            MLCh s = _setupCh(dst, ML_NAMEDECL);
+            assert(s.n == 2);
+            MLNode *ch = &nodes[s.chIdx];
+
+            _cons(q, &ch[0], decl.namespac);
+            _cons(q, &ch[1], decl.value);
+            return;
+        }
+
+        case HLNODE_FUNCTION:
+        {
+            const HLFunction& f = hl->u.func;
+            const HLFunctionHdr *fh = f.hdr->as<HLFunctionHdr>();
+
+            MLCh s = _setupCh(dst, ML_FUNC);
+            assert(s.n == 3);
+            MLNode *ch = &nodes[s.chIdx];
+
+            dst->m.p[0] = _decllist(q, ch, fh->paramlist);
+
+            _cons(q, &ch[1], fh->rettypes);
+            _cons(q, &ch[2], f.body);
+            return;
+        }
+
+        case HLNODE_RETURNYIELD:
+        {
+            const HLReturnYield& ry = hl->u.retn;
+            MLCmd cmd;
+            switch(hl->tok)
+            {
+                case Lexer::TOK_RETURN: cmd = ML_RETURN; break;
+                case Lexer::TOK_YIELD: cmd = ML_YIELD; break;
+                case Lexer::TOK_EMIT: cmd = ML_EMIT; break;
+                default: unreachable();
+            }
+            MLCh s = _setupCh(dst, cmd);
+            assert(s.n == 1);
+            MLNode *ch = &nodes[s.chIdx];
+            _cons(q, &ch[0], ry.what);
+            return;
+        }
+
+        case HLNODE_UNARY:
+            _opr(q, dst, hl->u.unary.opid, hl);
+            return;
+
+        case HLNODE_BINARY:
+            _opr(q, dst, hl->u.binary.opid, hl);
+            return;
+
+        case HLNODE_ARRAYCONS:
+        {
+            MLCh s = _setupCh(dst, ML_NEW_ARRAY);
+            assert(s.n == 1);
+            dst = &nodes[s.chIdx];
+            goto dolist;
+        }
+
+        case HLNODE_TABLECONS:
+        {
+            MLCh s = _setupCh(dst, ML_NEW_TABLE);
+            assert(s.n == 1);
+
+            const HLNode * const *hlch = hl->children();
+            const size_t nch = hl->numchildren();
+            assert(nch % 2 == 0);
+            size_t numkv = 0;
+            for(size_t i = 0; i < nch; i += 2)
+                numkv += !!hlch[i];
+            dst->m.p[0] = numkv; // For parsing: This many entries are pairs, the rest is just values
+            const size_t onlyv = (nch - numkv * 2) / 2;
+
+            MLNode *ch = &nodes[s.chIdx];
+            MLCh ls = _setupList(ch, numkv * 2 + onlyv);
+            ch = &nodes[ls.chIdx]; // This now points to the list elements
+
+            // Key+value goes first...
+            for(size_t i = 0; i < nch; i += 2)
+                if(const HLNode *hk = hlch[i])
+                {
+                    assert(hlch[i+1]);
+                    if(hk->type == HLNODE_NAME) // Ensure that names are really just literal strings, ie. {k=v} becomes {["k"]=v}
+                        ch[i].setVal(Val(_Str(hl->u.name.nameStrId)));
+                    else
+                        _cons(q, &ch[i], hlch[i]);
+                    _cons(q, &ch[i+1], hlch[i+1]);
+                }
+
+            // ... afterwards just values
+            MLNode *a = &ch[numkv * 2];
+            for(size_t i = 0; i < nch; i += 2)
+                if(!hlch[i])
+                    _cons(q, a++, hlch[i+1]);
+
+            assert(a == &ch[ls.n]); // Ensure we got exactly as many children as expected
+            return;
+
+        }
+
+        case HLNODE_FUNCTIONHDR: // handled as part of HLNODE_FUNCTION
+            ; // not reached
+
+        // not adding a default label here to keep compiler warnings. Let the assert below catch it.
+    }
+
+    assert(false);
+    unreachable();
+}
+
+void MLIR::construct(const HLNode* root)
+{
+    Queue<Cons> q;
+    nodes.reserve(gc, 128);
+
+    Cons r { root, indexOf(_add(1)) };
+    for(;;)
+    {
+        _construct(q, &nodes[r.mlidx], r.hl); // This may reallocate nodes[], don't keep a pointer
+        if(q.empty())
+            break;
+        r = q.pop();
+    }
+
+    q.dealloc(gc);
+}
+
+
+#if 0
 void MLIR::construct(const HLNode* root)
 {
     struct HLRef
@@ -319,10 +573,10 @@ void MLIR::construct(const HLNode* root)
                 if(size_t nch = r.node->numchildren())
                 {
                     r.parentidx = a.size();
-                    const HLNode * const * const ch = r.node->children();
+                    const HLNode * const * const hlch = r.node->children();
                     for(size_t i = 0; i < nch; ++i)
                     {
-                        r.node = ch[i]; // This may be NULL. Push it anyway to get the correct count; it's handled later
+                        r.node = hlch[i]; // This may be NULL. Push it anyway to get the correct count; it's handled later
                         q.push(gc, r);
                     }
                 }
@@ -390,6 +644,7 @@ void MLIR::importSymbols(const Symstore& syms, const StringPool& sp)
         printf("MLIR: Import symbol [%s], kind = %u, slot = %d\n", name.s, v.kind, v.slot);
     }
 }
+#endif
 
 typedef void (*ConvertFunc)(MLNode& m, HLNode& h);
 
@@ -399,10 +654,64 @@ void MLIR::convertVarDef(MLNode& m, HLNode& h)
     //def->ident->as<HLIdent>()->
 }
 
+MLNode* MLIR::_add(size_t n)
+{
+    return n ? nodes.alloc_n(gc, n) : NULL;
+}
+
+MLIR::MLCh MLIR::_setupCh(MLNode *& node, MLCmd cmd)
+{
+    assert(cmd != ML_LIST);
+    size_t idx = indexOf(node);
+    size_t n = mlirNumChildren(cmd);
+    MLNode *ch = _add(n); // may reallocate & invalidate node. TODO: handle alloc fail
+    node = &nodes[idx]; // fix ptr
+    node->m.chOffs = ch ? ch - node : 0;
+    node->m.cmd = cmd;
+
+    for(size_t i = 0; i < n; ++i) // For debugging
+        ch[i].m.cmd = 0xfc;
+
+    MLCh ret;
+    ret.n = n;
+    ret.chIdx = indexOf(ch);
+    return ret;
+}
+
+MLIR::MLCh MLIR::_setupList(MLNode *& node, size_t n)
+{
+    // There are no lists of length 1, re-use already existing node as the one list child.
+    // This is just an optimizaton and the code should be correct with or without this shortcut.
+    MLNode *ch;
+    if(n != 1)
+    {
+        size_t idx = indexOf(node);
+        ch = _add(n); // may reallocate & invalidate node. TODO: handle alloc fail
+        node = &nodes[idx]; // fix ptr
+        node->m.cmd = ML_LIST;
+        node->list.len = n;
+        node->m.chOffs = ch ? ch - node : 0;
+    }
+    else
+    {
+        ch = node;
+    }
+
+    for(size_t i = 0; i < n; ++i)
+        ch[i].m.cmd = 0xf1;
+
+    MLCh ret;
+    ret.n = n;
+    ret.chIdx = ch ? indexOf(ch) : 0;
+    return ret;
+}
+
+
+#if 0
 void MLIR::convertList(HLNode& listnode)
 {
     const HLList *list = listnode.as<HLList>();
-    const HLNode *const * ch = list->list;
+    const HLNode *const * hlch = list->list;
 }
 
 void MLIR::convertNode(MLNode& m, const HLNode& h, MLNode *parent)
@@ -484,6 +793,7 @@ void MLIR::convert()
     infos.resize(gc, nodes.size());
     visit(convertPre, NULL, this);
 }
+#endif
 
 /* Optimization ideas:
 - Any null-node in a list can get removed (there shouldn't be any?)

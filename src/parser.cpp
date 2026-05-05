@@ -857,6 +857,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
         return NULL;
 
     HLNode *lasttype = NULL;
+    bool varctx = false;
 
 
     do
@@ -875,6 +876,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
         else if(tryeat(Lexer::TOK_VAR))
         {
             lasttype = NULL;
+            varctx = true;
         }
         else
         {
@@ -882,14 +884,17 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
             // If two identifiers in a row ('int x') --  First is the type, second one the variable.
             // If only one, it's parsed below, using the previous type.
             if(lookahead.tt == Lexer::TOK_IDENT)
+            {
+                varctx = false; // C-style decl
                 lasttype = first = typeident();
+            }
             else if(allowVariadic && lookahead.tt == Lexer::TOK_TRIDOT)
             {
                 // (int x, float y, int...)
                 variadic = true; // with known type
                 eat(Lexer::TOK_TRIDOT);
             }
-            else if(!lasttype)
+            else if(!(lasttype || varctx))
             {
                 // This branch is only hit when we've just entered the for loop
                 error("A declaration needs to start with 'var' or a type name");
@@ -903,7 +908,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
         if(!variadic)
             def->u.vardef.ident = ident("variable", IDENT_USAGE_DECL, symref); // var name
 
-        if(!lasttype) // 'var x'
+        if(varctx) // 'var x'
         {
             assert(!first);
 
@@ -1184,6 +1189,18 @@ HLNode* Parser::name(const char *whatfor)
     return node;
 }
 
+HLNode* Parser::nameAsLitstr(const char* whatfor)
+{
+    HLNode *n = name(whatfor);
+    if(n)
+    {
+        sref strid = n->u.name.nameStrId;
+        n->type = HLNODE_CONSTANT_VALUE;
+        n->u.constant.val = Val(_Str(strid));
+    }
+    return n;
+}
+
 HLNode* Parser::ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref)
 {
     HLNode *node = _ident(curtok, whatfor, usage, symref);
@@ -1259,6 +1276,7 @@ HLNode *Parser::unary(Context ctx)
         // Initially, we're a uniary operator node.
         node->tok = rule->tok;
         node->u.unary.a = rhs;
+        node->u.unary.opid = Lexer::TokenToUnOp(rule->tok);
     }
 
     return node;
@@ -1277,6 +1295,7 @@ HLNode * Parser::binary(Context ctx, const Parser::ParseRule *rule, HLNode *lhs)
         node->tok = rule->tok;
         node->u.binary.a = rhs;
         node->u.binary.b = lhs;
+        node->u.binary.opid = Lexer::TokenToBinOp(rule->tok);
     }
     return node;
 }

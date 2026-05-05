@@ -124,6 +124,7 @@ protected:
     HLNode *litnum(Context ctx);
     HLNode *litstr(Context ctx);
     HLNode *name(const char *whatfor);
+    HLNode *nameAsLitstr(const char *whatfor);
     HLNode *ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref);
     HLNode *typeident();
     HLNode *_identInExpr(Context ctx);

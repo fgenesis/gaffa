@@ -12,6 +12,7 @@
 #include "symtable.h"
 #include "runtime.h"
 #include "mlir.h"
+#include "io_libc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -227,11 +228,16 @@ int main(int argc, char **argv)
     MLIR ml(rt.gc);
 
     ml.construct(node);
-    ml.importSymbols(pp.syms, rt.sp);
+    //ml.importSymbols(pp.syms, rt.sp);
 
     printf("ML nodes: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));
 
-    ml.convert();
+    //ml.convert();
+
+    BufSink hex;
+    sink_initHexPrint(&hex);
+    ml.dump(&hex, rt.sp);
+    hex.Close(&hex);
 
 
 #if 0

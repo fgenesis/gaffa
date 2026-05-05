@@ -71,16 +71,17 @@ public:
     FORCEINLINE T *alloc_n(GC& gc, tsize n)
     {
         T *a = data();
-        tsize newsz = sz + n;
+        const size_t oldsz = sz;
+        const tsize newsz = oldsz + n;
         if(newsz > cap)
         {
-            newsz *= 2; // alloc some more to amortize re-allocations
-            a = this->_chsize(gc, newsz);
+            size_t newcap = cap * 2 + sz; // alloc some more to amortize re-allocations
+            a = this->_chsize(gc, newcap);
             if(!a)
                 return NULL;
         }
         sz = newsz;
-        return a + newsz - n;
+        return a + oldsz;
     }
 
     FORCEINLINE T *push_back(GC& gc, T x)

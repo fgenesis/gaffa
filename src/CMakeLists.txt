@@ -62,6 +62,8 @@ set(src
     #rt_uint.h
     gacoro.cpp
     gacoro.h
+    io_libc.cpp
+    io_libc.h
 )
 
 add_library(gaffa ${src})

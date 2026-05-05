@@ -45,6 +45,8 @@ enum Constants
 };
 
 #define MAGIC_FILE_ID_BYTES      0x1b, 'g', 'A', 0x1c
+#define MAGIC_VERSION_BYTES      0, 0, 0
+#define MAGIC_FILE_VARIANT(chr)  { MAGIC_FILE_ID_BYTES, chr, MAGIC_VERSION_BYTES }
 
 /*enum MagicID
 {

@@ -11,4 +11,6 @@
 
 #ifdef _MSC_VER
 #pragma warning(disable: 26812) // unscoped enum (we're C++03-compatible on purpose!)
+//#pragma warning(1: 4062) // enumerator 'identifier' in a switch of enum 'enumeration' is not handled
+
 #endif
