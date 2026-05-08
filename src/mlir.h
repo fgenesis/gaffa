@@ -28,6 +28,7 @@ enum MLCmd
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
     ML_WHILE,           // stmt (0) [2, cond, block]
     ML_FOR,             // stmt (0) [2, decls, block]
+    ML_GETINDEX,        // expr (0) [2, obj, key]
     ML_FNCALL,          // expr (0) [2, funcexpr, paramexprs]
     ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs]
     ML_FUNC,            // expr (1, locals start) [3, argtypes, rettypes, block]
@@ -46,7 +47,6 @@ enum MLCmd
     _ML_EMPTY,
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
-    _ML_HL_TODO // Refer to HLNode that must still be lowered
 };
 
 /*
@@ -123,7 +123,7 @@ union MLNode
     void makedummy();
 };
 
-struct MLInfo
+union MLInfo
 {
     u32 line, column;
 };
@@ -135,14 +135,27 @@ struct MLTypeInfo
 
 struct MLVar
 {
-    enum Kind { LOCAL, UPVAL, EXT, CONSTVAL };
+    enum Kind
+    {
+        // --- serialized ---
+        LOCAL,    // Pure local value, not referenced as an upvalue
+        DOWNVAL,  // Local that is referenced as an upvalue (which is at this[1])
+        EXT,      // External symbol, not declared in this module
+        // --- not serialized ---
+        CONSTVAL, // During optimization step: When a variable was replaced by a constant value
+        UPVAL,    // Upvalue that references a local (which is at this[-1])
+        DEAD      // Optimized out
+    };
     Kind kind;
-    sref name;
+    struct
+    {
+        sref name;
+    } dbg;
     union
     {
-        ValU val; // if kind == CONSTVAL, this is the value, otherwise only its type is used
-        u32 slot; // local slot, upvalue slot, etc.
-    };
+        ValU val; // if kind == CONSTVAL, this is the value, otherwise only the type field is used
+        u32 slot;
+    } u;
 };
 
 
@@ -166,21 +179,22 @@ public:
     MLIR(GC& gc);
     ~MLIR();
 
+    enum Options // bitmask
+    {
+        STRIP_DEBUGINFO = 1
+    };
+
     // Construct a MLNode tree out of a HLNode tree.
     // The generated MLNodes are unresolved (cmd == _ML_HL_TODO) and still point to their HLNode.
-    void construct(const HLNode *root);
-
-    // Convert each node with cmd == _ML_HL_TODO fully into an MLNode.
-    // The HLNode tree is no longer needed after this call.
-    void convert(const Symstore& syms, const StringPool& sp);
+    void construct(const HLNode *root, Options options);
 
     // Typecheck and optimize the tree.
     void fold(MLFoldTracker& ft);
 
-    size_t indexOf(MLNode *node) const;
+    size_t indexOf(const MLNode *node) const;
 
     void visit(MLVisitorPre pre, MLVisitorPost post, void *ud);
-    void dump(BufSink *sink, StringPool& sp) const;
+    void dump(BufSink *sink, const StringPool& sp, Options options) const;
 
     PodArray<MLNode> nodes;
     PodArray<MLInfo> infos;
@@ -211,8 +225,9 @@ private:
     MLNode *_add(size_t n); // add a couple nodes to the end as one block; points to first node.
     MLCh _setupCh(MLNode *& node, MLCmd cmd); // assign children to node. may reallocate and invalidate note.
     MLCh _setupList(MLNode *& node, size_t n); // makes node a list, returns ptr to start of list elems. may reallocate and invalidate note.
-    void _delayExpand(MLNode *node, const HLNode *hl);
+    MLCh _setupChDefault(Queue<Cons>& q, MLNode *node, const HLNode *hl, MLCmd cmd);
 
     sref _decllist(Queue<Cons>& q, MLNode *& dst, const HLNode *decllist);
     void _opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl);
+
 };

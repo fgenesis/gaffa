@@ -18,7 +18,6 @@ struct MLWriter
 
     void write(int x)
     {
-        x = zigzagenc(x);
         byte *dst;
         size_t oldsz = arr.sz;
         if(oldsz + 8 > arr.cap)
@@ -26,7 +25,8 @@ struct MLWriter
         else
             dst = arr.data() + arr.sz;
 
-        u32 done = vu128enc(dst, x);
+        u32 done = vu128enc(dst, zigzagenc(x));
+        printf("%08X -> %08X -> %u\n", x, zigzagenc(x), done);
         arr.sz = oldsz + done;
     }
 
@@ -39,11 +39,12 @@ struct MLWriter
 
 struct MLDumper
 {
-    MLDumper(GC& gc) : tree(gc), dbg(gc) {}
+    MLDumper(GC& gc) : tree(gc), dbg(gc), vals(gc) {}
     ~MLDumper() { q.dealloc(tree.gc); }
     Queue<const MLNode*> q;
     MLWriter tree;
     MLWriter dbg;
+    ValStore vals;
 };
 
 // statements have no associated type
@@ -114,6 +115,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_WHILE:
         case ML_FOR:
         case ML_FNCALL:
+        case ML_GETINDEX:
             return 2;
 
         case ML_IFELSE:
@@ -130,7 +132,7 @@ static size_t mlirNumChildren(MLCmd cmd)
     return 0;
 }
 
-static void mlirDumpNode(MLDumper& dump, ValStore& vals, const MLNode *node)
+static void mlirDumpNode(MLDumper& dump, const MLNode *node)
 {
     MLCmd cmd = (MLCmd)node->m.cmd;
 
@@ -141,7 +143,7 @@ static void mlirDumpNode(MLDumper& dump, ValStore& vals, const MLNode *node)
     {
         case _ML_VAL:
             dump.tree.write(ML_CONST);
-            dump.tree.write(vals.put(node->val));
+            dump.tree.write(dump.vals.put(node->val));
             return;
 
         case ML_LIST:
@@ -149,7 +151,7 @@ static void mlirDumpNode(MLDumper& dump, ValStore& vals, const MLNode *node)
             if(nch == 1) // Skip lists that have exactly 1 child and emit that child in place of the list
                 goto dochildren;
             // It's intentionally impossible to construct lists of length 1
-            dump.tree.write(nch ? -(int)(nch - 1) : ML_LIST);
+            dump.tree.write(nch ? -(int)(nch - 1) : 0);
             break;
 
         default:
@@ -158,7 +160,6 @@ static void mlirDumpNode(MLDumper& dump, ValStore& vals, const MLNode *node)
             break;
 
         case _ML_DEAD:
-        case _ML_HL_TODO:
             unreachable();
     }
 
@@ -174,19 +175,27 @@ static void mlirDumpNode(MLDumper& dump, ValStore& vals, const MLNode *node)
 dochildren:
         const MLNode *c = node->firstChild();
         for(size_t i = 0; i < nch; ++i)
-            dump.q.push(vals.gc, &c[i]);
+            dump.q.push(dump.vals.gc, &c[i]);
     }
 }
 
-static void mlirDump(BufSink *sk, StringPool& sp, const MLNode *root)
+void MLIR::dump(BufSink *sk, const StringPool& sp, Options options) const
 {
-    ValStore vals(sp.gc);
     MLDumper dump(sp.gc);
 
-    const MLNode *node = root;
+    const bool debuginfo = !infos.empty() && !(options & STRIP_DEBUGINFO);
+    const MLNode *node = nodes.data();
     for(;;)
     {
-        mlirDumpNode(dump, vals, node);
+        mlirDumpNode(dump, node);
+
+        if(debuginfo)
+        {
+            size_t idx = indexOf(node);
+            MLInfo info = infos[idx];
+            dump.dbg.write(info.line);
+            dump.dbg.write(info.column);
+        }
         if(dump.q.empty())
             break;
         node = dump.q.pop();
@@ -195,7 +204,7 @@ static void mlirDump(BufSink *sk, StringPool& sp, const MLNode *root)
     byte hdr[] = MAGIC_FILE_VARIANT('M');
     sk->Write(sk, hdr, sizeof(hdr));
 
-    vals.serialize(sk, sp);
+    dump.vals.serialize(sk, sp);
 
     dump.tree.flush(sk);
 
@@ -267,7 +276,7 @@ MLIR::~MLIR()
     infos.dealloc(gc);
 }
 
-size_t MLIR::indexOf(MLNode* node) const
+size_t MLIR::indexOf(const MLNode* node) const
 {
     assert(node);
     const MLNode *base = nodes.data();
@@ -295,11 +304,6 @@ void MLIR::visit(MLVisitorPre pre, MLVisitorPost post, void *ud)
     visitRec(pre, post, ud, &nodes[0], NULL);
 }
 
-void MLIR::dump(BufSink* sink, StringPool& sp) const
-{
-    mlirDump(sink, sp, nodes.data());
-}
-
 static void invalidatePost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     node->m.cmd = _ML_DEAD;
@@ -308,12 +312,6 @@ static void invalidatePost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux
 void MLNode::invalidate()
 {
     visitRec(NULL, invalidatePost, NULL, this, NULL);
-}
-
-void MLIR::_delayExpand(MLNode * node, const HLNode * hl)
-{
-    node->hl.node = hl;
-    node->m.cmd = _ML_HL_TODO;
 }
 
 // does not reallocate nodes[]
@@ -359,6 +357,19 @@ sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist)
     return firstIdent->symid;
 }
 
+MLIR::MLCh MLIR::_setupChDefault(Queue<Cons>& q, MLNode* node, const HLNode* hl, MLCmd cmd)
+{
+    const HLAssignment& a = hl->u.assignment;
+    const MLCh s = _setupCh(node, cmd);
+    MLNode *ch = &nodes[s.chIdx];
+    const size_t N = hl->numchildren();
+    assert(N <= s.n);
+    const HLNode * const * hlch = hl->children();
+    for(size_t i = 0; i < N; ++i)
+        _cons(q, &ch[i], hlch[i]);
+    return s;
+}
+
 void MLIR::_opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl)
 {
     assert(op != OP_ERROR && op < _OP_MAX);
@@ -382,7 +393,6 @@ void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
         case HLNODE_LIST:
         {
 dolist:
-            const size_t myidx = indexOf(dst);
             const MLCh s = _setupList(dst, hl->numchildren()); // add all children
             const HLNode * const *hlch = hl->children();
             MLNode *ch = &nodes[s.chIdx];
@@ -521,6 +531,24 @@ dolist:
 
         }
 
+        case HLNODE_ASSIGNMENT:
+        case HLNODE_INDEXASSIGN:
+            _setupChDefault(q, dst, hl, ML_ASSIGN);
+            return;
+
+        case HLNODE_CALL:
+            _setupChDefault(q, dst, hl, ML_FNCALL);
+            return;
+
+        case HLNODE_MTHCALL:
+            _setupChDefault(q, dst, hl, ML_MTHCALL);
+            return;
+
+        case HLNODE_INDEX:
+            _setupChDefault(q, dst, hl, ML_GETINDEX);
+            return;
+
+
         case HLNODE_FUNCTIONHDR: // handled as part of HLNODE_FUNCTION
             ; // not reached
 
@@ -531,15 +559,25 @@ dolist:
     unreachable();
 }
 
-void MLIR::construct(const HLNode* root)
+void MLIR::construct(const HLNode* root, Options options)
 {
     Queue<Cons> q;
-    nodes.reserve(gc, 128);
 
     Cons r { root, indexOf(_add(1)) };
     for(;;)
     {
         _construct(q, &nodes[r.mlidx], r.hl); // This may reallocate nodes[], don't keep a pointer
+
+        if(!(options & STRIP_DEBUGINFO))
+        {
+            if(infos.size() < nodes.size())
+                infos.alloc_n(gc, nodes.size() - infos.size());
+
+            MLInfo &info = infos[r.mlidx];
+            info.line = r.hl->line;
+            info.column = r.hl->column;
+        }
+
         if(q.empty())
             break;
         r = q.pop();
@@ -680,7 +718,7 @@ MLIR::MLCh MLIR::_setupCh(MLNode *& node, MLCmd cmd)
 
 MLIR::MLCh MLIR::_setupList(MLNode *& node, size_t n)
 {
-    // There are no lists of length 1, re-use already existing node as the one list child.
+    // There are no lists of length 1 -> re-use already existing node as the one list child.
     // This is just an optimizaton and the code should be correct with or without this shortcut.
     MLNode *ch;
     if(n != 1)
@@ -706,94 +744,6 @@ MLIR::MLCh MLIR::_setupList(MLNode *& node, size_t n)
     return ret;
 }
 
-
-#if 0
-void MLIR::convertList(HLNode& listnode)
-{
-    const HLList *list = listnode.as<HLList>();
-    const HLNode *const * hlch = list->list;
-}
-
-void MLIR::convertNode(MLNode& m, const HLNode& h, MLNode *parent)
-{
-    MLCmd cmd = ML_LIST;
-    HLNodeType hltype = (HLNodeType)h.type;
-
-    if(h._nch == HLList::Children)
-    {
-        // It's a list node. Make it a list.
-        m.list.len = h.u.list.used;
-    }
-
-    switch(hltype)
-    {
-        case HLNODE_WHILELOOP: cmd = ML_WHILE; break;
-        case HLNODE_FORLOOP: cmd = ML_FOR; break;
-        case HLNODE_RETURNYIELD:
-            switch(h.tok)
-            {
-                case Lexer::TOK_RETURN: cmd = ML_RETURN; break;
-                case Lexer::TOK_YIELD: cmd = ML_YIELD; break;
-                case Lexer::TOK_EMIT: cmd = ML_EMIT; break;
-                default: unreachable();
-            }
-            break;
-        case HLNODE_CONSTANT_VALUE:
-            cmd = _ML_VAL;
-            m.val = h.u.constant.val;
-            break;
-        case HLNODE_DECLLIST:
-            ; //h.u.vardecllist.decllist
-
-        default:
-            unreachable();
-
-        // These cases don't need further handling and can be ignored
-        case HLNODE_LIST:
-        case HLNODE_BLOCK:
-            assert(h._nch == HLList::Children);
-        ;
-    }
-
-    assert(cmd != ML_LIST || h._nch == HLList::Children);
-    assert(m.numchildren() == h.numchildren());
-
-    m.m.cmd = cmd;
-}
-
-static MLPreVisitResult convertPre(MLNode *node, MLNode *parent, void *ud)
-{
-    MLPreVisitResult res { VISIT_CONTINUE, 0 };
-
-    MLIR& mlir = *(MLIR*)ud;
-    if(node->m.cmd != _ML_HL_TODO)
-        return res;
-
-    const size_t idx = mlir.indexOf(node);
-    const HLNode *h = node->hl.node;
-    MLInfo& info = mlir.infos[idx];
-    if(h)
-    {
-        info.line = h->line;
-        info.column = h->column;
-        mlir.convertNode(*node, *h, parent);
-    }
-    else // A NULL node becomes an empty list to indicate 'nothing there'
-    {
-        info.line = 0;
-        info.column = 0;
-        node->m.cmd = ML_LIST;
-        node->list.len = 0;
-    }
-    return res;
-}
-
-void MLIR::convert()
-{
-    infos.resize(gc, nodes.size());
-    visit(convertPre, NULL, this);
-}
-#endif
 
 /* Optimization ideas:
 - Any null-node in a list can get removed (there shouldn't be any?)
