@@ -117,7 +117,7 @@ t.x = 1
 t.y = t.x
 
 func tiny2(uint z) { return x+y+z }
-t.z = tiny2(t.y)
+t.z = tiny2(t.y)#1
 
 --func addi(int a, b, ...) -> int... { int c = a+b int d = x+y int e = c+d return e }
 

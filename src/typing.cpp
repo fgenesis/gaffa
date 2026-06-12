@@ -274,6 +274,47 @@ DType* TypeRegistry::mkprim(PrimType t)
     return d;
 }
 
+static void copydup(Type *dst, const Type *src, size_t copysize, Type pad, size_t totalsize)
+{
+    memcpy(dst, src, copysize * sizeof(*dst));
+    for(size_t i = copysize; i < totalsize; ++i)
+        dst[i] = pad;
+
+}
+
+Type TypeRegistry::resize(Type t, size_t n)
+{
+    TypeIdList ls = getlist(t);
+    if(!ls.n)
+        return PRIMTYPE_NIL;
+    if(n == ls.n) // Same size -> same thing
+        return t;
+    if(n < ls.n) // Sizing down -> easy
+        return mklist(ls.ptr, n);
+
+    // Can size up only if the last type entry is variadic
+    Type last = ls.ptr[ls.n - 1];
+    if(last & TYPEBIT_VARIADIC)
+    {
+        last &= ~TYPEBIT_VARIADIC;
+        if(n < 256)
+        {
+            Type tmp[256];
+            copydup(tmp, ls.ptr, ls.n, last, n);
+            return mklist(tmp, n);
+        }
+        else if(Type *tmp = gc_alloc_unmanaged_T<Type>(_tl.gc, NULL, 0, n)) // TODO: not sure if this case is needed
+        {
+            copydup(tmp, ls.ptr, ls.n, last, n);
+            Type cut = mklist(tmp, n);
+            gc_free_unmanaged_T(_tl.gc, tmp);
+            return cut;
+        }
+    }
+
+    return PRIMTYPE_NIL;
+}
+
 const TDesc *TypeRegistry::lookupDesc(Type t) const
 {
     if(t & TYPEBIT_TYPELIST)

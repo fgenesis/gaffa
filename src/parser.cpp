@@ -962,7 +962,7 @@ HLNode* Parser::_fncall(HLNode* callee)
         node->u.fncall.callee = callee;
         node->u.fncall.paramlist = _paramlist(); // this eats everything up to and including the terminating ')'
     }
-    return node;
+    return _endcall(node);
 }
 
 HLNode* Parser::_methodcall(HLNode* obj)
@@ -984,7 +984,21 @@ HLNode* Parser::_methodcall(HLNode* obj)
         eat(Lexer::TOK_LPAREN);
         node->u.mthcall.paramlist = _paramlist();
     }
-    return node;
+    return _endcall(node);
+}
+
+HLNode* Parser::_endcall(HLNode* call)
+{
+    if(call && tryeat(Lexer::TOK_HASH))
+    {
+       if(HLNode *node = ensure(hlir->calladj()))
+       {
+           node->u.calladj.adj = expr();
+           node->u.calladj.call = call;
+           return node;
+       }
+    }
+    return call;
 }
 
 

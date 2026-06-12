@@ -8,6 +8,7 @@ struct HLNode;
 struct BufSink;
 class StringPool;
 class Symstore;
+class VM;
 
 enum MLCmd
 {
@@ -33,12 +34,13 @@ enum MLCmd
     ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs]
     ML_FUNC,            // expr (1, locals start) [3, argtypes, rettypes, block]
     ML_RETURN,          // stmt (0) [1, exprs]
-    ML_YIELD,           // stmt (0) [1, exprs]
+    ML_YIELD,           // expr (0) [1, exprs]
     ML_EMIT,            // stmt (0) [1, exprs]
     ML_ITERPACK,        // expr (0) [1, exprs]
     ML_NEW_ARRAY,       // expr (0) [1, exprs]
     ML_NEW_TABLE,       // expr (1) (numkv) [1, exprlist] // {a=1, b=2, 3, 4} -> [a, 1, b, 2, 3, 4], numkv=2
     ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL or ML_VAR following
+    ML_CALLADJ,         // expr (0) [2, numexpr. callexpr]
     //ML_VALBLOCK,
 
     // (Trying to keep the 7th bit and up free for more efficient encoding)
@@ -103,10 +105,6 @@ union MLNode
     } list;
     struct
     {
-        const HLNode *node;
-    } hl;
-    struct
-    {
         u32 _do_not_use; // same as p[0]; some exprs have a parameter, using this would clobber it
         Type exprtype; // any expr node stores its known type here. This is fine because no expr has 2 params.
     } x;
@@ -117,6 +115,7 @@ union MLNode
     void setVal(const ValU &v);
     size_t numchildren() const;
     MLSub aslist(); // Returns children, or itself if not list (as if it was a list with 1 child)
+    Type type() const;
 
     // Invalidate this node and all its children
     void invalidate();
@@ -144,7 +143,6 @@ struct MLVar
         // --- not serialized ---
         CONSTVAL, // During optimization step: When a variable was replaced by a constant value
         UPVAL,    // Upvalue that references a local (which is at this[-1])
-        DEAD      // Optimized out
     };
     Kind kind;
     struct
@@ -153,14 +151,17 @@ struct MLVar
     } dbg;
     union
     {
-        ValU val; // if kind == CONSTVAL, this is the value, otherwise only the type field is used
-        u32 slot;
+        ValU val; // if kind == CONSTVAL, this is the value, and the type
+        struct
+        {
+            sref key;
+            Type ns;
+        } ext;
+        struct
+        {
+            Type type; // PRIMTYPE_AUTO if unknown
+        } local; // downval, local
     } u;
-};
-
-
-struct MLFoldTracker
-{
 };
 
 
@@ -181,6 +182,7 @@ public:
 
     enum Options // bitmask
     {
+        DEFAULT = 0,
         STRIP_DEBUGINFO = 1
     };
 
@@ -189,9 +191,10 @@ public:
     void construct(const HLNode *root, Options options);
 
     // Typecheck and optimize the tree.
-    void fold(MLFoldTracker& ft);
+    void fold(VM& vm, Symstore& syms, SymTable &env);
 
     size_t indexOf(const MLNode *node) const;
+    const MLInfo *infoOf(const MLNode *node) const;
 
     void visit(MLVisitorPre pre, MLVisitorPost post, void *ud);
     void dump(BufSink *sink, const StringPool& sp, Options options) const;

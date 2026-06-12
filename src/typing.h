@@ -183,6 +183,13 @@ public:
     // Create a subtype of an existing internal type (eg. Table<string, Any>)
     Type mksub(PrimType prim, const Type *sub, size_t n);
 
+    // Given a type list type, return a new type containing the first n types:
+    // (A, B, C, D) n=2 -> (A, B)
+    // Variadics are expanded as needed to reach exactly n, eg.:
+    // (A, B...) n=4 -> (A, B, B, B)
+    // Returns PRIMTYPE_NIL if the list can't be expanded
+    Type resize(Type t, size_t n);
+
     // TODO: function to make union
 
     const TDesc *lookupDesc(Type t) const; // get type descriptor

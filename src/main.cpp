@@ -227,7 +227,7 @@ int main(int argc, char **argv)
 
     MLIR ml(rt.gc);
 
-    ml.construct(node, true);
+    ml.construct(node, MLIR::DEFAULT);
     //ml.importSymbols(pp.syms, rt.sp);
 
     printf("ML nodes: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));
@@ -236,7 +236,7 @@ int main(int argc, char **argv)
 
     BufSink hex;
     sink_initHexPrint(&hex);
-    ml.dump(&hex, rt.sp);
+    ml.dump(&hex, rt.sp, MLIR::STRIP_DEBUGINFO);
     hex.Close(&hex);
 
 

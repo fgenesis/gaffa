@@ -68,7 +68,8 @@ static const byte TypeElementSizes[] =
     /* PRIMTYPE_ANY    */ sizeof(ValU), // both type + opaque
     /* PRIMTYPE_AUTO   */ sizeof(ValU),
     /* _PRIMTYPE_X_SUBTYPE,  */ 0,
-    /* PRIMTYPE_NORETURN */ 0
+    /* PRIMTYPE_NORETURN */ 0,
+    /* PRIMTYPE_NOTYPE */ 0
 };
 
 size_t GetPrimTypeStorageSize(unsigned t)
@@ -97,7 +98,8 @@ static const char *TypeNames[] =
     /* PRIMTYPE_ANY    */ "any",
     /* PRIMTYPE_AUTO   */ "auto",
     /* _PRIMTYPE_X_SUBTYPE,  */ "_x_subtype",
-    /* PRIMTYPE_NORETURN */ "noreturn"
+    /* PRIMTYPE_NORETURN */ "noreturn",
+    /* PRIMTYPE_NOTYPEN */ "notype"
 };
 
 const char *GetPrimTypeName(unsigned t)

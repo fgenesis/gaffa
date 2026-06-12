@@ -3,6 +3,9 @@
 #include "serialio.h"
 #include "valstore.h"
 #include "symstore.h"
+#include "runtime.h"
+
+#include <sstream>
 
 
 struct MLWriter
@@ -55,13 +58,16 @@ static bool mlirIsStmt(MLCmd cmd)
 
     switch(cmd)
     {
-    case ML_CONST:
-    case ML_VAR:
-    case ML_FNCALL:
-    case ML_MTHCALL:
-    case ML_FUNC:
-    case ML_NEW_ARRAY:
-    case ML_NEW_TABLE:
+    case ML_NAMEDECL:
+    case ML_DECL:
+    case ML_CLOSE:
+    case ML_ASSIGN:
+    case ML_IFELSE:
+    case ML_WHILE:
+    case ML_FOR:
+    case ML_RETURN:
+    case ML_EMIT:
+    case ML_EXPORT:
         return true;
     default: ;
     }
@@ -116,6 +122,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_FOR:
         case ML_FNCALL:
         case ML_GETINDEX:
+        case ML_CALLADJ:
             return 2;
 
         case ML_IFELSE:
@@ -265,6 +272,21 @@ size_t MLNode::numchildren() const
     return m.cmd != ML_LIST ? mlirNumChildren((MLCmd)m.cmd) : list.len;
 }
 
+Type MLNode::type() const
+{
+    MLCmd cmd = (MLCmd)m.cmd;
+    assert(cmd != ML_CONST);
+
+    if(cmd == _ML_VAL)
+        return val.type;
+
+    if(mlirIsStmt(cmd))
+        return PRIMTYPE_NOTYPE;
+
+    return x.exprtype;
+
+}
+
 MLIR::MLIR(GC& gc)
     : gc(gc)
 {
@@ -282,6 +304,12 @@ size_t MLIR::indexOf(const MLNode* node) const
     const MLNode *base = nodes.data();
     assert(base <= node && node < base + nodes.size());
     return node - base;
+}
+
+const MLInfo * MLIR::infoOf(const MLNode * node) const
+{
+    size_t idx = indexOf(node);
+    return idx < infos.size() ? &infos[idx] : NULL;
 }
 
 static void visitRec(MLVisitorPre pre, MLVisitorPost post, void *ud, MLNode *node, MLNode *parent)
@@ -548,6 +576,10 @@ dolist:
             _setupChDefault(q, dst, hl, ML_GETINDEX);
             return;
 
+        case HLNODE_CALLADJ:
+            _setupChDefault(q, dst, hl, ML_CALLADJ);
+            return;
+
 
         case HLNODE_FUNCTIONHDR: // handled as part of HLNODE_FUNCTION
             ; // not reached
@@ -744,8 +776,263 @@ MLIR::MLCh MLIR::_setupList(MLNode *& node, size_t n)
     return ret;
 }
 
+struct MLFoldTracker
+{
+    MLIR &mlir;
+    VM &vm;
+    Symstore& syms;
+    SymTable &env;
+    bool ok;
+    // -----
 
-/* Optimization ideas:
-- Any null-node in a list can get removed (there shouldn't be any?)
-- Any length-1 list can be replaced by its only child (simply forward parent's childOffs to new child)
-*/
+    std::string filename;
+    std::vector<std::string> errors;
+
+    void error(const MLNode *where, const char *msg);
+    void warn(const MLNode *where, const char *msg);
+
+    // Ensures sub < reference. 'where' is the thing to typecheck, 'decl' is where reference comes from
+    bool checktype(Type sub, Type reference, const char *what, const MLNode *where, const MLNode *decl);
+
+    // Helpers because lazy
+    inline Runtime& rt() { return *vm.rt; }
+    inline GC& gc() { return rt().gc; }
+    inline StringPool& sp() { return rt().sp; }
+    inline TypeRegistry& tr() { return rt().tr; }
+    inline Strp str(sref id) { return sp().lookup(id); }
+};
+
+void MLFoldTracker::error(const MLNode* where, const char *msg)
+{
+    const MLInfo *info = mlir.infoOf(where);
+    const u32 line = info ? info->line : 0;
+    printf("(%s:%u): %s\n", filename.c_str(), line, msg);
+    ok = false;
+}
+
+void MLFoldTracker::warn(const MLNode* where, const char *msg)
+{
+    const MLInfo *info = mlir.infoOf(where);
+    const u32 line = info ? info->line : 0;
+    printf("(%s:%u): Warning: %s\n", filename.c_str(), line, msg);
+}
+
+bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const MLNode* where, const MLNode* decl)
+{
+    if(vm.rt->tr.isListCompatible(sub, reference))
+        return true; // all good
+
+    // oh no. it's error time
+    std::ostringstream os;
+    os << what << " has mismatched type";
+    error(where, os.str().c_str());
+    error(decl, "(type should be same as here)");
+    return false;
+}
+
+
+static void tryFoldOpr(MLNode *node, MLFoldTracker& ft)
+{
+
+    HLNode *L = u.binary.a;
+    HLNode *R = u.binary.b;
+    const Lexer::TokenType tt = Lexer::TokenType(tok);
+    const char *opname = Lexer::GetTokenText(tt);
+    Str name = ft.vm.rt->sp.put(opname);
+
+    u.binary.opid = Lexer::TokenToBinOp(tt);
+
+    GC &gc = ft.vm.rt->gc;
+
+    Type ns = L->mytype;
+    if(ns == PRIMTYPE_AUTO) // FIXME: not sure if this is ok
+        ns = R->mytype;
+
+    if(ns == PRIMTYPE_AUTO)
+    {
+        if(!ft.isAutoToAny())
+            return; // Do not fold
+
+        ns = PRIMTYPE_ANY;
+        std::ostringstream os;
+        os << "unknown argument type for operator '" << opname << "', assuming 'any'";
+        ft.warn(this, os.str().c_str());
+    }
+
+    const Val *opr = ft.env.lookupInNamespace(ns, name.id);
+    if(!opr)
+    {
+        std::ostringstream os;
+        os << "type has no operator '" << opname << "'";
+        ft.error(this, os.str().c_str());
+        return;
+    }
+    const DFunc *fopr = opr->asFunc();
+    if(!fopr)
+    {
+        std::ostringstream os;
+        os << "type's '" << opname << "' is not a function";
+        ft.error(this, os.str().c_str());
+        return;
+    }
+
+    if(L->isconst() && R->isconst() && fopr->isPure())
+    {
+        Val stk[] = { L->u.constant.val, R->u.constant.val };
+        int status = fopr->call(&ft.vm, stk); // FIXME: typecheck this
+        assert(status == 1);
+        // FIXME: handle error when call failed
+        makeconst(gc, stk[0]);
+        return;
+    }
+}
+
+static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
+{
+    MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    MLPreVisitResult res = { VISIT_CONTINUE, 0 };
+
+    switch((MLCmd)node->m.cmd)
+    {
+        case ML_CONST:
+            assert(false && "This should have been taken care of during loading");
+    }
+
+    return res;
+}
+
+static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
+{
+    MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    const MLCmd cmd = (MLCmd)node->m.cmd;
+
+    switch(cmd)
+    {
+        case _ML_VAL:
+            break; // all good
+        case ML_VAR:
+        {
+            MLVar *v = &ft.mlir.vars[node->m.p[0]];
+            switch(v->kind)
+            {
+                case MLVar::EXT:
+                {
+                    if(const Val *val = ft.env.lookupInNamespace(v->u.ext.ns, v->u.ext.key))
+                    {
+                        node->setVal(*val);
+                        return;
+                    }
+                    std::ostringstream os;
+                    os << "Failed to resolve external symbol ";
+                    if(Type ns = v->u.ext.ns)
+                        os << ft.str(ns) << "::";
+                    os << ft.str(v->u.ext.key);
+                    ft.error(node, os.str().c_str());
+                }
+                break;
+
+                case MLVar::CONSTVAL:
+                    node->setVal(v->u.val);
+                    return;
+
+                case MLVar::UPVAL:
+                    --v; // go down
+                    // fall through
+                case MLVar::LOCAL:
+                case MLVar::DOWNVAL:
+                    node->x.exprtype = v->u.local.type; // If we don't know, this is PRIMTYPE_AUTO
+                    return;
+
+            }
+        }
+        break;
+
+        case ML_NAMEDECL:
+
+
+        case ML_DECL:
+        {
+            MLNode *ch = node->firstChild();
+            size_t localid = node->m.p[0];
+
+            MLSub typeexprs = ch[0].aslist();
+            MLSub exprs = ch[1].aslist();
+
+            const size_t N = typeexprs.n;
+
+            // Assign types first
+            for(size_t i = 0; i < N; ++i)
+            {
+                MLVar *v = &ft.mlir.vars[localid + i];
+                switch(v->kind)
+                {
+                    case MLVar::UPVAL:
+                        --v; // go down
+                        // fall through
+                    case MLVar::LOCAL:
+                    case MLVar::DOWNVAL:
+                        v->u.local.type = typeexprs.ch[i].type();
+                        break;
+
+                    case MLVar::CONSTVAL:
+                    {
+                        std::ostringstream os;
+                        os << "Attempt to declare known-constant as local";
+                        if(sref name = v->dbg.name)
+                            os << " '" <<  ft.str(name) << "'";
+                        ft.error(node, os.str().c_str());
+                        break;
+                    }
+
+                    case MLVar::EXT:
+                    {
+                        std::ostringstream os;
+                        os << "Attempt to declare external symbol as local";
+                        if(sref name = v->dbg.name)
+                            os << " '" <<  ft.str(name) << "'";
+                        ft.error(node, os.str().c_str());
+                    }
+                        break;
+
+                }
+            }
+
+            // Assign type based on value if automatic, or report type clash
+            for(size_t i = 0; i < exprs.n; ++i)
+            {
+                assert(false);
+            }
+
+
+        }
+        break;
+
+        case ML_FNCALL:
+        {
+            MLNode *funcexpr = node->firstChild();
+            assert(funcexpr->m.cmd != ML_LIST);
+
+        }
+        break;
+
+        default:
+            if(cmd < _ML_OP_MAX)
+            {
+                // It's an operator -> technically a function call, but known to return a single value.
+                tryFoldOpr(node, ft);
+                break;
+            }
+
+
+    }
+
+    // If expr, Should have early-returned. If not, type analysis failed.
+    // If stmt, that has no type.
+    node->x.exprtype = PRIMTYPE_NOTYPE;
+}
+
+void MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
+{
+    MLFoldTracker ft = { *this, vm, syms, env, true };
+    visit(foldPre, foldPost, &ft);
+}

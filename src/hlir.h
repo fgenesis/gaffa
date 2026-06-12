@@ -52,6 +52,7 @@ enum HLNodeType
     HLNODE_RETURNYIELD,
     HLNODE_CALL,
     HLNODE_MTHCALL,
+    HLNODE_CALLADJ,
     HLNODE_IDENT,
     HLNODE_NAME,
     HLNODE_TABLECONS,
@@ -209,6 +210,13 @@ struct HLMthCall : HLNodeBase
     HLNode *paramlist; // HLList
 };
 
+struct HLCallAdj : HLNodeBase
+{
+    enum { EnumType = HLNODE_CALLADJ, Children = 2, DefaultValType = PRIMTYPE_AUTO };
+    HLNode *adj;
+    HLNode *call;
+};
+
 struct HLIdent : HLNodeBase
 {
     enum { EnumType = HLNODE_IDENT, Children = 0, DefaultValType = PRIMTYPE_AUTO };
@@ -337,6 +345,7 @@ struct HLNode
         HLBranchAlways branch;
         HLFnCall fncall;
         HLMthCall mthcall;
+        HLCallAdj calladj;
         HLIndex index;
         HLFunction func;
         HLFunctionHdr fhdr;
@@ -469,6 +478,7 @@ public:
     inline HLNode *brk()           { return allocT<HLBranchAlways>();  } // FIXME: ???
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
     inline HLNode *mthcall()       { return allocT<HLMthCall>();       }
+    inline HLNode *calladj()       { return allocT<HLCallAdj>();       }
     inline HLNode *ident()         { return allocT<HLIdent>();         }
     inline HLNode *name()          { return allocT<HLName>();          }
     inline HLNode *index()         { return allocT<HLIndex>();         }

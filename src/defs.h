@@ -88,6 +88,7 @@ enum PrimType
     _PRIMTYPE_X_SUBTYPE,  // special marker for subtype specialization
     PRIMTYPE_NORETURN, // special type that can't be constructed -> can't return this, ever
     // These are the engine-level types. Runtime-created types are any IDs after this.
+    PRIMTYPE_NOTYPE,
     PRIMTYPE_MAX,
 
     _PRIMTYPE_FIRST_OBJ = PRIMTYPE_FUNC
