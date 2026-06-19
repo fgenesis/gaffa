@@ -49,7 +49,7 @@ enum HLNodeType
     HLNODE_FUNCDECL,
     HLNODE_VARDEF,
     HLNODE_DECLLIST,
-    HLNODE_RETURNYIELD,
+    HLNODE_RETURNEMIT,
     HLNODE_CALL,
     HLNODE_MTHCALL,
     HLNODE_CALLADJ,
@@ -77,6 +77,8 @@ enum HLTypeFlags
     HLTF_NONE     = 0x00,
     HLTF_OPTIONAL = 0x01
 };
+
+// TODO: DefaultValType should go
 
 struct HLNode;
 struct HLNodeBase
@@ -182,10 +184,10 @@ struct HLAssignment : HLNodeBase
     HLNode *vallist;
 };
 
-struct HLReturnYield : HLNodeBase
+struct HLReturnEmit : HLNodeBase
 {
-    // Note: return/yield are statements, NOT expressions, and therefore have no type of their own
-    enum { EnumType = HLNODE_RETURNYIELD, Children = 1 };
+    // Note: return/emit are statements, NOT expressions, and therefore have no type of their own
+    enum { EnumType = HLNODE_RETURNEMIT, Children = 1 };
     HLNode *what;
 };
 
@@ -341,7 +343,7 @@ struct HLNode
         HLVarDef vardef;
         HLForLoop forloop;
         HLWhileLoop whileloop;
-        HLReturnYield retn;
+        HLReturnEmit retn;
         HLBranchAlways branch;
         HLFnCall fncall;
         HLMthCall mthcall;
@@ -473,7 +475,7 @@ public:
     inline HLNode *vardecllist()   { return allocT<HLVarDeclList>();   }
     inline HLNode *funcdecl()      { return allocT<HLFuncDecl>();      }
     inline HLNode *vardef()        { return allocT<HLVarDef>();        }
-    inline HLNode *retn()          { return allocT<HLReturnYield>();   }
+    inline HLNode *retn()          { return allocT<HLReturnEmit>();   }
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
     inline HLNode *brk()           { return allocT<HLBranchAlways>();  } // FIXME: ???
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }

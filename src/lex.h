@@ -74,7 +74,6 @@ public:
         TOK_OR,     // or
         TOK_LIKE,   // like
         TOK_EXPORT, // export
-        TOK_YIELD,  // yield
         TOK_EMIT,   // emit
         TOK_DEFER,  // defer
         // rest

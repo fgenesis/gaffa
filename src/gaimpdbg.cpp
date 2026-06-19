@@ -22,7 +22,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_VARDEF:         return "vardef";
         case HLNODE_FUNCDECL:       return "funcdecl";
         case HLNODE_DECLLIST:       return "decllist";
-        case HLNODE_RETURNYIELD:    return "return/yield";
+        case HLNODE_RETURNEMIT:    return "return/yield";
         case HLNODE_CALL:           return "call";
         case HLNODE_MTHCALL:        return "methodcall";
         case HLNODE_IDENT:          return "ident";
@@ -154,17 +154,15 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
             printf(" %s", s);
         }
     }
-    else if(n->type == HLNODE_RETURNYIELD)
+    else if(n->type == HLNODE_RETURNEMIT)
     {
         if(n->tok == Lexer::TOK_RETURN)
             printf("return");
-        else if(n->tok == Lexer::TOK_YIELD)
-            printf("yield");
         else if(n->tok == Lexer::TOK_EMIT)
             printf("emit");
         else
         {
-            printf("yield/return/emit/???");
+            printf("return/emit/???");
             assert(false);
         }
     }

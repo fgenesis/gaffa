@@ -286,7 +286,7 @@ void HLNode::_foldRec(HLFoldTracker& ft)
             _foldUnop(ft);
             break;
 
-        case HLNODE_RETURNYIELD:
+        case HLNODE_RETURNEMIT:
             //_applyTypeFromList(ft, u.retn.what); // return HAS NO TYPE ON ITS OWN
             if(!u.retn.what->isknowntype())
                 u.retn.what->setknowntype(typelistFromTypes(ft, u.retn.what, nodeKnownType));
@@ -464,7 +464,7 @@ static HLPreVisitResult nodeReturnVisitor(HLNode *node, void *ud)
     // TODO: could also use norec for things that are known to be expressions
     // and therefore can't contain a return statement -- probably faster
 
-    if(node->type != HLNODE_RETURNYIELD || node->tok != Lexer::TOK_RETURN)
+    if(node->type != HLNODE_RETURNEMIT || node->tok != Lexer::TOK_RETURN)
         return res; // just continue
 
     // It's a return statement

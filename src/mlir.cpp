@@ -484,14 +484,13 @@ dolist:
             return;
         }
 
-        case HLNODE_RETURNYIELD:
+        case HLNODE_RETURNEMIT:
         {
-            const HLReturnYield& ry = hl->u.retn;
+            const HLReturnEmit& ry = hl->u.retn;
             MLCmd cmd;
             switch(hl->tok)
             {
                 case Lexer::TOK_RETURN: cmd = ML_RETURN; break;
-                case Lexer::TOK_YIELD: cmd = ML_YIELD; break;
                 case Lexer::TOK_EMIT: cmd = ML_EMIT; break;
                 default: unreachable();
             }
@@ -831,11 +830,12 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
 }
 
 
+#if 0
 static void tryFoldOpr(MLNode *node, MLFoldTracker& ft)
 {
 
-    HLNode *L = u.binary.a;
-    HLNode *R = u.binary.b;
+    HLNode *L = node->u.binary.a;
+    HLNode *R = node->u.binary.b;
     const Lexer::TokenType tt = Lexer::TokenType(tok);
     const char *opname = Lexer::GetTokenText(tt);
     Str name = ft.vm.rt->sp.put(opname);
@@ -886,6 +886,7 @@ static void tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         return;
     }
 }
+#endif
 
 static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
 {
@@ -1019,7 +1020,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             if(cmd < _ML_OP_MAX)
             {
                 // It's an operator -> technically a function call, but known to return a single value.
-                tryFoldOpr(node, ft);
+                //tryFoldOpr(node, ft);
                 break;
             }
 

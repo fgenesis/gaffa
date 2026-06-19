@@ -77,7 +77,6 @@ static const Keyword Keywords[] =
     { "continue",  Lexer::TOK_CONTINUE },
     { "and",       Lexer::TOK_AND      },
     { "or",        Lexer::TOK_OR       },
-    { "yield",     Lexer::TOK_YIELD    },
     { "export",    Lexer::TOK_EXPORT   },
     { "emit",      Lexer::TOK_EMIT     },
     { "defer",     Lexer::TOK_DEFER    },

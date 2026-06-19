@@ -315,7 +315,7 @@ HLNode* Parser::stmt()
             break;
 
         case Lexer::TOK_RETURN:
-        case Lexer::TOK_YIELD:
+        case Lexer::TOK_EMIT:
             ret = ensure(hlir->retn());
             ret->tok = curtok.tt; // so that we can distinguish yield and return
             advance();
