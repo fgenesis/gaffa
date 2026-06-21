@@ -2,6 +2,7 @@
 
 #include "defs.h"
 #include "array.h"
+#include "table.h"
 #include "typing.h"
 
 struct HLNode;
@@ -49,6 +50,7 @@ enum MLCmd
     _ML_EMPTY,
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
+    _ML_UVAR, // Unresolved variable // special (2, name, symid) // replaced before type analysis
 };
 
 /*
@@ -116,6 +118,7 @@ union MLNode
     size_t numchildren() const;
     MLSub aslist(); // Returns children, or itself if not list (as if it was a list with 1 child)
     Type type() const;
+    bool isconst() const; // Is a const value for the puspose of constant folding?
 
     // Invalidate this node and all its children
     void invalidate();
@@ -145,18 +148,10 @@ struct MLVar
         UPVAL,    // Upvalue that references a local (which is at this[-1])
     };
     Kind kind;
-    struct
-    {
-        sref name;
-    } dbg;
+    sref name;
     union
     {
         ValU val; // if kind == CONSTVAL, this is the value, and the type
-        struct
-        {
-            sref key;
-            Type ns;
-        } ext;
         struct
         {
             Type type; // PRIMTYPE_AUTO if unknown
@@ -187,8 +182,9 @@ public:
     };
 
     // Construct a MLNode tree out of a HLNode tree.
-    // The generated MLNodes are unresolved (cmd == _ML_HL_TODO) and still point to their HLNode.
     void construct(const HLNode *root, Options options);
+
+    void resolveVars(Symstore& syms);
 
     // Typecheck and optimize the tree.
     void fold(VM& vm, Symstore& syms, SymTable &env);
@@ -202,6 +198,7 @@ public:
     PodArray<MLNode> nodes;
     PodArray<MLInfo> infos;
     PodArray<MLVar> vars;
+    PodArray<u32> unresolvedVars; // index of each node to fix
 
     GC& gc;
 

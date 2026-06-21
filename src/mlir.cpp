@@ -257,7 +257,7 @@ Val MLNode::asVal() const
 {
     STATIC_ASSERT(STATIC_OFFSETOF(MLNode, m.cmd) >= STATIC_END_OF(MLNode, val.type));
 
-    assert(m.cmd == _ML_VAL);
+    assert(isconst());
     return val;
 }
 
@@ -265,6 +265,12 @@ void MLNode::setVal(const ValU& v)
 {
     val = v;
     m.cmd = _ML_VAL; // Write this later in case the compiler decides to copy .val plus padding area
+}
+
+bool MLNode::isconst() const
+{
+    assert(m.cmd != ML_CONST); // This should not be present when loaded
+    return m.cmd == _ML_VAL;
 }
 
 size_t MLNode::numchildren() const
@@ -296,6 +302,8 @@ MLIR::~MLIR()
 {
     nodes.dealloc(gc);
     infos.dealloc(gc);
+    vars.dealloc(gc);
+    unresolvedVars.dealloc(gc);
 }
 
 size_t MLIR::indexOf(const MLNode* node) const
@@ -345,6 +353,7 @@ void MLNode::invalidate()
 // does not reallocate nodes[]
 void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
 {
+    dst->m.chOffs = 0;
     if(hl)
     {
         dst->m.cmd = 0xff; // For debugging: Mark as queued
@@ -434,8 +443,10 @@ dolist:
             return;
 
         case HLNODE_IDENT:
-            dst->m.cmd = ML_VAR;
-            dst->m.p[0] = hl->u.ident.symid;
+            dst->m.cmd = _ML_UVAR; // To be resolved later
+            dst->m.p[0] = hl->u.ident.nameStrId;
+            dst->m.p[1] = hl->u.ident.symid;
+            unresolvedVars.push_back(gc, indexOf(dst));
             return;
 
         case HLNODE_VARDECLASSIGN:
@@ -593,6 +604,7 @@ dolist:
 void MLIR::construct(const HLNode* root, Options options)
 {
     Queue<Cons> q;
+    nodes.reserve(gc, 128); // HACK FIXME
 
     Cons r { root, indexOf(_add(1)) };
     for(;;)
@@ -617,103 +629,56 @@ void MLIR::construct(const HLNode* root, Options options)
     q.dealloc(gc);
 }
 
-
-#if 0
-void MLIR::construct(const HLNode* root)
+void MLIR::resolveVars(Symstore& syms)
 {
-    struct HLRef
-    {
-        const HLNode *node;
-        size_t parentidx; // if 0, no parent, otherwise the parent is located at this index - 1
-    };
+    printf("Resolve %u symbols...\n", (unsigned)unresolvedVars.size());
+    PodArray<u32> varidx; // maps symid to index in vars[] plus 1
+    varidx.resize(gc, syms.knownSize());
+    memset(varidx.data(), 0, varidx.size() * sizeof(u32)); // make all invalid
 
-    PodArray<HLRef> a;
-
-    // First step: Collect all nodes; MLNode ordering applies.
-    // To be able to patch child offsets into parent MLNodes, also store the index of the parent
-    {
-        Queue<HLRef> q;
-        HLRef r { root, 0 };
-        for(;;)
-        {
-            a.push_back(gc, r); // Keep all nodes around in the same order for the next step
-
-            if(r.node)
-                if(size_t nch = r.node->numchildren())
-                {
-                    r.parentidx = a.size();
-                    const HLNode * const * const hlch = r.node->children();
-                    for(size_t i = 0; i < nch; ++i)
-                    {
-                        r.node = hlch[i]; // This may be NULL. Push it anyway to get the correct count; it's handled later
-                        q.push(gc, r);
-                    }
-                }
-
-            if(q.empty())
-                break;
-            r = q.pop();
-        }
-        q.dealloc(gc);
-    }
-
-    // Next step: Now that we know the total count, create MLNode array and link each one with its HLNode.
-    {
-        // All the MLNodes get stored in a single block of memory
-        const size_t N = a.size();
-        MLNode * const base = nodes.resize(gc, N);
-        const u32 NO_PARENT = (u32)-1;
-
-        size_t previdx = 0; // The first parentidx is 0 and will be skipped
-        for(size_t i = 0; i < N; ++i)
-        {
-            const HLRef r = a[i];
-            MLNode *m = &base[i];
-            m->m.cmd = _ML_HL_TODO;
-            m->m.chOffs = NO_PARENT; // This is overwritten later if the node has a child referring back
-            m->hl.node = r.node;
-
-            // All children follow in a row -> only take the first child to update the parent
-            if(r.parentidx != previdx)
-            {
-                MLNode *parent = &base[r.parentidx - 1];
-                assert(parent < m);
-                assert(parent->m.chOffs == NO_PARENT); // Make sure nobody else has touched this so far
-                parent->m.chOffs = (u32)(m - parent);
-                previdx = r.parentidx;
-            }
-        }
-        a.dealloc(gc);
-    }
-}
-
-void MLIR::importSymbols(const Symstore& syms, const StringPool& sp)
-{
-    const size_t N = syms.allsyms.size();
+    const size_t N = unresolvedVars.size();
     for(size_t i = 0; i < N; ++i)
     {
-        const Symstore::Sym& sym = syms.allsyms[i];
-        const Strp name = sp.lookup(sym.nameStrId);
-        if(!(sym.usage & SYMUSE_USED))
+        MLNode *node = &nodes[unresolvedVars[i]];
+        assert(node->m.cmd == _ML_UVAR);
+        node->m.cmd = ML_VAR;
+        const u32 symid = node->m.p[1];
+        MLVar *v;
+        if(const u32 idxPlus1 = varidx[symid])
         {
-            printf("MLIR: Skip unused symbol [%s]\n", name.s);
-            continue;
+            v = &vars[idxPlus1 - 1];
+            node->m.p[0] = idxPlus1 - 1;
         }
+        else // setup MLVar
+        {
+            v = vars.alloc_n(gc, 1);
+            varidx[symid] = vars.size(); // plus 1
+            node->m.p[0] = vars.size() - 1;
 
-        MLVar v = {};
-        v.kind = MLVar::LOCAL;
-        v.slot = sym.slot;
-        v.name = sym.nameStrId;
+            const Symstore::Sym *sym = syms.getsym(symid);
 
-        if(sym.slot < 0)
-            v.kind = MLVar::EXT;
-        if(sym.usage & SYMUSE_UPVAL)
-            v.kind = MLVar::UPVAL;
+            v->name = node->m.p[0];
+            v->kind = MLVar::LOCAL;
+            v->u.local.type = PRIMTYPE_AUTO; // done later
 
-        printf("MLIR: Import symbol [%s], kind = %u, slot = %d\n", name.s, v.kind, v.slot);
+            if(sym->slot < 0)
+            {
+                v->kind = MLVar::EXT;
+            }
+            if(sym->usage & SYMUSE_UPVAL)
+            {
+                v->kind = MLVar::DOWNVAL;
+                // Current var is the downvalue, alloc the upvalue too
+                MLVar *upv = vars.alloc_n(gc, 1);
+                upv->kind = MLVar::UPVAL;
+                upv->name = v->name;
+            }
+        }
     }
+
+    varidx.dealloc(gc);
+    unresolvedVars.dealloc(gc);
 }
-#endif
 
 typedef void (*ConvertFunc)(MLNode& m, HLNode& h);
 
@@ -829,42 +794,32 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
     return false;
 }
 
-
-#if 0
 static void tryFoldOpr(MLNode *node, MLFoldTracker& ft)
 {
+    MLNode *L = node->firstChild();
+    MLNode *R = L + 1;
+    assert(L);
 
-    HLNode *L = node->u.binary.a;
-    HLNode *R = node->u.binary.b;
-    const Lexer::TokenType tt = Lexer::TokenType(tok);
-    const char *opname = Lexer::GetTokenText(tt);
+    // TODO: At some point handle special cases like x*0 that depend on the operator
+    if(!(L->isconst() && R->isconst()))
+        return;
+
+    OperatorId opid = (OperatorId)node->m.cmd;
+    const char *opname = GetOperatorName(opid);
     Str name = ft.vm.rt->sp.put(opname);
-
-    u.binary.opid = Lexer::TokenToBinOp(tt);
 
     GC &gc = ft.vm.rt->gc;
 
-    Type ns = L->mytype;
-    if(ns == PRIMTYPE_AUTO) // FIXME: not sure if this is ok
-        ns = R->mytype;
-
-    if(ns == PRIMTYPE_AUTO)
-    {
-        if(!ft.isAutoToAny())
-            return; // Do not fold
-
-        ns = PRIMTYPE_ANY;
-        std::ostringstream os;
-        os << "unknown argument type for operator '" << opname << "', assuming 'any'";
-        ft.warn(this, os.str().c_str());
-    }
+    // Left side of a binary operator defines the namespace it's looked up in
+    Type ns = L->type();
+    assert(ns != PRIMTYPE_AUTO); // We're post-folding, type should be resolved at this point
 
     const Val *opr = ft.env.lookupInNamespace(ns, name.id);
     if(!opr)
     {
         std::ostringstream os;
         os << "type has no operator '" << opname << "'";
-        ft.error(this, os.str().c_str());
+        ft.error(node, os.str().c_str());
         return;
     }
     const DFunc *fopr = opr->asFunc();
@@ -872,21 +827,19 @@ static void tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     {
         std::ostringstream os;
         os << "type's '" << opname << "' is not a function";
-        ft.error(this, os.str().c_str());
+        ft.error(node, os.str().c_str());
         return;
     }
 
-    if(L->isconst() && R->isconst() && fopr->isPure())
+    if(fopr->isPure())
     {
-        Val stk[] = { L->u.constant.val, R->u.constant.val };
+        Val stk[] = { L->asVal(), R->asVal() };
         int status = fopr->call(&ft.vm, stk); // FIXME: typecheck this
         assert(status == 1);
         // FIXME: handle error when call failed
-        makeconst(gc, stk[0]);
-        return;
+        node->setVal(stk[0]);
     }
 }
-#endif
 
 static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
 {
@@ -910,24 +863,28 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
     switch(cmd)
     {
         case _ML_VAL:
+        case ML_LIST:
             break; // all good
         case ML_VAR:
         {
-            MLVar *v = &ft.mlir.vars[node->m.p[0]];
+            u32 varid = node->m.p[0];
+            MLVar *v = &ft.mlir.vars[varid];
             switch(v->kind)
             {
                 case MLVar::EXT:
                 {
-                    if(const Val *val = ft.env.lookupInNamespace(v->u.ext.ns, v->u.ext.key))
+                    Type ns = PRIMTYPE_NIL; // FIXME:this should be its own ML cmd and fall through here
+                    if(const Val *val = ft.env.lookupInNamespace(ns, v->name))
                     {
+                        printf("Ext. variable '%s' replaced with constant\n", ft.str(v->name).s);
                         node->setVal(*val);
                         return;
                     }
                     std::ostringstream os;
                     os << "Failed to resolve external symbol ";
-                    if(Type ns = v->u.ext.ns)
+                    if(ns)
                         os << ft.str(ns) << "::";
-                    os << ft.str(v->u.ext.key);
+                    os << ft.str(v->name);
                     ft.error(node, os.str().c_str());
                 }
                 break;
@@ -979,7 +936,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                     {
                         std::ostringstream os;
                         os << "Attempt to declare known-constant as local";
-                        if(sref name = v->dbg.name)
+                        if(sref name = v->name)
                             os << " '" <<  ft.str(name) << "'";
                         ft.error(node, os.str().c_str());
                         break;
@@ -989,7 +946,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                     {
                         std::ostringstream os;
                         os << "Attempt to declare external symbol as local";
-                        if(sref name = v->dbg.name)
+                        if(sref name = v->name)
                             os << " '" <<  ft.str(name) << "'";
                         ft.error(node, os.str().c_str());
                     }
@@ -1016,11 +973,15 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         }
         break;
 
+        case _ML_UVAR:
+            assert(false); // should have been resolved by now
+            break;
+
         default:
             if(cmd < _ML_OP_MAX)
             {
                 // It's an operator -> technically a function call, but known to return a single value.
-                //tryFoldOpr(node, ft);
+                tryFoldOpr(node, ft);
                 break;
             }
 

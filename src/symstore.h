@@ -125,6 +125,7 @@ public:
     Sym *getsym(unsigned uid);
     const Sym *getsym(unsigned uid) const;
     unsigned getuid(const Sym *sym);
+    inline size_t knownSize() const { return allsyms.size(); }
 
     std::vector<unsigned> missing;
 

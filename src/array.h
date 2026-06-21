@@ -75,7 +75,7 @@ public:
         const tsize newsz = oldsz + n;
         if(newsz > cap)
         {
-            size_t newcap = cap * 2 + sz; // alloc some more to amortize re-allocations
+            size_t newcap = cap * 2 + newsz; // alloc some more to amortize re-allocations
             a = this->_chsize(gc, newcap);
             if(!a)
                 return NULL;
