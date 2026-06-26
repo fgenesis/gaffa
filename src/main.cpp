@@ -228,7 +228,7 @@ int main(int argc, char **argv)
     MLIR ml(rt.gc);
 
     ml.construct(node, MLIR::DEFAULT);
-    ml.resolveVars(pp.syms);
+    ml.resolveVars(pp.syms, rt.sp);
     ml.fold(vm, pp.syms, *env);
 
     printf("ML nodes: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));

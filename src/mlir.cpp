@@ -644,7 +644,7 @@ void MLIR::construct(const HLNode* root, Options options)
     q.dealloc(gc);
 }
 
-void MLIR::resolveVars(Symstore& syms)
+void MLIR::resolveVars(Symstore& syms, StringPool& sp)
 {
     printf("Resolve %u symbols...\n", (unsigned)unresolvedVars.size());
     PodArray<u32> varidx; // maps symid to index in vars[] plus 1
@@ -693,6 +693,10 @@ void MLIR::resolveVars(Symstore& syms)
                 upv->kind = MLVar::UPVAL;
                 upv->name = v->name;
             }
+
+            Strp s = sp.lookup(v->name);
+            printf("VAR[%d]: %s [kind %u]\n",
+                (unsigned)i, s.s, v->kind);
         }
     }
 

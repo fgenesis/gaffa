@@ -192,7 +192,7 @@ public:
     // Construct a MLNode tree out of a HLNode tree.
     void construct(const HLNode *root, Options options);
 
-    void resolveVars(Symstore& syms);
+    void resolveVars(Symstore& syms, StringPool& sp);
 
     // Typecheck and optimize the tree.
     void fold(VM& vm, Symstore& syms, SymTable &env);
