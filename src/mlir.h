@@ -31,11 +31,11 @@ enum MLCmd
     ML_WHILE,           // stmt (0) [2, cond, block]
     ML_FOR,             // stmt (0) [2, decls, block]
     ML_GETINDEX,        // expr (0) [2, obj, key]
+    ML_GETNS,           // expr (0) [2, ns, key]
     ML_FNCALL,          // expr (0) [2, funcexpr, paramexprs]
     ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs]
     ML_FUNC,            // expr (1, locals start) [3, argtypes, rettypes, block]
     ML_RETURN,          // stmt (0) [1, exprs]
-    ML_YIELD,           // expr (0) [1, exprs]
     ML_EMIT,            // stmt (0) [1, exprs]
     ML_ITERPACK,        // expr (0) [1, exprs]
     ML_NEW_ARRAY,       // expr (0) [1, exprs]
@@ -51,6 +51,13 @@ enum MLCmd
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
     _ML_UVAR, // Unresolved variable // special (2, name, symid) // replaced before type analysis
+
+    // TODO:
+    // _ML_ERROR
+    // -> Instead of tracking errors in MLFoldTracker, make a node an error node and carry on.
+    // If it never gets seen again after folding is done, ignore there were problems because they didn't matter
+    // -> After folding, iterate the tree once more in the same order and look for error nodes,
+    // and report them if encountered
 };
 
 /*
@@ -157,6 +164,7 @@ struct MLVar
             Type type; // PRIMTYPE_AUTO if unknown
         } local; // downval, local
     } u;
+    u32 firstuse; // index of node that introduces us
 };
 
 

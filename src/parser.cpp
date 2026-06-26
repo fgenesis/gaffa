@@ -1121,9 +1121,31 @@ HLNode* Parser::suffixedexpr()
     return _suffixed(primaryexpr());
 }
 
+// ns::ident
+// ns::["expr"]
+HLNode *Parser::_namespace(HLNode *ns)
+{
+    // '::' was just eaten
+    HLNode *node = ensure(hlir->nsindex());
+    if(node)
+    {
+        node->u.ns.ns = ns;
+        if(tryeat(Lexer::TOK_LSQ))
+        {
+            const Lexer::Token opening = prevtok;
+            node->u.ns.ident = expr();
+            eatmatching(Lexer::TOK_RSQ, opening);
+        }
+        else
+            node->u.ns.ident = nameAsLitstr("name");
+    }
+    return node;
+}
+
 
 /* EXPR followed by one of:
-  '.' ident
+  '.' name
+  '::' name
   [expr]
   (args)
   :mth(args)
@@ -1137,32 +1159,32 @@ HLNode* Parser::_suffixed(HLNode *prefix)
         switch(curtok.tt)
         {
             case Lexer::TOK_DOT:
-            advance();
-            next = hlir->index();
-            next->u.index.lhs = node;
-            if(HLNode *rhs = name("field")) // eats the name and advances
-            {
-                // Convert t.x to t["x"]
-                sref str = rhs->u.name.nameStrId;
-                rhs->unsafemorph<HLConstantValue>();
-                rhs->u.constant.val.u.str = str;
-                rhs->u.constant.val.type = PRIMTYPE_STRING;
-                next->u.index.idx = rhs;
-            }
-            break;
+                advance();
+                next = hlir->index();
+                next->u.index.lhs = node;
+                next->u.index.idx = nameAsLitstr("field"); // Convert t.x to t["x"]
+                break;
 
             case Lexer::TOK_LSQ:
+            {
+                const Lexer::Token opening = curtok;
                 advance();
                 next = hlir->index();
                 next->u.index.lhs = node;
                 next->u.index.idx = expr();
-                eat(Lexer::TOK_RSQ);
+                eatmatching(Lexer::TOK_RSQ, opening);
                 break;
+            }
 
             /*case Lexer::TOK_LPAREN:
                 advance();
                 next = _fncall(node);
                 break;*/
+
+            case Lexer::TOK_DBLCOLON:
+                advance();
+                next = _namespace(node);
+                break;
 
             case Lexer::TOK_COLON:
                 advance();
@@ -1209,7 +1231,7 @@ HLNode* Parser::nameAsLitstr(const char* whatfor)
     if(n)
     {
         sref strid = n->u.name.nameStrId;
-        n->type = HLNODE_CONSTANT_VALUE;
+        n->unsafemorph<HLConstantValue>();
         n->u.constant.val = Val(_Str(strid));
     }
     return n;

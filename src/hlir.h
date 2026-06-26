@@ -66,6 +66,7 @@ enum HLNodeType
     HLNODE_FUNCTIONHDR,
     HLNODE_SINK,
     HLNODE_EXPORT,
+    HLNODE_NS_INDEX,
 
     // Intermediates; not produced by the parser
     HLNODE_FUNC_PROTO,
@@ -244,6 +245,13 @@ struct HLIndex : HLNodeBase
     HLNode *idx; // name or expr
 };
 
+struct HLNamespaceIndex : HLNodeBase
+{
+    enum { EnumType = HLNODE_NS_INDEX, Children = 2, DefaultValType = PRIMTYPE_AUTO };
+    HLNode *ns;
+    HLNode *ident;
+};
+
 
 struct HLFunctionHdr : HLNodeBase
 {
@@ -353,6 +361,7 @@ struct HLNode
         HLFunctionHdr fhdr;
         HLSink sink;
         HLExport exprt;
+        HLNamespaceIndex ns;
         HLFuncProto funcproto;
         HLResolvedCall resolvedcall;
 
@@ -475,7 +484,7 @@ public:
     inline HLNode *vardecllist()   { return allocT<HLVarDeclList>();   }
     inline HLNode *funcdecl()      { return allocT<HLFuncDecl>();      }
     inline HLNode *vardef()        { return allocT<HLVarDef>();        }
-    inline HLNode *retn()          { return allocT<HLReturnEmit>();   }
+    inline HLNode *retn()          { return allocT<HLReturnEmit>();    }
     inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
     inline HLNode *brk()           { return allocT<HLBranchAlways>();  } // FIXME: ???
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
@@ -488,6 +497,7 @@ public:
     inline HLNode *fhdr()          { return allocT<HLFunctionHdr>();   }
     inline HLNode *sink()          { return allocT<HLSink>();          }
     inline HLNode *exprt()         { return allocT<HLExport>();        }
+    inline HLNode *nsindex()       { return allocT<HLNamespaceIndex>();}
     inline HLNode *dummy()         { return allocT<HLDummy>();         }
     inline HLNode *funcproto()     { return allocT<HLFuncProto>();     }
 

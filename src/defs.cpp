@@ -216,3 +216,4 @@ size_t GetOperatorArity(OperatorId op)
 
     return 2;
 }
+

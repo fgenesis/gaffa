@@ -108,7 +108,6 @@ static size_t mlirNumChildren(MLCmd cmd)
             return 0;
 
         case ML_RETURN:
-        case ML_YIELD:
         case ML_EMIT:
         case ML_ITERPACK:
         case ML_NEW_ARRAY:
@@ -122,6 +121,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_FOR:
         case ML_FNCALL:
         case ML_GETINDEX:
+        case ML_GETNS:
         case ML_CALLADJ:
             return 2;
 
@@ -293,6 +293,8 @@ Type MLNode::type() const
 
 }
 
+// ------------------------------------------------------------
+
 MLIR::MLIR(GC& gc)
     : gc(gc)
 {
@@ -320,34 +322,43 @@ const MLInfo * MLIR::infoOf(const MLNode * node) const
     return idx < infos.size() ? &infos[idx] : NULL;
 }
 
-static void visitRec(MLVisitorPre pre, MLVisitorPost post, void *ud, MLNode *node, MLNode *parent)
+static void visitRec(PodArray<MLNode>& nodes, MLVisitorPre pre, MLVisitorPost post, void *ud, u32 nodeidx, u32 parentidx)
 {
+    // Careful: Visiting may:
+    // 1) reallocate nodes[] -> don't keep pointers
+    // 2) Morph nodes into something else -> don't keep any values like #children, either
     MLPreVisitResult vis { VISIT_CONTINUE, 0 };
     if(pre)
-        vis = pre(node, parent, ud);
-    if(size_t nch = node->numchildren())
+        vis = pre(&nodes[nodeidx], &nodes[parentidx], ud);
+
     {
-        MLNode *ch = node->firstChild();
-        for(size_t i = 0; i < nch; ++i)
-            visitRec(pre, post, ud, ch + i, node);
+        MLNode *node = &nodes[nodeidx];
+        if(size_t nch = node->numchildren())
+        {
+            size_t firstChildIdx = nodeidx + node->m.chOffs;
+            for(size_t i = 0; i < nch; ++i)
+                visitRec(nodes, pre, post, ud, firstChildIdx + i, nodeidx);
+        }
     }
+
     if(post)
-        post(node, parent, ud, vis.aux);
+        post(&nodes[nodeidx], &nodes[parentidx], ud, vis.aux);
 }
 
 void MLIR::visit(MLVisitorPre pre, MLVisitorPost post, void *ud)
 {
-    visitRec(pre, post, ud, &nodes[0], NULL);
+    visitRec(nodes, pre, post, ud, 0, NULL);
 }
 
-static void invalidatePost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
+/*static void invalidatePost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     node->m.cmd = _ML_DEAD;
-}
+}*/
 
 void MLNode::invalidate()
 {
-    visitRec(NULL, invalidatePost, NULL, this, NULL);
+    //visitRec(NULL, invalidatePost, NULL, this, NULL);
+    m.cmd = _ML_DEAD;
 }
 
 // does not reallocate nodes[]
@@ -586,6 +597,10 @@ dolist:
             _setupChDefault(q, dst, hl, ML_GETINDEX);
             return;
 
+        case HLNODE_NS_INDEX:
+            _setupChDefault(q, dst, hl, ML_GETNS);
+            return;
+
         case HLNODE_CALLADJ:
             _setupChDefault(q, dst, hl, ML_CALLADJ);
             return;
@@ -646,18 +661,23 @@ void MLIR::resolveVars(Symstore& syms)
         MLVar *v;
         if(const u32 idxPlus1 = varidx[symid])
         {
+            // Seen before, use exising MLVar
             v = &vars[idxPlus1 - 1];
             node->m.p[0] = idxPlus1 - 1;
         }
-        else // setup MLVar
+        else // setup a new MLVar
         {
             v = vars.alloc_n(gc, 1);
+
+            // Get the name out before overwriting it
+            v->name = node->m.p[0];
+
             varidx[symid] = vars.size(); // plus 1
             node->m.p[0] = vars.size() - 1;
 
             const Symstore::Sym *sym = syms.getsym(symid);
 
-            v->name = node->m.p[0];
+            v->firstuse = indexOf(node);
             v->kind = MLVar::LOCAL;
             v->u.local.type = PRIMTYPE_AUTO; // done later
 
@@ -751,6 +771,7 @@ struct MLFoldTracker
 
     std::string filename;
     std::vector<std::string> errors;
+    std::vector<u32> typesrc; // x = typesrc[y] -> Which other node x did get node y its type from
 
     void error(const MLNode *where, const char *msg);
     void warn(const MLNode *where, const char *msg);
@@ -764,6 +785,7 @@ struct MLFoldTracker
     inline StringPool& sp() { return rt().sp; }
     inline TypeRegistry& tr() { return rt().tr; }
     inline Strp str(sref id) { return sp().lookup(id); }
+    inline Str putstr(const char *s) { return sp().put(s); }
 };
 
 void MLFoldTracker::error(const MLNode* where, const char *msg)
@@ -794,21 +816,225 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
     return false;
 }
 
-static void tryFoldOpr(MLNode *node, MLFoldTracker& ft)
+
+struct NumValuesResult
+{
+    enum Verdict
+    {
+        ERROR,
+        EXACT_NUMBER,
+        MIN_NUMBER, // when variadic
+    };
+    Verdict verdict;
+    size_t n;
+};
+
+static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft);
+
+static NumValuesResult numResultValuesOfList(const MLNode *ch, size_t nch, MLFoldTracker& ft)
+{
+    NumValuesResult ret = { NumValuesResult::EXACT_NUMBER, 0 };
+    for(size_t i = 0; i < nch; ++i)
+    {
+        const MLNode *node = &ch[i];
+        NumValuesResult r = numResultValues(&ch[i], ft);
+        switch(r.verdict)
+        {
+            case NumValuesResult::ERROR:
+                ret.verdict = r.verdict;
+                return ret;
+
+            case NumValuesResult::MIN_NUMBER:
+                ret.verdict = r.verdict;
+                if(i+1 == nch)
+                {
+                    case NumValuesResult::EXACT_NUMBER:
+                    ret.n += r.n;
+                    break;
+                }
+                else
+                {
+                    ft.error(node, "In an expression list, only the last expr can be variadic");
+                    ret.verdict = NumValuesResult::ERROR;
+                    return ret;
+                }
+        }
+    }
+    return ret;
+}
+
+static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft)
+{
+    MLCmd cmd = (MLCmd)node->m.cmd;
+    // Statements don't return anything
+    if(mlirIsStmt(cmd))
+    {
+        ft.error(node, "Attempt to use a statement as expression");
+        NumValuesResult ret = { NumValuesResult::ERROR, 0 };
+        return ret;
+    }
+
+    switch(cmd)
+    {
+        case ML_LIST:
+            return numResultValuesOfList(node->firstChild(), node->numchildren(), ft);
+
+        case ML_FNCALL:
+        {
+            assert(false); // TODO -- ideally we have a folded function at this point that already has its types deduced
+        }
+        break;
+
+        case ML_MTHCALL:
+        {
+            assert(false); // TODO
+        }
+        break;
+
+
+        case ML_CALLADJ:
+        {
+            NumValuesResult ret = { NumValuesResult::EXACT_NUMBER, 0 };
+
+            const MLNode *numexpr = node->firstChild();
+            const MLNode *myexpr = numexpr + 1;
+            if(!numexpr->isconst() || numexpr->val.type != PRIMTYPE_UINT)
+                ft.error(numexpr, "Value-adjustment must result in a compile-time constant uint value");
+
+            ret.n = numexpr->asVal().u.ui;
+            if(ret.n > 255)
+                ft.error(numexpr, "Value-adjustment can not result in more values than a non-variadic function can return (255)");
+
+            NumValuesResult orig = numResultValues(myexpr, ft);
+            if(orig.verdict == NumValuesResult::ERROR)
+                return orig;
+
+            if(ret.n > orig.n && orig.verdict == NumValuesResult::EXACT_NUMBER)
+            {
+                std::ostringstream os;
+                os << "Expresssion results in " << orig.n << " values; attempt to adjust to " << ret.n;
+                ft.error(myexpr, os.str().c_str());
+            }
+
+            return ret; // This is always exact
+        }
+
+
+        default:
+            if(cmd < _OP_MAX) // Operators always return a single value
+            {
+                case _ML_VAL:
+                case ML_VAR:
+                case ML_GETINDEX:
+                case ML_GETNS:
+                case ML_FUNC:
+                case ML_ITERPACK:
+                case ML_NEW_ARRAY:
+                case ML_NEW_TABLE:
+                {
+                    NumValuesResult ret = { NumValuesResult::EXACT_NUMBER, 1 };
+                    return ret;
+                }
+            }
+    }
+
+    assert(false);
+    NumValuesResult ret = { NumValuesResult::ERROR, 0 };
+    return ret;
+}
+
+// >= 0: folded into this manu values
+// < 0: error or not folded
+static int tryFoldFunction(MLNode *call, const DFunc& func, MLNode *args, size_t argc, int maxresults, MLFoldTracker& ft)
+{
+    assert(argc >= func.info.nargs);
+
+    if(!func.isPure())
+        return -1;
+
+    // Need all args to be constant
+    // TODO: typeof(x) needs special handling -- only needs known type, not full result
+    // TODO: At some point handle special cases like x*0, x*1, 0+x, etc
+    // IDEA: Make it a special annotation [partial]? And when calling, pass non-constant values as XNil
+    // Or make it an extra fold-time funcptr that exists only for functions supporting this feature (C-side-only!)
+    for(size_t i = 0; i < argc; ++i)
+        if(!args->isconst())
+            return -2;
+
+    size_t spaceneeded = std::max<size_t>(func.info.nrets, argc);
+
+    PodArray<ValU> argspace;
+    ValU * const argp = argspace.alloc_n_exact(ft.gc(), spaceneeded);
+    if(!argp)
+        return -3;
+
+    for(size_t i = 0; i < argc; ++i)
+        argp[i] = args[i].asVal();
+
+    // If the function call is successful, argp will hold the return values
+    int status = func.call(&ft.vm, reinterpret_cast<Val*>(argp)); // FIXME: typecheck this?
+    if(status >= 0)
+    {
+        if(maxresults >= 0 && status > maxresults)
+        {
+            std::ostringstream os;
+            os << "Function folding resulted in " << status << " return values, but only "
+                << maxresults << " " << (maxresults==1 ? "is" : "are") << " used";
+            ft.warn(call, os.str().c_str());
+            status = maxresults;
+        }
+
+        // Make sure nothing references the params anymore
+        // (if they are encountered during traversal an assert will trap)
+        for(size_t i = 0; i < argc; ++i)
+            args[i].invalidate();
+
+        if(status == 0) // Function call resulted in no values -> Optimize it out
+            call->makedummy();
+        else if(status == 1) // Single result -> Replace the call node directly with the result
+            call->setVal(argp[0]);
+        else if(status > 1) // More -> Transform the call into a list node
+        {
+            MLNode *rets = args; // Optimistically assume we can re-use the args nodes to store returned values
+
+            if(argc > (size_t)status) // Doesn't fit? Must add new nodes in the end.
+            {
+                size_t callidx = ft.mlir.indexOf(call); // This is going to reallocate...
+                rets = ft.mlir.nodes.alloc_n(ft.gc(), status);
+                call = &ft.mlir.nodes[callidx]; // ... and restore
+            }
+
+            for(size_t i = 0; i < (size_t)status; ++i)
+                rets[i].setVal(argp[i]);
+
+            // Make list and reference child nodes
+            call->m.cmd = ML_LIST;
+            call->list.len = status;
+            assert(call < rets);
+            call->m.chOffs = rets - call;
+        }
+        // else: Call didn't succeed, don't fold.
+    }
+    else
+    {
+        // TODO: Make it so that the function can return a warning or an error to display and handle here
+        ft.error(call, "Function folding failed with an error");
+    }
+
+    argspace.dealloc(ft.gc());
+    return status;
+}
+
+static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
 {
     MLNode *L = node->firstChild();
-    MLNode *R = L + 1;
-    assert(L);
-
-    // TODO: At some point handle special cases like x*0 that depend on the operator
-    if(!(L->isconst() && R->isconst()))
-        return;
 
     OperatorId opid = (OperatorId)node->m.cmd;
+    size_t arity = GetOperatorArity(opid);
+    assert(arity);
+    assert(node->numchildren() == arity);
     const char *opname = GetOperatorName(opid);
-    Str name = ft.vm.rt->sp.put(opname);
-
-    GC &gc = ft.vm.rt->gc;
+    Str name = ft.putstr(opname);
 
     // Left side of a binary operator defines the namespace it's looked up in
     Type ns = L->type();
@@ -820,25 +1046,19 @@ static void tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         std::ostringstream os;
         os << "type has no operator '" << opname << "'";
         ft.error(node, os.str().c_str());
-        return;
+        return false;
     }
-    const DFunc *fopr = opr->asFunc();
-    if(!fopr)
+    const DFunc *func = opr->asFunc();
+    if(!func)
     {
         std::ostringstream os;
         os << "type's '" << opname << "' is not a function";
         ft.error(node, os.str().c_str());
-        return;
+        return false;
     }
 
-    if(fopr->isPure())
-    {
-        Val stk[] = { L->asVal(), R->asVal() };
-        int status = fopr->call(&ft.vm, stk); // FIXME: typecheck this
-        assert(status == 1);
-        // FIXME: handle error when call failed
-        node->setVal(stk[0]);
-    }
+    // TODO: is there an operator that results in more than 1 return value?
+    return tryFoldFunction(node, *func, L, arity, 1, ft) > 0;
 }
 
 static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
@@ -855,6 +1075,33 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
     return res;
 }
 
+static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
+{
+    // FIXME: make a thing in TR that pretty-prints a type name
+    const char *tn = GetPrimTypeName(t);
+    const char *cn = GetPrimTypeName(v->u.local.type);
+    if(!tn)
+        tn = "(unnamed)";
+    if(!cn)
+        cn = "(unnamed)";
+
+    printf("assignVarType '%s' = %s (currently: %s)\n", ft.str(v->name).s, tn ? tn : "(unnamed)", cn ? cn : "(unnamed)");
+
+    assert(v->kind == MLVar::LOCAL || v->kind == MLVar::DOWNVAL);
+    if(v->u.local.type == PRIMTYPE_AUTO)
+    {
+        v->u.local.type = t;
+        printf("Var '%s' now has type %s\n", ft.str(v->name).s, tn ? tn : "(unnamed)");
+    }
+    else if(v->u.local.type != t)
+    {
+        std::ostringstream os;
+        os << "'" << ft.str(v->name).s << "' already has a type; previously declared as '"
+            << cn << "', now declaring as '" << tn << "'";
+        ft.error(&ft.mlir.nodes[v->firstuse], os.str().c_str()); // FIXME: this is bad
+    }
+}
+
 static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
@@ -862,9 +1109,10 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 
     switch(cmd)
     {
-        case _ML_VAL:
-        case ML_LIST:
-            break; // all good
+        case _ML_VAL: // Constants can't be folded further
+        case ML_LIST: // all good, took care of the list recursively already before returning here
+            break;
+
         case ML_VAR:
         {
             u32 varid = node->m.p[0];
@@ -873,17 +1121,17 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             {
                 case MLVar::EXT:
                 {
-                    Type ns = PRIMTYPE_NIL; // FIXME:this should be its own ML cmd and fall through here
-                    if(const Val *val = ft.env.lookupInNamespace(ns, v->name))
+                    if(const Val *val = ft.env.lookupSymbol(v->name))
                     {
-                        printf("Ext. variable '%s' replaced with constant\n", ft.str(v->name).s);
+                        printf("Ext. variable '%s' replaced with constant from env (primtype?: %s)\n",
+                            ft.str(v->name).s, GetPrimTypeName(val->type));
+                        v->kind = MLVar::CONSTVAL;
+                        v->u.val = *val;
                         node->setVal(*val);
                         return;
                     }
                     std::ostringstream os;
                     os << "Failed to resolve external symbol ";
-                    if(ns)
-                        os << ft.str(ns) << "::";
                     os << ft.str(v->name);
                     ft.error(node, os.str().c_str());
                 }
@@ -900,18 +1148,69 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                 case MLVar::DOWNVAL:
                     node->x.exprtype = v->u.local.type; // If we don't know, this is PRIMTYPE_AUTO
                     return;
-
             }
         }
         break;
 
+        case ML_GETNS:
+        {
+            MLNode *ns = node->firstChild();
+            MLNode *key = ns + 1;
+
+            if(!ns->isconst())
+            {
+                ft.error(node, "Namespace must be compile-time known");
+                return;
+            }
+            if(!key->isconst())
+            {
+                ft.error(node, "Namespaced identifier must be compile-time known");
+                return;
+            }
+
+            DType *nstype = ns->asVal().asDType();
+            Val keyval = key->asVal();
+            if(!nstype)
+            {
+                ft.error(ns, "Namespace must be a type");
+                return;
+            }
+            if(keyval.type != PRIMTYPE_STRING)
+            {
+                ft.error(ns, "Namespaced identifier must be a string");
+                return;
+            }
+
+            if(const Val *val = ft.env.lookupInNamespace(nstype->tid, keyval.u.str))
+            {
+                printf("%s::%s replaced with constant from env\n",
+                    GetPrimTypeName(val->type), ft.str(keyval.u.str).s);
+                node->setVal(*val);
+                return;
+            }
+            else
+            {
+                std::ostringstream os;
+                const char *nss = GetPrimTypeName(nstype->tid);
+                if(!nss)
+                    nss = "(unnamed)";
+                os << "Failed to resolve namespaced symbol " << nss << "::" << nss;
+                ft.error(node, os.str().c_str());
+                return;
+            }
+        }
+        unreachable(); // Namespace lookup must either be folded or error
+        break;
+
         case ML_NAMEDECL:
+            assert(false);
+            break;
 
 
         case ML_DECL:
         {
             MLNode *ch = node->firstChild();
-            size_t localid = node->m.p[0];
+            const size_t localid = node->m.p[0];
 
             MLSub typeexprs = ch[0].aslist();
             MLSub exprs = ch[1].aslist();
@@ -921,15 +1220,35 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             // Assign types first
             for(size_t i = 0; i < N; ++i)
             {
+                MLNode *te = &typeexprs.ch[i];
                 MLVar *v = &ft.mlir.vars[localid + i];
                 switch(v->kind)
                 {
                     case MLVar::UPVAL:
+                        assert(false); // FIXME: do we ever encounter upvals in a decl? probably not
                         --v; // go down
                         // fall through
                     case MLVar::LOCAL:
                     case MLVar::DOWNVAL:
-                        v->u.local.type = typeexprs.ch[i].type();
+                        if(te->isconst())
+                        {
+                            Val tv = te->asVal();
+                            if(tv.type == PRIMTYPE_TYPE)
+                                assignVarType(v, tv.asDType()->tid, ft);
+                            else
+                            {
+                                std::ostringstream os;
+                                os << "Attempt to use a value as variable '" << ft.str(v->name) << "' type that is not a type";
+                                ft.error(te, os.str().c_str());
+                            }
+                        }
+                        else
+                        {
+                            std::ostringstream os;
+                            os << "Variable '" << ft.str(v->name) << "' type can't be deduced at this stage, assuming 'any'";
+                            ft.warn(te, os.str().c_str());
+                            v->u.local.type = PRIMTYPE_ANY;
+                        }
                         break;
 
                     case MLVar::CONSTVAL:
@@ -949,17 +1268,90 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                         if(sref name = v->name)
                             os << " '" <<  ft.str(name) << "'";
                         ft.error(node, os.str().c_str());
-                    }
                         break;
+                    }
 
                 }
             }
 
+            // Check amount
+            // Any expression can return a number of results, which needs to be known to know
+            // how many variables to typecheck per expr.
+            NumValuesResult nv = numResultValuesOfList(exprs.ch, exprs.n, ft);
+
+            switch(nv.verdict)
+            {
+                case NumValuesResult::ERROR:
+                    assert(false);
+                    return;
+
+                case NumValuesResult::EXACT_NUMBER:
+                    if(nv.n < N)
+                    {
+                        std::ostringstream os;
+                        os << "Getting " << nv.n << " values, but " << N << " are needed";
+                        ft.error(node, os.str().c_str());
+                        return;
+                    }
+                    else if(nv.n > N)
+                    {
+                        std::ostringstream os;
+                        os << "Getting " << nv.n << " values, but only " << N << " are assigned (" << (nv.n - N) << " are dropped)";
+                        ft.warn(node, os.str().c_str());
+                    }
+                    break;
+
+                case NumValuesResult::MIN_NUMBER:
+                    if(nv.n < N)
+                    {
+                        // TODO: allow this when the tail ones are optionals?
+                        std::ostringstream os;
+                        os << "Getting " << nv.n << " or more values, but " << N << " are needed";
+                        ft.error(node, os.str().c_str());
+                        return;
+                    }
+                    else if(nv.n > N)
+                    {
+                        std::ostringstream os;
+                        os << "Getting " << nv.n << " or more values, but only " << N << " are assigned (" << (nv.n - N) << " are always dropped)";
+                        ft.warn(node, os.str().c_str());
+                    }
+                    break;
+            }
+
+            size_t idx = localid;
+
             // Assign type based on value if automatic, or report type clash
             for(size_t i = 0; i < exprs.n; ++i)
             {
-                assert(false);
+                const MLNode *e = &exprs.ch[i];
+                NumValuesResult eres = numResultValues(e, ft);
+                Type t = e->type();
+                assert(eres.n >= 1);
+                if(eres.n > 1)
+                {
+                    TypeIdList tl = ft.tr().getlist(t);
+                    for(size_t k = 0; k < tl.n; ++k)
+                    {
+                        Type tt = tl.ptr[k];
+                        MLVar *v = &ft.mlir.vars[idx++];
+                        assignVarType(v, tt, ft);
+                    }
+                }
+                else
+                {
+                    MLVar *v = &ft.mlir.vars[idx++];
+                    if(e->isconst()) // FIXME: this is valid only if mutable -- should do proper tracking, anyway
+                    {
+                        v->kind = MLVar::CONSTVAL;
+                        v->u.val = e->asVal();
+                    }
+                    else
+                        assignVarType(v, t, ft);
+                }
             }
+
+            // TODO: eliminate variables entirely that are known constant
 
 
         }
@@ -969,6 +1361,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         {
             MLNode *funcexpr = node->firstChild();
             assert(funcexpr->m.cmd != ML_LIST);
+            assert(false); // TODO
 
         }
         break;
@@ -996,5 +1389,6 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 void MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
 {
     MLFoldTracker ft = { *this, vm, syms, env, true };
+    ft.typesrc.resize(nodes.size());
     visit(foldPre, foldPost, &ft);
 }

@@ -71,7 +71,7 @@ enum RTError
     RTE_VALUE_CAST         = RTE_FIRST_ERROR - 2,
     RTE_NOT_CALLABLE       = RTE_FIRST_ERROR - 3,
     RTE_ALLOC_FAIL         = RTE_FIRST_ERROR - 4,
-    RTE_DEAD_VM            = RTE_FIRST_ERROR - 5, // VM ran to completion and terminated without error
+    RTE_DEAD_VM            = RTE_FIRST_ERROR - 5, // VM previously ran to completion and terminated without error
     RTE_NOT_ENOUGH_PARAMS  = RTE_FIRST_ERROR - 6,
     RTE_TOO_MANY_PARAMS    = RTE_FIRST_ERROR - 7,
     RTE_NOT_YIELDABLE      = RTE_FIRST_ERROR - 8,

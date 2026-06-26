@@ -22,7 +22,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_VARDEF:         return "vardef";
         case HLNODE_FUNCDECL:       return "funcdecl";
         case HLNODE_DECLLIST:       return "decllist";
-        case HLNODE_RETURNEMIT:    return "return/yield";
+        case HLNODE_RETURNEMIT:     return "return/emit";
         case HLNODE_CALL:           return "call";
         case HLNODE_MTHCALL:        return "methodcall";
         case HLNODE_IDENT:          return "ident";
@@ -34,6 +34,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_ITER_EXPRLIST:  return "iterexprlist";
         case HLNODE_INDEX:          return "index";
         case HLNODE_INDEXASSIGN:    return "indexassign";
+        case HLNODE_NS_INDEX:       return "nsindex";
         case HLNODE_FUNCTION:       return "function";
         case HLNODE_FUNCTIONHDR:    return "functionhdr";
         case HLNODE_SINK:           return "sink";

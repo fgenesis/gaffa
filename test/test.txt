@@ -99,8 +99,10 @@
 
 --func i2f(int i) -> float { return i }
 
-uint x, y = 1, 2
-uint z = x+y
+--var w = uint::zero
+--uint x, y = 1, 2
+--uint z = x+y
+uint z = 1+2
 --return x+y, "hi"
 
 --func int.+(int a, int b) {}

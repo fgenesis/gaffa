@@ -99,6 +99,7 @@ protected:
     HLNode *_methodcall(HLNode *obj);
     HLNode *_endcall(HLNode *call);
     HLNode *_exprlist();
+    HLNode *_namespace(HLNode *ns);
     HLNode *trydecl();
     HLNode *decl();
     HLNode *declOrStmt();

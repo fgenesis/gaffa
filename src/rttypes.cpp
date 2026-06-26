@@ -29,7 +29,7 @@ struct ClassReg
     }
 
     DFunc *method(const char * name, LeafFunc lfunc, const Type * params, size_t nparams, const Type * rets, size_t nrets, FuncInfo::Flags extraflags);
-    DFunc *op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity);
+    DFunc *op(OperatorId op, LeafFunc lfunc, Type t, unsigned arity);
 
 private:
     RTReg& r;
@@ -123,10 +123,10 @@ DFunc *ClassReg::method(const char * name, LeafFunc lfunc, const Type * params, 
     return r.regfunc(cls, name, lfunc, params, nparams, rets, nrets, extraflags);
 }
 
-DFunc *ClassReg::op(Lexer::TokenType optok, LeafFunc lfunc, Type t, unsigned arity)
+DFunc *ClassReg::op(OperatorId op, LeafFunc lfunc, Type t, unsigned arity)
 {
     assert(arity <= 2);
-    const char *name = Lexer::GetTokenText(optok);
+    const char *name = GetOperatorName(op);
     Type ta[] = { t, t };
     return this->method(name, lfunc, ta, arity, ta, 1, FuncInfo::Pure);
 }
@@ -198,7 +198,7 @@ static void reg_type_uint(RTReg& r)
     ClassReg xuint = r.regclass("uint", d);
     _reg_numeric<uint>(xuint);
 
-    xuint.op(Lexer::TOK_PLUS, op_uint_plus, PRIMTYPE_UINT, 2);
+    xuint.op(OP_ADD, op_uint_plus, PRIMTYPE_UINT, 2);
 }
 
 

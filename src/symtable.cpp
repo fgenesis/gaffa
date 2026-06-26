@@ -32,7 +32,7 @@ void SymTable::addToNamespace(GC& gc, Type ns, sref key, const Val& val)
     // Important: Table uses nil and xnil to denote free/unused/tombstone keys.
     // Conveniently, sref is always a valid string, and is never 0, so this can never be nil/xnil.
     static_assert(PRIMTYPE_NIL == 0, "fail");
-    assert(key);
+    assert(key && ns);
 
     // With this property established, we can mis-use a Val key to store 2 integers instead of a regular "Val".
 
@@ -47,7 +47,7 @@ void SymTable::addToNamespace(GC& gc, Type ns, sref key, const Val& val)
 
 const Val* SymTable::lookupInNamespace(Type ns, sref key) const
 {
-    assert(key);
+    assert(key && ns);
     ValU k;
     k.type = (PrimType)key;
     k.u.opaque = ns;
@@ -57,10 +57,10 @@ const Val* SymTable::lookupInNamespace(Type ns, sref key) const
 
 void SymTable::addSymbol(GC& gc, sref key, const Val& val)
 {
-    addToNamespace(gc, PRIMTYPE_NIL, key, val);
+    addToNamespace(gc, PRIMTYPE_NORETURN, key, val);
 }
 
 const Val* SymTable::lookupSymbol(sref key) const
 {
-    return lookupInNamespace(PRIMTYPE_NIL, key);
+    return lookupInNamespace(PRIMTYPE_NORETURN, key);
 }
