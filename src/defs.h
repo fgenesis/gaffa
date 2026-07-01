@@ -264,6 +264,7 @@ enum OperatorId
     OP_CONCAT,
     OP_GETINDEX,
     OP_SETINDEX,
+    OP_GETINDEXOPT,
 
     _OP_MAX,
 };

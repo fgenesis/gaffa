@@ -249,6 +249,7 @@ const char* Symstore::Lookup::namewhere() const
 {
     switch(where)
     {
+        case SCOPEREF_NOREF:    return "noref";
         case SCOPEREF_LOCAL:    return "local";
         case SCOPEREF_UPVAL:    return "upvalue";
         case SCOPEREF_EXTERNAL: return "extern";

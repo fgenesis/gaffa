@@ -53,6 +53,8 @@ struct MLDumper
 // statements have no associated type
 static bool mlirIsStmt(MLCmd cmd)
 {
+    STATIC_ASSERT(_ML_OP_MAX < ML_CONST); // If this fails, increase ML_CONST
+
     if(cmd < _ML_OP_MAX)
         return true;
 
@@ -305,7 +307,6 @@ MLIR::~MLIR()
     nodes.dealloc(gc);
     infos.dealloc(gc);
     vars.dealloc(gc);
-    unresolvedVars.dealloc(gc);
 }
 
 size_t MLIR::indexOf(const MLNode* node) const
@@ -454,10 +455,8 @@ dolist:
             return;
 
         case HLNODE_IDENT:
+            dst->tmp.hlnode = hl;
             dst->m.cmd = _ML_UVAR; // To be resolved later
-            dst->m.p[0] = hl->u.ident.nameStrId;
-            dst->m.p[1] = hl->u.ident.symid;
-            unresolvedVars.push_back(gc, indexOf(dst));
             return;
 
         case HLNODE_VARDECLASSIGN:
@@ -468,6 +467,7 @@ dolist:
             const HLNode *decls = hl->u.vardecllist.decllist;
             MLNode *ch = &nodes[s.chIdx];
             dst->m.p[0] = _decllist(q, ch, decls); // may reallocate hlch
+            dst->m.cmd = _ML_UDECL; // Must be remapped later
 
             // Continue expanding RHS expressions
             const HLNode *vals = hl->u.vardecllist.vallist;
@@ -616,10 +616,12 @@ dolist:
     unreachable();
 }
 
-void MLIR::construct(const HLNode* root, Options options)
+void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options options)
 {
     Queue<Cons> q;
     nodes.reserve(gc, 128); // HACK FIXME
+    PodArray<size_t> unresolved; // index of each node to fix
+    unresolved.reserve(gc, syms.knownSize());
 
     Cons r { root, indexOf(_add(1)) };
     for(;;)
@@ -636,72 +638,103 @@ void MLIR::construct(const HLNode* root, Options options)
             info.column = r.hl->column;
         }
 
+        switch((MLCmd)nodes[r.mlidx].m.cmd)
+        {
+            case _ML_UVAR:
+            case _ML_UDECL:
+                unresolved.push_back(gc, r.mlidx);
+                break;
+
+            default: ;
+        }
+
         if(q.empty())
             break;
         r = q.pop();
     }
 
     q.dealloc(gc);
+
+    _resolveVars(unresolved.data(), unresolved.size(), syms, sp);
+
+    unresolved.dealloc(gc);
 }
 
-void MLIR::resolveVars(Symstore& syms, StringPool& sp)
+// Note: This could be split up into a function that does the vars and a postproc step
+// instead of pushing into unresolved vec (above). Would remove an allocation.
+void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, StringPool& sp)
 {
-    printf("Resolve %u symbols...\n", (unsigned)unresolvedVars.size());
-    PodArray<u32> varidx; // maps symid to index in vars[] plus 1
-    varidx.resize(gc, syms.knownSize());
-    memset(varidx.data(), 0, varidx.size() * sizeof(u32)); // make all invalid
+    const size_t nsyms = syms.knownSize();
+    printf("Resolve %u occurences referencing %u symbols ...\n", (unsigned)N, (unsigned)nsyms);
+    vars.reserve(gc, nsyms); // Need at least this many; maybe some more for upvalues
 
-    const size_t N = unresolvedVars.size();
+    // Maps symbol index to index in vars[]
+    PodArray<u32> remap;
+    remap.resize(gc, nsyms);
+
+    // Setup all symbols
+    for(size_t symid = 0; symid < nsyms; ++symid)
+    {
+        remap[symid] = (u32)vars.size();
+
+        MLVar *v = vars.alloc_n(gc, 1);
+        // This inits only the fields that are serialized; the rest stays uninited for now until folding
+
+        const Symstore::Sym *sym = syms.getsym(symid);
+        v->name = sym->nameStrId;
+
+        bool mut = sym->referencedHow & SYMREF_MUTABLE;
+
+        if(sym->referencedHow & SYMREF_EXTERNAL)
+        {
+            assert(!mut);
+            assert(!(sym->usage & SYMUSE_UPVAL));
+            v->kind = MLVar::EXT;
+        }
+        else if(sym->usage & SYMUSE_UPVAL)
+        {
+            v->kind = mut ? MLVar::M_DOWNVAL : MLVar::C_DOWNVAL;
+            // Current var is the downvalue, alloc the upvalue too
+            MLVar *upv = vars.alloc_n(gc, 1);
+            upv->kind = MLVar::UPVAL;
+        }
+        else
+        {
+            v->kind = mut ? MLVar::M_LOCAL : MLVar::C_LOCAL;
+        }
+
+        printf("VAR[%u]: %s [kind %u] @ symidx %u\n",
+            remap[symid], sp.lookup(v->name).s, v->kind, (unsigned)symid);
+    }
+
     for(size_t i = 0; i < N; ++i)
     {
-        MLNode *node = &nodes[unresolvedVars[i]];
-        assert(node->m.cmd == _ML_UVAR);
-        node->m.cmd = ML_VAR;
-        const u32 symid = node->m.p[1];
-        MLVar *v;
-        if(const u32 idxPlus1 = varidx[symid])
+        MLNode *node = &nodes[unresolved[i]];
+
+        switch((MLCmd)node->m.cmd)
         {
-            // Seen before, use exising MLVar
-            v = &vars[idxPlus1 - 1];
-            node->m.p[0] = idxPlus1 - 1;
-        }
-        else // setup a new MLVar
-        {
-            v = vars.alloc_n(gc, 1);
-
-            // Get the name out before overwriting it
-            v->name = node->m.p[0];
-
-            varidx[symid] = vars.size(); // plus 1
-            node->m.p[0] = vars.size() - 1;
-
-            const Symstore::Sym *sym = syms.getsym(symid);
-
-            v->firstuse = indexOf(node);
-            v->kind = MLVar::LOCAL;
-            v->u.local.type = PRIMTYPE_AUTO; // done later
-
-            if(sym->slot < 0)
+            case _ML_UVAR:
             {
-                v->kind = MLVar::EXT;
-            }
-            if(sym->usage & SYMUSE_UPVAL)
-            {
-                v->kind = MLVar::DOWNVAL;
-                // Current var is the downvalue, alloc the upvalue too
-                MLVar *upv = vars.alloc_n(gc, 1);
-                upv->kind = MLVar::UPVAL;
-                upv->name = v->name;
+                node->m.cmd = ML_VAR;
+                const HLIdent *hlident = node->tmp.hlnode->as<HLIdent>();
+                ScopeReferral referral = (ScopeReferral)hlident->ex.u.scoperef;
+                assert(referral != SCOPEREF_NOREF);
+                node->m.p[0] = remap[hlident->symid] + !!(referral == SCOPEREF_UPVAL); // Upvalue refs go one up
+                break;
             }
 
-            Strp s = sp.lookup(v->name);
-            printf("VAR[%d]: %s [kind %u]\n",
-                (unsigned)i, s.s, v->kind);
+            case _ML_UDECL:
+                // Unresolved decl still refers the symid; refer to var idx instead
+                node->m.cmd = ML_DECL;
+                node->m.p[0] = remap[node->m.p[0]];
+                break;
+
+            default:
+                unreachable();
         }
     }
 
-    varidx.dealloc(gc);
-    unresolvedVars.dealloc(gc);
+    remap.dealloc(gc);
 }
 
 typedef void (*ConvertFunc)(MLNode& m, HLNode& h);
@@ -779,6 +812,8 @@ struct MLFoldTracker
 
     void error(const MLNode *where, const char *msg);
     void warn(const MLNode *where, const char *msg);
+    void info(const MLNode *where, const char *msg);
+    void extrainfo(const MLNode *where);
 
     // Ensures sub < reference. 'where' is the thing to typecheck, 'decl' is where reference comes from
     bool checktype(Type sub, Type reference, const char *what, const MLNode *where, const MLNode *decl);
@@ -791,6 +826,27 @@ struct MLFoldTracker
     inline Strp str(sref id) { return sp().lookup(id); }
     inline Str putstr(const char *s) { return sp().put(s); }
 };
+
+void MLFoldTracker::extrainfo(const MLNode *where)
+{
+    switch((MLCmd)where->m.cmd)
+    {
+        case ML_VAR:
+            if(const MLVar *v = &mlir.vars[where->m.p[0]])
+                if(v->decl)
+                    info(&mlir.nodes[v->decl], "Declared here");
+        break;
+
+        default: ;
+    }
+}
+
+void MLFoldTracker::info(const MLNode* where, const char *msg)
+{
+    const MLInfo *info = mlir.infoOf(where);
+    const u32 line = info ? info->line : 0;
+    printf("(%s:%u): %s\n", filename.c_str(), line, msg);
+}
 
 void MLFoldTracker::error(const MLNode* where, const char *msg)
 {
@@ -819,7 +875,6 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
     error(decl, "(type should be same as here)");
     return false;
 }
-
 
 struct NumValuesResult
 {
@@ -945,6 +1000,29 @@ static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft)
     assert(false);
     NumValuesResult ret = { NumValuesResult::ERROR, 0 };
     return ret;
+}
+
+static void preFoldVars(MLVar *vars, size_t N, MLFoldTracker& ft)
+{
+    for(size_t i = 0; i < N; ++i)
+    {
+        MLVar& v = vars[i];
+        v.u.local.type = PRIMTYPE_AUTO; // actual types are assigned or deduced later
+        v.u.val.type = PRIMTYPE_AUTO;
+        v.decl = 0; // filled when encountered
+
+        // Replace any external symbols with their value.
+        // Any EXT encountered afterwards will be turned into an error node since that symbol wasn't resolvable.
+        if(v.kind == MLVar::EXT)
+        {
+            const Val *val = ft.env.lookupSymbol(v.name);
+            if(val)
+            {
+                v.kind = MLVar::CONSTVAL;
+                v.u.val = *val;
+            }
+        }
+    }
 }
 
 // >= 0: folded into this manu values
@@ -1081,28 +1159,32 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
 
 static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
 {
+    const Type valt = v->u.local.type;
+
     // FIXME: make a thing in TR that pretty-prints a type name
     const char *tn = GetPrimTypeName(t);
-    const char *cn = GetPrimTypeName(v->u.local.type);
+    const char *cn = GetPrimTypeName(valt);
     if(!tn)
         tn = "(unnamed)";
     if(!cn)
         cn = "(unnamed)";
 
-    printf("assignVarType '%s' = %s (currently: %s)\n", ft.str(v->name).s, tn ? tn : "(unnamed)", cn ? cn : "(unnamed)");
+    const char *vname = ft.str(v->name).s;
 
-    assert(v->kind == MLVar::LOCAL || v->kind == MLVar::DOWNVAL);
-    if(v->u.local.type == PRIMTYPE_AUTO)
+    printf("assignVarType '%s' = %s (currently: %s)\n", vname, tn ? tn : "(unnamed)", cn ? cn : "(unnamed)");
+
+    assert(v->isLocal());
+    if(valt == PRIMTYPE_AUTO)
     {
         v->u.local.type = t;
-        printf("Var '%s' now has type %s\n", ft.str(v->name).s, tn ? tn : "(unnamed)");
+        printf("Var '%s' now has type %s\n", vname, tn ? tn : "(unnamed)");
     }
-    else if(v->u.local.type != t)
+    else if(valt != t)
     {
         std::ostringstream os;
-        os << "'" << ft.str(v->name).s << "' already has a type; previously declared as '"
+        os << "'" << vname << "' already has a type; previously declared as '"
             << cn << "', now declaring as '" << tn << "'";
-        ft.error(&ft.mlir.nodes[v->firstuse], os.str().c_str()); // FIXME: this is bad
+        ft.error(&ft.mlir.nodes[v->decl], os.str().c_str()); // FIXME: this is bad
     }
 }
 
@@ -1115,7 +1197,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
     {
         case _ML_VAL: // Constants can't be folded further
         case ML_LIST: // all good, took care of the list recursively already before returning here
-            break;
+            return;
 
         case ML_VAR:
         {
@@ -1123,20 +1205,10 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             MLVar *v = &ft.mlir.vars[varid];
             switch(v->kind)
             {
-                case MLVar::EXT:
+                case MLVar::EXT: // External symbols must have been resolved at this point, if not, it's unknown -> Error
                 {
-                    if(const Val *val = ft.env.lookupSymbol(v->name))
-                    {
-                        printf("Ext. variable '%s' replaced with constant from env (primtype?: %s)\n",
-                            ft.str(v->name).s, GetPrimTypeName(val->type));
-                        v->kind = MLVar::CONSTVAL;
-                        v->u.val = *val;
-                        node->setVal(*val);
-                        return;
-                    }
                     std::ostringstream os;
-                    os << "Failed to resolve external symbol ";
-                    os << ft.str(v->name);
+                    os << "Failed to resolve external symbol '" << ft.str(v->name) << '\'';
                     ft.error(node, os.str().c_str());
                 }
                 break;
@@ -1148,10 +1220,24 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                 case MLVar::UPVAL:
                     --v; // go down
                     // fall through
-                case MLVar::LOCAL:
-                case MLVar::DOWNVAL:
-                    node->x.exprtype = v->u.local.type; // If we don't know, this is PRIMTYPE_AUTO
+                case MLVar::M_LOCAL:
+                case MLVar::C_LOCAL:
+                case MLVar::M_DOWNVAL:
+                case MLVar::C_DOWNVAL:
+                {
+                    Type deduced = v->u.local.type;
+                    if(deduced == PRIMTYPE_AUTO)
+                    {
+                        // FIXME: This is probably bad and shouldn't happen?
+                        std::ostringstream os;
+                        os << "Type of variable '" << ft.str(v->name) << "' not deduced, falling back to 'any'";
+                        ft.warn(node, os.str().c_str());
+                        deduced = PRIMTYPE_ANY;
+                        v->u.local.type = deduced;
+                    }
+                    node->x.exprtype = deduced;
                     return;
+                }
             }
         }
         break;
@@ -1232,8 +1318,10 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                         assert(false); // FIXME: do we ever encounter upvals in a decl? probably not
                         --v; // go down
                         // fall through
-                    case MLVar::LOCAL:
-                    case MLVar::DOWNVAL:
+                    case MLVar::M_LOCAL:
+                    case MLVar::M_DOWNVAL:
+                    case MLVar::C_LOCAL:
+                    case MLVar::C_DOWNVAL:
                         if(te->isconst())
                         {
                             Val tv = te->asVal();
@@ -1394,5 +1482,6 @@ void MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
 {
     MLFoldTracker ft = { *this, vm, syms, env, true };
     ft.typesrc.resize(nodes.size());
+    preFoldVars(vars.data(), vars.size(), ft);
     visit(foldPre, foldPost, &ft);
 }

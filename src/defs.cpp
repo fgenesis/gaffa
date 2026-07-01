@@ -167,7 +167,8 @@ static const char * s_OpNames[] =
     /* OP_LOGOR    */ "__op_or",
     /* OP_CONCAT   */ "__op_concat",
     /* OP_GETINDEX */ "__op_getindex",
-    /* OP_SETINDEX */ "__op_setindex"
+    /* OP_SETINDEX */ "__op_setindex",
+    /* OP_GETINDEXOPT */ "__op_getindexopt"
 };
 
 static bool IsOperatorPrefix(const char *s)

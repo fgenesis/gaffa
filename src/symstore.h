@@ -17,6 +17,7 @@ enum ScopeType
 
 enum ScopeReferral
 {
+    SCOPEREF_NOREF,
     SCOPEREF_LOCAL,    // in local scope
     SCOPEREF_UPVAL,    // not in local scope but exists in an outer scope across a function boundary
     SCOPEREF_EXTERNAL, // unknown identifier

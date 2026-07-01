@@ -19,10 +19,10 @@ enum MLCmd
     _ML_OP_FIRST = 1,   // always expr
     _ML_OP_MAX = _OP_MAX,
 
-                        // kind (#params) [#children]
+                        // kind (#params) [#children] <byte a>
 
-    ML_CONST = 40,      // expr (1, const table idx)
-    ML_VAR,             // expr (1, local table idx) -- local, upval, or extval
+    ML_CONST = 32,      // expr (1, const table idx)
+    ML_VAR,             // expr (1, local table idx)
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
     ML_DECL,            // stmt (1, local start) [2, typeexprs, exprs] -- num of vars = #typeexprs
     ML_CLOSE,           // stmt (2, local start, N)
@@ -51,6 +51,7 @@ enum MLCmd
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
     _ML_UVAR, // Unresolved variable // special (2, name, symid) // replaced before type analysis
+    _ML_UDECL, // Unremapped decl node
 
     // TODO:
     // _ML_ERROR
@@ -117,6 +118,10 @@ union MLNode
         u32 _do_not_use; // same as p[0]; some exprs have a parameter, using this would clobber it
         Type exprtype; // any expr node stores its known type here. This is fine because no expr has 2 params.
     } x;
+    struct
+    {
+        const HLNode *hlnode; // Temporarily stored during construction
+    } tmp;
 
     MLNode *firstChild();
     const MLNode *firstChild() const;
@@ -147,8 +152,10 @@ struct MLVar
     enum Kind
     {
         // --- serialized ---
-        LOCAL,    // Pure local value, not referenced as an upvalue
-        DOWNVAL,  // Local that is referenced as an upvalue (which is at this[1])
+        C_LOCAL,    // Pure local value, not referenced as an upvalue
+        M_LOCAL,    // mutable variant
+        C_DOWNVAL,  // Local that is referenced as an upvalue (which is at this[1])
+        M_DOWNVAL,
         EXT,      // External symbol, not declared in this module
         // --- not serialized ---
         CONSTVAL, // During optimization step: When a variable was replaced by a constant value
@@ -156,6 +163,11 @@ struct MLVar
     };
     Kind kind;
     sref name;
+    // -- Nothing below here is serialized --
+    u32 decl; // if != 0: node index of node that declares us
+
+    // if kind == CONSTVAL, this is the value, and the type
+    // if kind is a local or downval, val.type is the deduced type, and the rest is not used
     union
     {
         ValU val; // if kind == CONSTVAL, this is the value, and the type
@@ -164,7 +176,14 @@ struct MLVar
             Type type; // PRIMTYPE_AUTO if unknown
         } local; // downval, local
     } u;
-    u32 firstuse; // index of node that introduces us
+
+
+    // Helper to go from upvalue to downvalue, if necessary
+    inline       MLVar& down()       { return this[-(kind == UPVAL)]; }
+    inline const MLVar& down() const { return this[-(kind == UPVAL)]; }
+
+    inline bool isLocal() const { return kind < EXT; }
+    inline bool isMutable() const { assert(kind != UPVAL); return kind == M_LOCAL || kind == M_DOWNVAL; }
 };
 
 
@@ -190,9 +209,8 @@ public:
     };
 
     // Construct a MLNode tree out of a HLNode tree.
-    void construct(const HLNode *root, Options options);
+    void construct(const HLNode *root, Symstore& syms, StringPool& sp, Options options);
 
-    void resolveVars(Symstore& syms, StringPool& sp);
 
     // Typecheck and optimize the tree.
     void fold(VM& vm, Symstore& syms, SymTable &env);
@@ -206,7 +224,6 @@ public:
     PodArray<MLNode> nodes;
     PodArray<MLInfo> infos;
     PodArray<MLVar> vars;
-    PodArray<u32> unresolvedVars; // index of each node to fix
 
     GC& gc;
 
@@ -226,6 +243,8 @@ private:
         size_t chIdx; // index of first child
         size_t n;
     };
+
+    void _resolveVars(const size_t *unresolved, size_t n, Symstore& syms, StringPool& sp);
 
     void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl); // may reallocate dst
     void _cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl);

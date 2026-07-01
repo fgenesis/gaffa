@@ -67,6 +67,7 @@ enum HLNodeType
     HLNODE_SINK,
     HLNODE_EXPORT,
     HLNODE_NS_INDEX,
+    HLNODE_NS_INDEXASSIGN,
 
     // Intermediates; not produced by the parser
     HLNODE_FUNC_PROTO,
@@ -222,9 +223,18 @@ struct HLCallAdj : HLNodeBase
 
 struct HLIdent : HLNodeBase
 {
+    union Extra
+    {
+        struct
+        {
+            byte scoperef; // ScopeReferral
+        } u;
+        u32 ui;
+    };
     enum { EnumType = HLNODE_IDENT, Children = 0, DefaultValType = PRIMTYPE_AUTO };
     sref nameStrId;
-    sref symid;
+    u32 symid;
+    Extra ex;
 };
 
 struct HLName : HLNodeBase

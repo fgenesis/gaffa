@@ -181,6 +181,7 @@ void Parser::_applyUsage(const Lexer::Token& tok, HLNode* node, IdentUsage usage
                 name.s, f.sym->slot, node->line, f.namewhere(), f.sym->linedefined());
 
             ident.symid = syms.getuid(f.sym);
+            ident.ex.u.scoperef = f.where;
             node->flags |= IDENTFLAGS_RHS;
         }
     }
@@ -837,6 +838,10 @@ void Parser::_checkAssignTarget(HLNode* node, const Lexer::Token& nodetok)
     else if(node->type == HLNODE_INDEX)
     {
         node->type = HLNODE_INDEXASSIGN;
+    }
+    else if(node->type == HLNODE_NS_INDEX)
+    {
+        node->type = HLNODE_NS_INDEXASSIGN;
     }
 }
 
