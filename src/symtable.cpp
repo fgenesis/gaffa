@@ -54,6 +54,12 @@ const Val* SymTable::lookupInNamespace(Type ns, sref key) const
     return tab.getp(k);
 }
 
+const Val *SymTable::lookupObjectMethod(const GCobj* obj, sref methodname)
+{
+    Type t = obj->dtype->tid;
+    return lookupInNamespace(t, methodname);
+}
+
 
 void SymTable::addSymbol(GC& gc, sref key, const Val& val)
 {

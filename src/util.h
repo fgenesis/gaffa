@@ -188,3 +188,23 @@ struct IntegralConstant
 typedef IntegralConstant<bool, true>  CompileTrue;
 typedef IntegralConstant<bool, false> CompileFalse;
 template<bool V> struct CompileCheck : IntegralConstant<bool, V>{};
+
+
+// -1 if a < b
+// 0  if a == b
+// +1 if a > b
+template<typename T>
+inline static int ValCmp(T a, T b)
+{
+    return (a > b) - (a < b);
+}
+
+// -1 if x < 0
+// 0  if x == 0
+// +1 if x > 0
+template<typename T>
+inline static int Sign(T x)
+{
+    return (x > 0) - (x < 0);
+}
+

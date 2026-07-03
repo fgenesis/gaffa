@@ -5,15 +5,12 @@
 #include "gc.h"
 
 
-// internal use only
-/*struct OpRegHelper
+struct CommonStrings
 {
-    Lexer::TokenType tt;
-    LeafFunc lfunc;
-    const OpDef *def;
-    const Type *params;
-    const Type *rets;
-};*/
+    bool init(StringPool &sp);
+    sref operatorNames[_OP_MAX];
+    sref primtypeNames[PRIMTYPE_MAX];
+};
 
 struct Runtime
 {
@@ -24,6 +21,6 @@ struct Runtime
     GC gc;
     StringPool sp;
     TypeRegistry tr;
+    CommonStrings cs;
 
-    //void registerOperator(SymTable& syms, const OpRegHelper& reg);
 };

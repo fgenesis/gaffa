@@ -30,7 +30,7 @@ u32 ValStore::put(ValU v)
         if(vals[i] == v)
             return i;
     }
-
+    printf("ValStore: put new %s: %p\n", GetPrimTypeName(v.type), (void*)v.u.opaque);
     ValU *p = vals.push_back(gc, v);
     assert(p); // TODO: handle OOM
     return N;

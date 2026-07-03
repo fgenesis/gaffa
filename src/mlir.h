@@ -23,6 +23,7 @@ enum MLCmd
 
     ML_CONST = 32,      // expr (1, const table idx)
     ML_VAR,             // expr (1, local table idx)
+    ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
     ML_DECL,            // stmt (1, local start) [2, typeexprs, exprs] -- num of vars = #typeexprs
     ML_CLOSE,           // stmt (2, local start, N)
@@ -50,7 +51,7 @@ enum MLCmd
     _ML_EMPTY,
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
-    _ML_UVAR, // Unresolved variable // special (2, name, symid) // replaced before type analysis
+    _ML_UVAR, // Unresolved identifier // special (2, name, symid) // replaced before type analysis
     _ML_UDECL, // Unremapped decl node
 
     // TODO:
@@ -152,14 +153,10 @@ struct MLVar
     enum Kind
     {
         // --- serialized ---
-        C_LOCAL,    // Pure local value, not referenced as an upvalue
-        M_LOCAL,    // mutable variant
-        C_DOWNVAL,  // Local that is referenced as an upvalue (which is at this[1])
-        M_DOWNVAL,
-        EXT,      // External symbol, not declared in this module
+        CVAR,       // Local variable, not mutable
+        MUTVAR,     // Local variable, mutable
         // --- not serialized ---
-        CONSTVAL, // During optimization step: When a variable was replaced by a constant value
-        UPVAL,    // Upvalue that references a local (which is at this[-1])
+        CONSTVAL, // During optimization step: When a CVAR was replaced by a constant value
     };
     Kind kind;
     sref name;
@@ -174,16 +171,16 @@ struct MLVar
         struct
         {
             Type type; // PRIMTYPE_AUTO if unknown
-        } local; // downval, local
+        } local;
     } u;
 
+    inline bool isMutable() const { return kind == MUTVAR; }
+};
 
-    // Helper to go from upvalue to downvalue, if necessary
-    inline       MLVar& down()       { return this[-(kind == UPVAL)]; }
-    inline const MLVar& down() const { return this[-(kind == UPVAL)]; }
-
-    inline bool isLocal() const { return kind < EXT; }
-    inline bool isMutable() const { assert(kind != UPVAL); return kind == M_LOCAL || kind == M_DOWNVAL; }
+struct MLExternal
+{
+    sref name;
+    Val val;
 };
 
 
@@ -224,6 +221,7 @@ public:
     PodArray<MLNode> nodes;
     PodArray<MLInfo> infos;
     PodArray<MLVar> vars;
+    PodArray<MLExternal> externals;
 
     GC& gc;
 

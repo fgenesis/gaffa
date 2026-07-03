@@ -14,6 +14,7 @@ typedef float real;
 typedef double widereal;
 typedef uint32_t realui;
 
+// fixed-size types
 typedef int32_t s32;
 typedef uint32_t u32;
 typedef uint16_t u16;
@@ -66,21 +67,23 @@ enum PrimType
     // S     - type can be sub-typed
     // G     - value is garbage-collected directly
     // g     - value is garbage-collected indirectly only
-    PRIMTYPE_NIL,    // F  i         // enum value must be 0
-    PRIMTYPE_ERROR,  // F     S  g   //
-    PRIMTYPE_OPAQUE, //    ?         //
-    PRIMTYPE_BOOL,   // ?  i         //
-    PRIMTYPE_UINT,   // T  i         //
-    PRIMTYPE_SINT,   // T  i         //
-    PRIMTYPE_FLOAT,  // T  i         //
-    PRIMTYPE_STRING, // T  R     g   //
-    PRIMTYPE_TYPE,   // T  R     g   //
-    PRIMTYPE_FUNC,   // T  o  S  G   //
-    PRIMTYPE_CORO,   // T  o  S  G   //
-    PRIMTYPE_TABLE,  // T  o  S  G   //
-    PRIMTYPE_ARRAY,  // T  o  S  G   //
-    PRIMTYPE_SYMTAB, // T  o     G   //
-    PRIMTYPE_OBJECT, // T  o     G   //
+    // x     - type is fixed -- can't change state or be modified once created
+    // 1     - type is a primitive value
+    PRIMTYPE_NIL,    // F  i        1    // enum value must be 0
+    PRIMTYPE_ERROR,  // F     S  g  x   //
+    PRIMTYPE_OPAQUE, //    ?        1   //
+    PRIMTYPE_BOOL,   // ?  i        1   //
+    PRIMTYPE_UINT,   // T  i        1   //
+    PRIMTYPE_SINT,   // T  i        1   //
+    PRIMTYPE_FLOAT,  // T  i        1   //
+    PRIMTYPE_STRING, // T  R     g  x   //
+    PRIMTYPE_TYPE,   // T  o     g  x   //
+    PRIMTYPE_FUNC,   // T  o  S  G  x   //
+    PRIMTYPE_CORO,   // T  o  S  G      //
+    PRIMTYPE_TABLE,  // T  o  S  G      //
+    PRIMTYPE_ARRAY,  // T  o  S  G      //
+    PRIMTYPE_SYMTAB, // T  o     G      //
+    PRIMTYPE_OBJECT, // T  o     G      //
 
     PRIMTYPE_ANY,    // can hold any value. must be after specific types.
 
@@ -94,8 +97,15 @@ enum PrimType
     _PRIMTYPE_FIRST_OBJ = PRIMTYPE_FUNC
 };
 
+inline static bool isObjectType(PrimType pt) { return pt >= PRIMTYPE_TYPE && pt < PRIMTYPE_ANY; }
+
+// Type is a reference to an object that is mutable?
+inline static bool isMutableRefType(PrimType pt) { return pt >= PRIMTYPE_CORO && pt < PRIMTYPE_ANY; }
+
 struct _Nil {};
 struct _Xnil {}; // the "invalid nil", used as sentinel, marker, etc
+struct _Auto {}; // Invalid value marked as auto-type
+struct _Notype {};
 
 struct MemBlock
 {
@@ -139,15 +149,18 @@ enum
 // Most likely (but not necessarily!) preceded in memory by a GCprefix, see gc.h
 struct GCobj
 {
+    // -------------------------
     // Beware: These are overlaid with GCprefix members and intentionally NOT initialized in a ctor!
     // The GC initializes the overlay part already and it MUST NOT be touched afterwards.
-
-    // HMM: This could be merged. lower u8 is primtype, next 8 bits regular gc flags,
-    // upper 16 bits reserved for internal gc things.
-    // BUT: This needs to be pointer-size aligned, so we'd waste something on 64bit arch
     u32 gcTypeAndFlags;
-    u32 gcsize;
+    tsize gcsize;
+    // -------------------------
+    // Regular members below
+
     DType *dtype;
+
+
+    inline PrimType primtype() const { return PrimType(gcTypeAndFlags & GCOBJ_MASK_PRIMTYPE); }
 };
 
 union _AnyValU
@@ -187,6 +200,8 @@ struct Val : public ValU
     inline Val()                        { _init(PRIMTYPE_NIL); }
     inline Val(_Nil)                    { _init(PRIMTYPE_NIL); }
     inline Val(_Xnil)                   { _init(PRIMTYPE_NIL);    u.opaque = 1; }
+    inline Val(_Auto)                   { _init(PRIMTYPE_AUTO); }
+    inline Val(_Notype)                 { _init(PRIMTYPE_NOTYPE); }
     explicit inline Val(bool b)                  { _init(PRIMTYPE_BOOL);   u.ui = b; }
     explicit inline Val(unsigned int i)          { _init(PRIMTYPE_UINT);   u.ui = i; }
     explicit inline Val(int i)                   { _init(PRIMTYPE_SINT);   u.si = i; }
@@ -203,13 +218,15 @@ struct Val : public ValU
 
     Val(const void *func) = delete; // Not implemented, catch-all
 
-    inline GCobj *asAnyObj(PrimType prim) { return prim == type ? u.obj : NULL; }
+    inline GCobj *asAnyObj(PrimType prim) { return isObjectType(type) ? u.obj : NULL; }
+    inline GCobj *asObj(PrimType prim) { return prim == type ? u.obj : NULL; }
     DFunc    *asFunc();
     SymTable *asSymTab();
     DObj     *asDObj();
     DType    *asDType();
 
-    inline const GCobj *asAnyObj(PrimType prim) const {  return prim == type ? u.obj : NULL; }
+    inline const GCobj *asAnyObj() const { return isObjectType(type) ? u.obj : NULL; }
+    inline const GCobj *asObj(PrimType prim) const { return prim == type ? u.obj : NULL; }
     const DFunc    *asFunc() const;
     const SymTable *asSymTab() const;
     const DObj     *asDObj() const;
@@ -265,6 +282,7 @@ enum OperatorId
     OP_GETINDEX,
     OP_SETINDEX,
     OP_GETINDEXOPT,
+    OP_CALL,
 
     _OP_MAX,
 };

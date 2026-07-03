@@ -40,7 +40,7 @@ struct GCprefix
     // --------
     // This is overlaid in memory. The following fields are the same as in GCobj.
     u32 gcTypeAndFlags;
-    u32 gcsize;
+    tsize gcsize;
 
     enum { HDR_SIZE = sizeof(GCheader) };
 

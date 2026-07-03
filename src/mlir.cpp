@@ -7,6 +7,25 @@
 
 #include <sstream>
 
+/* TODO:
+- When constant folding calls, [], {}, or anything that created an object for which isMutableRefType() is true,
+  the original expression must not be eliminated, unless we can shallow copy the object, instead of creating it.
+  -> ie. it only contains values for which isMutableRefType() is false.
+  We can still create
+  Use case:
+  type Pair = { int, int }
+  var Pair = struct { int, int }
+  etc, to be able to fold these at compile time when they appear inside of a function.
+
+- Calling a non-comptime function or method on a comptime object, or a comptime method with non-comptime parameters,
+  must immediately invalidate that object since it's no longer compile-time constant.
+  -> Failing to optimize away any function call on an object makes it no longer comptime constant.
+  ->Invalidating a comptime object means its comptime representation is shallow-copy-created at runtime if that is possible.
+
+- Declarations can only be removed when every isMutableRefType() object stays comptime-constant
+
+*/
+
 
 struct MLWriter
 {
@@ -105,6 +124,7 @@ static size_t mlirNumChildren(MLCmd cmd)
     {
         case ML_CONST:
         case ML_VAR:
+        case ML_EXT:
         case ML_CLOSE:
         case _ML_VAL:
             return 0;
@@ -141,9 +161,10 @@ static size_t mlirNumChildren(MLCmd cmd)
     return 0;
 }
 
-static void mlirDumpNode(MLDumper& dump, const MLNode *node)
+static void mlirDumpNode(MLDumper& dump, const MLNode *node, size_t idx)
 {
     MLCmd cmd = (MLCmd)node->m.cmd;
+    printf("dump mlir %u (cmd %u)\n", (unsigned)idx, node->m.cmd);
 
     size_t nch = 0;
 
@@ -193,10 +214,11 @@ void MLIR::dump(BufSink *sk, const StringPool& sp, Options options) const
     MLDumper dump(sp.gc);
 
     const bool debuginfo = !infos.empty() && !(options & STRIP_DEBUGINFO);
-    const MLNode *node = nodes.data();
+    const MLNode * const root = nodes.data();
+    const MLNode *node = root;
     for(;;)
     {
-        mlirDumpNode(dump, node);
+        mlirDumpNode(dump, node, node - root);
 
         if(debuginfo)
         {
@@ -307,6 +329,7 @@ MLIR::~MLIR()
     nodes.dealloc(gc);
     infos.dealloc(gc);
     vars.dealloc(gc);
+    externals.dealloc(gc);
 }
 
 size_t MLIR::indexOf(const MLNode* node) const
@@ -668,43 +691,41 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
     printf("Resolve %u occurences referencing %u symbols ...\n", (unsigned)N, (unsigned)nsyms);
     vars.reserve(gc, nsyms); // Need at least this many; maybe some more for upvalues
 
-    // Maps symbol index to index in vars[]
-    PodArray<u32> remap;
+    PodArray<u32> remap; // Maps symbol index to index in vars[]
     remap.resize(gc, nsyms);
 
     // Setup all symbols
     for(size_t symid = 0; symid < nsyms; ++symid)
     {
-        remap[symid] = (u32)vars.size();
-
-        MLVar *v = vars.alloc_n(gc, 1);
         // This inits only the fields that are serialized; the rest stays uninited for now until folding
-
         const Symstore::Sym *sym = syms.getsym(symid);
-        v->name = sym->nameStrId;
-
         bool mut = sym->referencedHow & SYMREF_MUTABLE;
 
         if(sym->referencedHow & SYMREF_EXTERNAL)
         {
             assert(!mut);
             assert(!(sym->usage & SYMUSE_UPVAL));
-            v->kind = MLVar::EXT;
-        }
-        else if(sym->usage & SYMUSE_UPVAL)
-        {
-            v->kind = mut ? MLVar::M_DOWNVAL : MLVar::C_DOWNVAL;
-            // Current var is the downvalue, alloc the upvalue too
-            MLVar *upv = vars.alloc_n(gc, 1);
-            upv->kind = MLVar::UPVAL;
+
+            remap[symid] = (u32)externals.size();
+
+            MLExternal *e = externals.alloc_n(gc, 1);
+            e->name = sym->nameStrId;
+
+            printf("EXT[%u]: %s @ symidx %u\n",
+                remap[symid], sp.lookup(e->name).s, (unsigned)symid);
         }
         else
         {
-            v->kind = mut ? MLVar::M_LOCAL : MLVar::C_LOCAL;
-        }
+            remap[symid] = (u32)vars.size();
 
-        printf("VAR[%u]: %s [kind %u] @ symidx %u\n",
-            remap[symid], sp.lookup(v->name).s, v->kind, (unsigned)symid);
+            MLVar *v = vars.alloc_n(gc, 1);
+
+            v->name = sym->nameStrId;
+            v->kind = mut ? MLVar::MUTVAR : MLVar::CVAR;
+
+            printf("VAR[%u]: %s [kind %u] @ symidx %u\n",
+                remap[symid], sp.lookup(v->name).s, v->kind, (unsigned)symid);
+        }
     }
 
     for(size_t i = 0; i < N; ++i)
@@ -713,13 +734,15 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
 
         switch((MLCmd)node->m.cmd)
         {
-            case _ML_UVAR:
+            case _ML_UVAR: // Resolve and decide whether it becomes a local or an external
             {
-                node->m.cmd = ML_VAR;
                 const HLIdent *hlident = node->tmp.hlnode->as<HLIdent>();
                 ScopeReferral referral = (ScopeReferral)hlident->ex.u.scoperef;
                 assert(referral != SCOPEREF_NOREF);
-                node->m.p[0] = remap[hlident->symid] + !!(referral == SCOPEREF_UPVAL); // Upvalue refs go one up
+                const Symstore::Sym *sym = syms.getsym(hlident->symid);
+
+                node->m.cmd = (sym->referencedHow & SYMREF_EXTERNAL) ? ML_EXT : ML_VAR;
+                node->m.p[0] = remap[hlident->symid];
                 break;
             }
 
@@ -825,6 +848,9 @@ struct MLFoldTracker
     inline TypeRegistry& tr() { return rt().tr; }
     inline Strp str(sref id) { return sp().lookup(id); }
     inline Str putstr(const char *s) { return sp().put(s); }
+
+    const DFunc *getObjectOperator(const GCobj *obj, OperatorId op);
+    const DFunc *getCallable(const GCobj *obj);
 };
 
 void MLFoldTracker::extrainfo(const MLNode *where)
@@ -874,6 +900,24 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
     error(where, os.str().c_str());
     error(decl, "(type should be same as here)");
     return false;
+}
+
+const DFunc *MLFoldTracker::getObjectOperator(const GCobj *obj, OperatorId op)
+{
+    sref method = rt().cs.operatorNames[op];
+    const Val *v = env.lookupObjectMethod(obj, method);
+    return v ? v->asFunc() : NULL;
+}
+
+const DFunc *MLFoldTracker::getCallable(const GCobj * obj)
+{
+    if(!obj)
+        return NULL;
+
+    if(obj->primtype() == PRIMTYPE_FUNC)
+        return (DFunc*)obj;
+
+    return getObjectOperator(obj, OP_CALL);
 }
 
 struct NumValuesResult
@@ -1002,32 +1046,33 @@ static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft)
     return ret;
 }
 
+// Replace any external symbols with their value.
+// Any EXT encountered afterwards will be turned into an error node since that symbol wasn't resolvable.
+static void preFoldExternals(MLExternal *ext, size_t N, MLFoldTracker& ft)
+{
+
+    for(size_t i = 0; i < N; ++i)
+    {
+        MLExternal& e = ext[i];
+        const Val *val = ft.env.lookupSymbol(e.name);
+        e.val = val ? *val : _Notype(); // PRIMTYPE_NOTYPE is never valid for externals
+    }
+}
+
 static void preFoldVars(MLVar *vars, size_t N, MLFoldTracker& ft)
 {
     for(size_t i = 0; i < N; ++i)
     {
         MLVar& v = vars[i];
         v.u.local.type = PRIMTYPE_AUTO; // actual types are assigned or deduced later
-        v.u.val.type = PRIMTYPE_AUTO;
-        v.decl = 0; // filled when encountered
-
-        // Replace any external symbols with their value.
-        // Any EXT encountered afterwards will be turned into an error node since that symbol wasn't resolvable.
-        if(v.kind == MLVar::EXT)
-        {
-            const Val *val = ft.env.lookupSymbol(v.name);
-            if(val)
-            {
-                v.kind = MLVar::CONSTVAL;
-                v.u.val = *val;
-            }
-        }
+        v.u.val.type = PRIMTYPE_AUTO; // error marker, not used, for debugging only
+        v.decl = 0; // filled when encountered in ML_DECL during folding
     }
 }
 
 // >= 0: folded into this manu values
 // < 0: error or not folded
-static int tryFoldFunction(MLNode *call, const DFunc& func, MLNode *args, size_t argc, int maxresults, MLFoldTracker& ft)
+static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t argc, int maxresults, MLFoldTracker& ft)
 {
     assert(argc >= func.info.nargs);
 
@@ -1037,8 +1082,7 @@ static int tryFoldFunction(MLNode *call, const DFunc& func, MLNode *args, size_t
     // Need all args to be constant
     // TODO: typeof(x) needs special handling -- only needs known type, not full result
     // TODO: At some point handle special cases like x*0, x*1, 0+x, etc
-    // IDEA: Make it a special annotation [partial]? And when calling, pass non-constant values as XNil
-    // Or make it an extra fold-time funcptr that exists only for functions supporting this feature (C-side-only!)
+    // -> Extra DFunc funcptr that exists only for functions supporting this feature (C-side-only!)
     for(size_t i = 0; i < argc; ++i)
         if(!args->isconst())
             return -2;
@@ -1095,7 +1139,6 @@ static int tryFoldFunction(MLNode *call, const DFunc& func, MLNode *args, size_t
             assert(call < rets);
             call->m.chOffs = rets - call;
         }
-        // else: Call didn't succeed, don't fold.
     }
     else
     {
@@ -1140,7 +1183,7 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     }
 
     // TODO: is there an operator that results in more than 1 return value?
-    return tryFoldFunction(node, *func, L, arity, 1, ft) > 0;
+    return tryFoldCall(node, *func, L, arity, 1, ft) > 0;
 }
 
 static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
@@ -1173,7 +1216,6 @@ static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
 
     printf("assignVarType '%s' = %s (currently: %s)\n", vname, tn ? tn : "(unnamed)", cn ? cn : "(unnamed)");
 
-    assert(v->isLocal());
     if(valt == PRIMTYPE_AUTO)
     {
         v->u.local.type = t;
@@ -1199,31 +1241,33 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         case ML_LIST: // all good, took care of the list recursively already before returning here
             return;
 
+        case ML_EXT:
+        {
+            MLExternal *e = &ft.mlir.externals[node->m.p[0]];
+            if(e->val.type != PRIMTYPE_NOTYPE) // set by preFoldExternals() if unresolved
+                node->setVal(e->val);
+            else
+            {
+                std::ostringstream os;
+                os << "Failed to resolve external symbol '" << ft.str(e->name) << '\'';
+                ft.error(node, os.str().c_str());
+            }
+            return;
+        }
+
+
         case ML_VAR:
         {
             u32 varid = node->m.p[0];
             MLVar *v = &ft.mlir.vars[varid];
             switch(v->kind)
             {
-                case MLVar::EXT: // External symbols must have been resolved at this point, if not, it's unknown -> Error
-                {
-                    std::ostringstream os;
-                    os << "Failed to resolve external symbol '" << ft.str(v->name) << '\'';
-                    ft.error(node, os.str().c_str());
-                }
-                break;
-
                 case MLVar::CONSTVAL:
                     node->setVal(v->u.val);
                     return;
 
-                case MLVar::UPVAL:
-                    --v; // go down
-                    // fall through
-                case MLVar::M_LOCAL:
-                case MLVar::C_LOCAL:
-                case MLVar::M_DOWNVAL:
-                case MLVar::C_DOWNVAL:
+                case MLVar::CVAR:
+                case MLVar::MUTVAR:
                 {
                     Type deduced = v->u.local.type;
                     if(deduced == PRIMTYPE_AUTO)
@@ -1306,22 +1350,18 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             MLSub exprs = ch[1].aslist();
 
             const size_t N = typeexprs.n;
+            const size_t declidx = ft.mlir.indexOf(node);
 
             // Assign types first
             for(size_t i = 0; i < N; ++i)
             {
                 MLNode *te = &typeexprs.ch[i];
                 MLVar *v = &ft.mlir.vars[localid + i];
+                v->decl = declidx;
                 switch(v->kind)
                 {
-                    case MLVar::UPVAL:
-                        assert(false); // FIXME: do we ever encounter upvals in a decl? probably not
-                        --v; // go down
-                        // fall through
-                    case MLVar::M_LOCAL:
-                    case MLVar::M_DOWNVAL:
-                    case MLVar::C_LOCAL:
-                    case MLVar::C_DOWNVAL:
+                    case MLVar::CVAR:
+                    case MLVar::MUTVAR:
                         if(te->isconst())
                         {
                             Val tv = te->asVal();
@@ -1344,24 +1384,8 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                         break;
 
                     case MLVar::CONSTVAL:
-                    {
-                        std::ostringstream os;
-                        os << "Attempt to declare known-constant as local";
-                        if(sref name = v->name)
-                            os << " '" <<  ft.str(name) << "'";
-                        ft.error(node, os.str().c_str());
+                        assert(false && "constval during decl, should not be folded yet");
                         break;
-                    }
-
-                    case MLVar::EXT:
-                    {
-                        std::ostringstream os;
-                        os << "Attempt to declare external symbol as local";
-                        if(sref name = v->name)
-                            os << " '" <<  ft.str(name) << "'";
-                        ft.error(node, os.str().c_str());
-                        break;
-                    }
 
                 }
             }
@@ -1414,6 +1438,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             size_t idx = localid;
 
             // Assign type based on value if automatic, or report type clash
+            size_t numconstval = 0;
             for(size_t i = 0; i < exprs.n; ++i)
             {
                 const MLNode *e = &exprs.ch[i];
@@ -1429,23 +1454,27 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                         MLVar *v = &ft.mlir.vars[idx++];
                         assignVarType(v, tt, ft);
                     }
+                    // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
                 }
                 else
                 {
                     MLVar *v = &ft.mlir.vars[idx++];
-                    if(e->isconst()) // FIXME: this is valid only if mutable -- should do proper tracking, anyway
+                    if(!v->isMutable() && e->isconst())
                     {
                         v->kind = MLVar::CONSTVAL;
                         v->u.val = e->asVal();
+                        ++numconstval;
                     }
                     else
                         assignVarType(v, t, ft);
                 }
             }
 
-            // TODO: eliminate variables entirely that are known constant
-
-
+            // ALL values got replaced by compile-time known constants? Don't need this decl node, kick it.
+            // All ML_VAR referenced later that were declared here it will be replaced with constants,
+            // so there will be no reference left.
+            if(numconstval == N)
+                node->makedummy();
         }
         break;
 
@@ -1453,7 +1482,10 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         {
             MLNode *funcexpr = node->firstChild();
             assert(funcexpr->m.cmd != ML_LIST);
-            assert(false); // TODO
+            if(funcexpr->isconst())
+                if(const DFunc *df = ft.getCallable(funcexpr->asVal().asAnyObj()))
+                    tryFoldCall(node, *df, funcexpr + 1, node->numchildren() - 1, -1, ft);
+            return;
 
         }
         break;
@@ -1467,7 +1499,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             {
                 // It's an operator -> technically a function call, but known to return a single value.
                 tryFoldOpr(node, ft);
-                break;
+                return;
             }
 
 
@@ -1482,6 +1514,7 @@ void MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
 {
     MLFoldTracker ft = { *this, vm, syms, env, true };
     ft.typesrc.resize(nodes.size());
+    preFoldExternals(externals.data(), externals.size(), ft);
     preFoldVars(vars.data(), vars.size(), ft);
     visit(foldPre, foldPost, &ft);
 }

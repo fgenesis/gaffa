@@ -28,6 +28,18 @@ FORCEINLINE static uhash rotr(uhash h, unsigned n)
     return (h >> n) | (h << (Bits - n));
 }
 
+// https://github.com/skeeto/hash-prospector/issues/19
+// score: 0.10734781817103507
+inline static u32 lowbias32(u32 x)
+{
+    x ^= x >> 16;
+    x *= 0x21f0aaad;
+    x ^= x >> 15;
+    x *= 0xf35a2d97;
+    x ^= x >> 15;
+    return x;
+}
+
 
 // hash and strlen() in one
 HStr lenhash(uhash h, const char * const s);

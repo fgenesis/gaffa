@@ -16,22 +16,22 @@ Val::Val(DFunc *func)    { _init(PRIMTYPE_FUNC);   u.obj = func; }
 
 Val::Val(DObj *o)
 {
-    PrimType pt = (PrimType)(o->gcTypeAndFlags & GCOBJ_MASK_PRIMTYPE);
+    PrimType pt = o->primtype();
     assert(pt == o->dtype->tdesc->primtype);
     _init(pt);
     u.obj = o;
 }
 
 
-DFunc      *Val::asFunc()     { return static_cast<DFunc*   >(asAnyObj(PRIMTYPE_FUNC)); }
-SymTable   *Val::asSymTab()   { return static_cast<SymTable*>(asAnyObj(PRIMTYPE_SYMTAB)); }
-DObj       *Val::asDObj()     { return static_cast<DObj*    >(asAnyObj(PRIMTYPE_OBJECT)); }
-DType      *Val::asDType()    { return static_cast<DType*   >(asAnyObj(PRIMTYPE_TYPE)); }
+DFunc      *Val::asFunc()     { return static_cast<DFunc*   >(asObj(PRIMTYPE_FUNC)); }
+SymTable   *Val::asSymTab()   { return static_cast<SymTable*>(asObj(PRIMTYPE_SYMTAB)); }
+DObj       *Val::asDObj()     { return static_cast<DObj*    >(asObj(PRIMTYPE_OBJECT)); }
+DType      *Val::asDType()    { return static_cast<DType*   >(asObj(PRIMTYPE_TYPE)); }
 
-const DFunc      *Val::asFunc()    const { return static_cast<const DFunc*   >(asAnyObj(PRIMTYPE_FUNC)); }
-const SymTable   *Val::asSymTab()  const { return static_cast<const SymTable*>(asAnyObj(PRIMTYPE_SYMTAB)); }
-const DObj       *Val::asDObj()    const { return static_cast<const DObj*    >(asAnyObj(PRIMTYPE_OBJECT)); }
-const DType      *Val::asDType()   const { return static_cast<const DType*   >(asAnyObj(PRIMTYPE_TYPE)); }
+const DFunc      *Val::asFunc()    const { return static_cast<const DFunc*   >(asObj(PRIMTYPE_FUNC)); }
+const SymTable   *Val::asSymTab()  const { return static_cast<const SymTable*>(asObj(PRIMTYPE_SYMTAB)); }
+const DObj       *Val::asDObj()    const { return static_cast<const DObj*    >(asObj(PRIMTYPE_OBJECT)); }
+const DType      *Val::asDType()   const { return static_cast<const DType*   >(asObj(PRIMTYPE_TYPE)); }
 
 
 struct UintPair
@@ -168,7 +168,8 @@ static const char * s_OpNames[] =
     /* OP_CONCAT   */ "__op_concat",
     /* OP_GETINDEX */ "__op_getindex",
     /* OP_SETINDEX */ "__op_setindex",
-    /* OP_GETINDEXOPT */ "__op_getindexopt"
+    /* OP_GETINDEXOPT */ "__op_getindexopt",
+    /* OP_CALL     */ "__op_call"
 };
 
 static bool IsOperatorPrefix(const char *s)

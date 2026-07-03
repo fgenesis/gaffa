@@ -22,7 +22,7 @@ int hexwrite(BufSink *sk, const void *mem, size_t n)
     size_t rem = sk->priv.sz;
     for(size_t i = 0; i < n; ++i)
     {
-        printf(" %02X", b[i]);
+        printf("%02X ", b[i]);
         if(!--rem)
         {
             puts("");

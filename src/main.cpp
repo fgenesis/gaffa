@@ -228,36 +228,18 @@ int main(int argc, char **argv)
     MLIR ml(rt.gc);
 
     ml.construct(node, pp.syms, rt.sp, MLIR::DEFAULT);
+
+    printf("ML nodes before folding: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));
+
+    {
+        BufSink hex;
+        sink_initHexPrint(&hex);
+        ml.dump(&hex, rt.sp, MLIR::STRIP_DEBUGINFO);
+        hex.Close(&hex);
+    }
+
     ml.fold(vm, pp.syms, *env);
 
-    printf("ML nodes: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));
-
-    //ml.convert();
-
-    BufSink hex;
-    sink_initHexPrint(&hex);
-    ml.dump(&hex, rt.sp, MLIR::STRIP_DEBUGINFO);
-    hex.Close(&hex);
-
-
-#if 0
-
-    HLFoldTracker ft = { vm, pp.syms, *env, hb, 0 };
-
-    /*puts("\n####### AFTER EARLY FOLDING #######\n");
-    node->fold(ft);
-    hlirDebugDump(rt, node);*/
-
-
-    ft.stage = FOLD_SPECIALIZE;
-    HLNode *folded = node->fold(ft);
-    puts("\n####### AFTER LATE FOLDING #######\n");
-    hlirDebugDump(rt, folded);
-
-    //MLIRContainer mc(gc);
-    //mc.import(node, strtab, fn);
-
-#endif
 
    return 0;
 }

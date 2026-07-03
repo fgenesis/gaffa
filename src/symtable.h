@@ -25,6 +25,9 @@ public:
     void addToNamespace(GC& gc, Type ns, sref key, const Val& val);
     const Val *lookupInNamespace(Type ns, sref key) const;
 
+    // Helpers
+    const Val *lookupObjectMethod(const GCobj *obj, sref methodname);
+
 private:
     SymTable();
     Table tab;
