@@ -183,7 +183,7 @@ static bool IsOperatorPrefix(const char *s)
 
 const char *GetOperatorName(OperatorId op)
 {
-    static_assert(Countof(s_OpNames) == _OP_MAX, "mismatch");
+    static_assert(Countof(s_OpNames) == _OP_MAX_FUNC, "mismatch");
     return op < Countof(s_OpNames) ? s_OpNames[op] : NULL;
 }
 
@@ -212,6 +212,7 @@ size_t GetOperatorArity(OperatorId op)
         case OP_UNOT:
         case OP_UBITNOT:
         case OP_ULEN:
+        case OP_QQM:
             return 1;
         default: ;
     }

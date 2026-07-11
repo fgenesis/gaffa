@@ -53,13 +53,7 @@ enum MLCmd
     _ML_VAL, // constant value, stored inline in MLNode
     _ML_UVAR, // Unresolved identifier // special (2, name, symid) // replaced before type analysis
     _ML_UDECL, // Unremapped decl node
-
-    // TODO:
-    // _ML_ERROR
-    // -> Instead of tracking errors in MLFoldTracker, make a node an error node and carry on.
-    // If it never gets seen again after folding is done, ignore there were problems because they didn't matter
-    // -> After folding, iterate the tree once more in the same order and look for error nodes,
-    // and report them if encountered
+    _ML_ERROR, // Error. If encountered after folding, the tree isn't sound and no code can be generated.
 };
 
 /*
@@ -132,6 +126,8 @@ union MLNode
     MLSub aslist(); // Returns children, or itself if not list (as if it was a list with 1 child)
     Type type() const;
     bool isconst() const; // Is a const value for the puspose of constant folding?
+    void setError(sref s);
+    void setError(StringPool& sp, const char *err);
 
     // Invalidate this node and all its children
     void invalidate();
@@ -210,7 +206,7 @@ public:
 
 
     // Typecheck and optimize the tree.
-    void fold(VM& vm, Symstore& syms, SymTable &env);
+    bool fold(VM& vm, Symstore& syms, SymTable &env);
 
     size_t indexOf(const MLNode *node) const;
     const MLInfo *infoOf(const MLNode *node) const;

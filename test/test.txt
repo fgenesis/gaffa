@@ -103,6 +103,8 @@
 --uint x, y = 1, 2
 --uint z = x+y
 uint z = 1+2
+--return ??z
+
 --return x+y, "hi"
 
 --func int.+(int a, int b) {}

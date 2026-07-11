@@ -284,7 +284,11 @@ enum OperatorId
     OP_GETINDEXOPT,
     OP_CALL,
 
-    _OP_MAX,
+    _OP_MAX_FUNC,
+    
+    OP_QQM = _OP_MAX_FUNC,
+
+    _OP_MAX
 };
 
 static bool IsOperatorPrefix(const char *s);

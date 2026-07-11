@@ -297,6 +297,17 @@ bool MLNode::isconst() const
     return m.cmd == _ML_VAL;
 }
 
+void MLNode::setError(sref s)
+{
+    m.cmd = _ML_ERROR;
+    m.p[0] = s;
+}
+
+void MLNode::setError(StringPool& sp, const char* err)
+{
+    setError(sp.put(err).id);
+}
+
 size_t MLNode::numchildren() const
 {
     return m.cmd != ML_LIST ? mlirNumChildren((MLCmd)m.cmd) : list.len;
@@ -932,9 +943,9 @@ struct NumValuesResult
     size_t n;
 };
 
-static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft);
+static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft);
 
-static NumValuesResult numResultValuesOfList(const MLNode *ch, size_t nch, MLFoldTracker& ft)
+static NumValuesResult numResultValuesOfList(MLNode *ch, size_t nch, MLFoldTracker& ft)
 {
     NumValuesResult ret = { NumValuesResult::EXACT_NUMBER, 0 };
     for(size_t i = 0; i < nch; ++i)
@@ -966,7 +977,7 @@ static NumValuesResult numResultValuesOfList(const MLNode *ch, size_t nch, MLFol
     return ret;
 }
 
-static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft)
+static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
 {
     MLCmd cmd = (MLCmd)node->m.cmd;
     // Statements don't return anything
@@ -997,16 +1008,22 @@ static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft)
 
         case ML_CALLADJ:
         {
-            NumValuesResult ret = { NumValuesResult::EXACT_NUMBER, 0 };
+            NumValuesResult ret = { NumValuesResult::ERROR, 0 };
 
-            const MLNode *numexpr = node->firstChild();
-            const MLNode *myexpr = numexpr + 1;
+            MLNode *numexpr = node->firstChild();
+            MLNode *myexpr = numexpr + 1;
             if(!numexpr->isconst() || numexpr->val.type != PRIMTYPE_UINT)
-                ft.error(numexpr, "Value-adjustment must result in a compile-time constant uint value");
+            {
+                numexpr->setError(ft.sp(), "Value-adjustment must result in a compile-time constant uint value");
+                return ret;
+            }
 
             ret.n = numexpr->asVal().u.ui;
             if(ret.n > 255)
-                ft.error(numexpr, "Value-adjustment can not result in more values than a non-variadic function can return (255)");
+            {
+                numexpr->setError(ft.sp(), "Value-adjustment can not result in more values than a non-variadic function can return (255)");
+                return ret;
+            }
 
             NumValuesResult orig = numResultValues(myexpr, ft);
             if(orig.verdict == NumValuesResult::ERROR)
@@ -1016,9 +1033,11 @@ static NumValuesResult numResultValues(const MLNode *node, MLFoldTracker& ft)
             {
                 std::ostringstream os;
                 os << "Expresssion results in " << orig.n << " values; attempt to adjust to " << ret.n;
-                ft.error(myexpr, os.str().c_str());
+                myexpr->setError(ft.sp(), os.str().c_str());
+                return ret;
             }
 
+            ret.verdict = NumValuesResult::EXACT_NUMBER;
             return ret; // This is always exact
         }
 
@@ -1105,7 +1124,7 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
         {
             std::ostringstream os;
             os << "Function folding resulted in " << status << " return values, but only "
-                << maxresults << " " << (maxresults==1 ? "is" : "are") << " used";
+                << maxresults << " used";
             ft.warn(call, os.str().c_str());
             status = maxresults;
         }
@@ -1143,7 +1162,7 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
     else
     {
         // TODO: Make it so that the function can return a warning or an error to display and handle here
-        ft.error(call, "Function folding failed with an error");
+        call->setError(ft.sp(), "Function folding failed with an error");
     }
 
     argspace.dealloc(ft.gc());
@@ -1170,15 +1189,15 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     {
         std::ostringstream os;
         os << "type has no operator '" << opname << "'";
-        ft.error(node, os.str().c_str());
+        node->setError(ft.sp(), os.str().c_str());
         return false;
     }
-    const DFunc *func = opr->asFunc();
+    const DFunc *func = opr->asFunc(); // FIXME: resolve call op
     if(!func)
     {
         std::ostringstream os;
         os << "type's '" << opname << "' is not a function";
-        ft.error(node, os.str().c_str());
+        node->setError(ft.sp(), os.str().c_str());
         return false;
     }
 
@@ -1250,7 +1269,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             {
                 std::ostringstream os;
                 os << "Failed to resolve external symbol '" << ft.str(e->name) << '\'';
-                ft.error(node, os.str().c_str());
+                node->setError(ft.sp(), os.str().c_str());
             }
             return;
         }
@@ -1293,12 +1312,12 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 
             if(!ns->isconst())
             {
-                ft.error(node, "Namespace must be compile-time known");
+                node->setError(ft.sp(), "Namespace must be compile-time known");
                 return;
             }
             if(!key->isconst())
             {
-                ft.error(node, "Namespaced identifier must be compile-time known");
+                node->setError(ft.sp(), "Namespaced identifier must be compile-time known");
                 return;
             }
 
@@ -1306,12 +1325,12 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             Val keyval = key->asVal();
             if(!nstype)
             {
-                ft.error(ns, "Namespace must be a type");
+                node->setError(ft.sp(), "Namespace must be a type");
                 return;
             }
             if(keyval.type != PRIMTYPE_STRING)
             {
-                ft.error(ns, "Namespaced identifier must be a string");
+                node->setError(ft.sp(), "Namespaced identifier must be a string");
                 return;
             }
 
@@ -1329,7 +1348,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                 if(!nss)
                     nss = "(unnamed)";
                 os << "Failed to resolve namespaced symbol " << nss << "::" << nss;
-                ft.error(node, os.str().c_str());
+                node->setError(ft.sp(), os.str().c_str());
                 return;
             }
         }
@@ -1371,7 +1390,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                             {
                                 std::ostringstream os;
                                 os << "Attempt to use a value as variable '" << ft.str(v->name) << "' type that is not a type";
-                                ft.error(te, os.str().c_str());
+                                te->setError(ft.sp(), os.str().c_str());
                             }
                         }
                         else
@@ -1406,7 +1425,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                     {
                         std::ostringstream os;
                         os << "Getting " << nv.n << " values, but " << N << " are needed";
-                        ft.error(node, os.str().c_str());
+                        node->setError(ft.sp(), os.str().c_str());
                         return;
                     }
                     else if(nv.n > N)
@@ -1423,7 +1442,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                         // TODO: allow this when the tail ones are optionals?
                         std::ostringstream os;
                         os << "Getting " << nv.n << " or more values, but " << N << " are needed";
-                        ft.error(node, os.str().c_str());
+                        node->setError(ft.sp(), os.str().c_str());
                         return;
                     }
                     else if(nv.n > N)
@@ -1441,7 +1460,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             size_t numconstval = 0;
             for(size_t i = 0; i < exprs.n; ++i)
             {
-                const MLNode *e = &exprs.ch[i];
+                MLNode *e = &exprs.ch[i];
                 NumValuesResult eres = numResultValues(e, ft);
                 Type t = e->type();
                 assert(eres.n >= 1);
@@ -1505,16 +1524,31 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 
     }
 
+    assert(mlirIsStmt((MLCmd)node->m.cmd));
+
     // If expr, Should have early-returned. If not, type analysis failed.
     // If stmt, that has no type.
     node->x.exprtype = PRIMTYPE_NOTYPE;
 }
 
-void MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
+static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud)
+{
+    MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    MLPreVisitResult res = { VISIT_CONTINUE, 0 };
+
+    if(node->m.cmd == _ML_ERROR)
+        ft.error(node, ft.str(node->m.p[0]).s);
+
+    return res;
+}
+
+bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
 {
     MLFoldTracker ft = { *this, vm, syms, env, true };
     ft.typesrc.resize(nodes.size());
     preFoldExternals(externals.data(), externals.size(), ft);
     preFoldVars(vars.data(), vars.size(), ft);
     visit(foldPre, foldPost, &ft);
+    visit(foldPreErrorCheck, NULL, &ft); // needs no post
+    return ft.errors.empty();
 }
