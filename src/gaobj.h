@@ -67,39 +67,6 @@ public:
 inline Type DObj::dynamicType() const { return dtype->tid; }
 
 
-
-// C leaf function; fastest to call but has some restrictions:
-// - Non-variadic, max(#parameters, #retvals) must be <= MINSTACK
-// - The VM will not try to allocate extra stack, MINSTACK has to suffice
-// - Read args from inout[0..], write return values to inout[0..]
-// - Must NOT call back into the VM (no call frame is pushed)
-// - Can not reallocate the VM stack
-// - Can't have upvalues
-// - You need to know the number of parameters and return values,
-//   and the function must be registered correctly so the VM
-//   and type system know this too.
-// - Stack space is limited; up to MINSTACK usable slots total
-// - Return how many values the function should return, or any RTError to throw a runtime error
-// - To cause a runtime error, return any of RTError < 0
-typedef int (*LeafFunc)(VM *vm, Val inout[]);
-
-
-
-// Full-fledged C function; slower to call
-// - May or may not be variadic (params, return values, or both)
-// - Calling back into the VM is allowed
-// - Can grow the stack
-// - Can have upvalues
-// ---- C function call protocol: ----
-// - Parameters are in inout[0..nargs)
-// - Write return values to inout[0..N), then return N (there will be enough space pre-allocated)
-// - If variadic returning N values: in the function, do this:
-//     inout = vm->stack_ensure(inout, N);
-//   Then proceed as above.
-// - To cause a runtime error, return a RTError value < 0
-typedef int (*CFunc)(VM *vm, size_t nargs, Val *inout, Val *upvals);
-
-
 struct FuncInfo
 {
     Type rettype; // type list of return values

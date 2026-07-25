@@ -382,6 +382,7 @@ OperatorId Lexer::TokenToUnOp(TokenType tok)
         case TOK_EXCL: return OP_UNOT;
         case TOK_TILDE: return OP_UBITNOT;
         case TOK_HASH: return OP_ULEN;
+        case TOK_QQM: return OP_QQM;
     }
 
     assert(false);

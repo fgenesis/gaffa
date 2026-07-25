@@ -1177,12 +1177,22 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     size_t arity = GetOperatorArity(opid);
     assert(arity);
     assert(node->numchildren() == arity);
-    const char *opname = GetOperatorName(opid);
-    Str name = ft.putstr(opname);
 
     // Left side of a binary operator defines the namespace it's looked up in
     Type ns = L->type();
     assert(ns != PRIMTYPE_AUTO); // We're post-folding, type should be resolved at this point
+
+    if(opid == OP_QQM)
+    {
+        node->x.exprtype = ns | TYPEBIT_OPTIONAL;
+        return true;
+    }
+
+    // Operator is unary or binary operator that resolves to a function (__op_*)
+
+    const char *opname = GetOperatorName(opid);
+    Str name = ft.putstr(opname);
+
 
     const Val *opr = ft.env.lookupInNamespace(ns, name.id);
     if(!opr)
@@ -1192,7 +1202,7 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         node->setError(ft.sp(), os.str().c_str());
         return false;
     }
-    const DFunc *func = opr->asFunc(); // FIXME: resolve call op
+    const DFunc *func = opr->asFunc(); // FIXME: resolve __op_call
     if(!func)
     {
         std::ostringstream os;

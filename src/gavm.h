@@ -4,7 +4,6 @@
 #include "typing.h"
 #include <vector>
 
-struct VmIter;
 struct DType;
 struct VM;
 struct VMP;
@@ -14,30 +13,6 @@ struct Runtime;
 enum
 {
     MINSTACK = 16
-};
-
-// advance iterator; old value is in val and updated to new value
-// continue iteration until this returns 0
-typedef uint (*IterAdv)(ValU& val, VmIter& it);
-
-struct VmIter
-{
-    IterAdv next;
-
-    union
-    {
-        struct
-        {
-            _AnyValU end, step;
-            ValU start;
-        } numeric;
-
-        struct
-        {
-            tsize i;
-            GCobj *obj;
-        } index;
-    } u;
 };
 
 struct VMCallFrame
@@ -92,7 +67,6 @@ struct VM
     VMCallFrame cur; // Saved call frame when yielding
     Val *_stkbase, *_stkend;
     std::vector<VMCallFrame> callstack;
-    std::vector<VmIter> iterstack;
 
     struct
     {
@@ -153,6 +127,18 @@ struct Imm_3xu32
     u32 a, b, c;
 };
 
+union Imm_4xs16
+{
+    s16 a, b, c, d;
+    s16 arr[4];
+};
+
+union Imm_2xs16
+{
+    s16 a, b;
+    s16 arr[2];
+};
+
 struct Imm_4xu32
 {
     u32 a, b, c, d;
@@ -160,6 +146,12 @@ struct Imm_4xu32
 struct Imm_uint
 {
     uint a; // 32 or 64 bit depending on arch
+};
+
+struct Imm_Iterf
+{
+    LeafFunc iterf;
+    u32 a;
 };
 
 template<typename T>
@@ -184,8 +176,8 @@ static FORCEINLINE size_t immslots(const T *imm)
 // Invariant: Each Inst array ends with an entry that has func=NULL,
 // and gfunc holds the object that contains this instruction array.
 
-#define VMPARAMS const Inst *ins, VM * const vm, Val *sbase, Val *sp
-#define VMARGS ins, vm, sbase, sp
+#define VMPARAMS const Inst *ins, int C, Val *sp, VM * const vm, Val *sbase
+#define VMARGS ins, C, sp, vm, sbase
 
 // Inst and OpFunc are kinda the same, but a C function typedef can't use
 // itself as a function parameter
@@ -241,6 +233,10 @@ VMFUNC_DEF(callany);
 #define FORWARD(a) do { imm += (a); CHAIN(nextop); } while(0)
 
 #define LOCAL(i) (&sbase[i])
+
+// Signalling value for an iteration to end (when C == ITER_END)
+// This has to be exactly 2, any other value may crash.
+enum  { ITER_END = 2 };
 
 
 typedef size_t (*OpGenFunc)(void *dst, const u32 *argslots);

@@ -103,7 +103,7 @@
 --uint x, y = 1, 2
 --uint z = x+y
 uint z = 1+2
---return ??z
+return ??z
 
 --return x+y, "hi"
 

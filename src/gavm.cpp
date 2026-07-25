@@ -678,182 +678,31 @@ VMFUNC_IMM(loadkui32, Imm_2xu32)
     NEXT();
 }
 
-static VmIter *newiter(VM *vm)
-{
-    vm->iterstack.emplace_back();
-    return &vm->iterstack.back();
-}
-
-static uint iter_adv_ui_forward(ValU& v, VmIter& it)
-{
-    const uint i = v.u.ui + it.u.numeric.step.ui;
-    v.u.ui = i;
-    return i < it.u.numeric.end.ui; // FIXME
-}
-static uint iter_adv_ui_backward(ValU& v, VmIter& it)
-{
-    const uint i = v.u.ui - it.u.numeric.step.ui;
-    v.u.ui = i;
-    return i > it.u.numeric.end.ui; // FIXME
-}
-static uint iter_init_ui(ValU& v, VmIter& it)
-{
-    v = it.u.numeric.start;
-    if(it.u.numeric.step.si >= 0)
-    {
-        it.next = iter_adv_ui_forward;
-        return v.u.ui < it.u.numeric.end.ui;
-    }
-
-    it.u.numeric.step.si = -it.u.numeric.step.si;
-    it.next = iter_adv_ui_backward;
-    return v.u.ui > it.u.numeric.end.ui;
-}
-
-static uint iter_adv_f_forward(ValU& v, VmIter& it)
-{
-    const real i = v.u.f + it.u.numeric.step.f;
-    v.u.f = i;
-    return i < it.u.numeric.end.f;
-}
-static uint iter_adv_f_backward(ValU& v, VmIter& it)
-{
-    const real i = v.u.f + it.u.numeric.step.f;
-    v.u.f = i;
-    return i > it.u.numeric.end.f; // FIXME
-}
-static uint iter_init_f(ValU& v, VmIter& it)
-{
-    v = it.u.numeric.start;
-    if(it.u.numeric.step.f >= 0)
-    {
-        it.next = iter_adv_f_forward;
-        return v.u.f < it.u.numeric.end.f;
-    }
-
-    it.next = iter_adv_f_backward;
-    return v.u.f > it.u.numeric.end.f;
-}
-
-// This is for when we know all values have the correct type
-static VmIter *setupiter(VM *vm, const Val *sp, const Imm_3xu32 *imm)
-{
-    VmIter *it = newiter(vm);
-    it->u.numeric.start = sp[imm->a];
-    it->u.numeric.end = sp[imm->b].u;
-    it->u.numeric.step = sp[imm->c].u;
-    return it;
-}
-
-VMFUNC_IMM(iter1_ui, Imm_3xu32)
-{
-    VmIter *it = setupiter(vm, sp, imm);
-    it->next = iter_init_ui;
-    NEXT();
-}
-
-VMFUNC_IMM(iter1_f, Imm_3xu32)
-{
-    VmIter *it = setupiter(vm, sp, imm);
-    it->next = iter_init_f;
-    NEXT();
-}
-
 static Inst *error()
 {
     assert(false);
     return NULL;
 }
 
-static void typeerror(tsize is, tsize shouldbe)
+static void typeerror(Type is, tsize shouldbe)
 {
     assert(false);
 }
 
-static void checktype(tsize is, tsize shouldbe)
+static void checktype(Type is, tsize shouldbe)
 {
     if(is != shouldbe)
         typeerror(is, shouldbe);
 }
 
-/*
-// Unsafe variant where we get 3 values and need to typecheck
-VMFUNC_IMM(iter1_any, Imm_3xu32)
+static FORCEINLINE void knowntype(const Val *v, PrimType shouldbe)
 {
-    VmIter *it = setupiter(vm, sp, imm);
-    const tsize t = it->u.numeric.cur.type.id;
-    const tsize t2 = sp[imm->b].v.type.id;
-    const tsize t3 = sp[imm->c].v.type.id;
-    switch(t)
-    {
-        case PRIMTYPE_UINT:
-        case PRIMTYPE_SINT:
-        case PRIMTYPE_FLOAT:
-            checktype(t2, t);
-            if(t == PRIMTYPE_FLOAT)
-            {
-                it->next = it->u.numeric.cur.u.f >= 0 ? iter_adv_f_incr : iter_adv_f_decr;
-                checktype(t3, t);
-            }
-            else // must be some int
-            {
-                it->next = iter_adv_i;
-                if(!(t3 == PRIMTYPE_UINT || t3 == PRIMTYPE_SINT))
-                    typeerror(t3, t);
-            }
-            break;
-        default:
-            error(); // TODO NOT NUMERIC
-    }
-    NEXT();
+    assert(v->type == shouldbe);
 }
-*/
-
-VMFUNC_IMM(iterpack, Imm_u32)
+static FORCEINLINE void knowntype(const Val& v, PrimType shouldbe)
 {
-    // TODO: pack some iters into object
-
-    // pop iters
-    vm->iterstack.resize(vm->iterstack.size() - imm->a);
-    NEXT();
+    assert(v.type == shouldbe);
 }
-
-VMFUNC_IMM(iterpop, Imm_u32)
-{
-    vm->iterstack.resize(vm->iterstack.size() - imm->a);
-    NEXT();
-}
-
-VMFUNC_IMM(iternext, Imm_3xu32)
-{
-    const u32 niters = imm->a;
-    const u32 firstlocal = imm->b;
-    VmIter * const iters = &vm->iterstack.back() - niters + 1;
-    for(u32 i = 0; i < niters; ++i)
-        if(!iters[i].next(sp[firstlocal + i], iters[i]))
-            NEXT();
-
-    // Jump back
-    ins -= imm->c;
-    CHAIN(rer);
-}
-
-/* Iteration protocol:
-for(int x = 1..5; Thing t = ...) {}
-
-    // Push 3 iterators
-    iter x
-    iter y
-    iter z
-    jf next
-loop:
-    ... LOOP BODY HERE ...
-    on break, goto end
-next:
-    iternext 3 xx ->loop
-end:
-    iterpop 3
-*/
 
 VMFUNC_IMM(addui, Imm_2xu32)
 {
@@ -861,19 +710,99 @@ VMFUNC_IMM(addui, Imm_2xu32)
     NEXT();
 }
 
-// Simple, integer-only loop
-VMFUNC_IMM(simplenext, Imm_3xu32)
+VMFUNC_IMM(sint_cmp, Imm_2xu32)
 {
-    Val *ctr = LOCAL(imm->a);
-    const uint limit = LOCAL(imm->b)->u.ui;
-    if(++ctr->u.ui < limit)
-    {
-        ins -= imm->c;
-        CHAIN(rer);
-    }
-
+    Val *va = LOCAL(imm->a);
+    Val *vb = LOCAL(imm->b);
+    sint a = va->u.si;
+    sint b = vb->u.si;
+    C = ValCmp(a, b);
     NEXT();
 }
+
+// Simple, branch-free two-way jump:
+// Jump to imm.a if C == 0
+// Jump to imm.b if C != 0
+// Don't use this to construct loops, since it doesn't CHAIN(rer).
+VMFUNC_IMM(jz, Imm_2xs16)
+{
+    ins += imm->arr[C & 1];
+    NEXT();
+}
+
+// Branch-free 3-way jump, with different targets depending on C.
+// This is ok to construct loops.
+VMFUNC_IMM(jleg, Imm_4xs16)
+{
+    ins += imm->arr[C + 1];
+    CHAIN(rer);
+}
+
+// Universal for loop end instruction
+VMFUNC_IMM(forloop, Imm_u32)
+{
+	if(LIKELY(C != ITER_END)) // Assume we go back up.
+		CHAIN(jb);
+    C = 0; // Make sure that the next forloop() instruction isn't taken by accident
+    NEXT();
+}
+
+// An iteration step must set C = ITER_END when the iterator has
+// run out of elements.
+// Otherwise, C must not be touched.
+VMFUNC_IMM(fornext_uint1, Imm_u32)
+{
+	Val *v = LOCAL(imm->a);
+    knowntype(v[0], PRIMTYPE_UINT);
+    knowntype(v[1], PRIMTYPE_UINT);
+	if(!(v[0].u.ui++ < v[1].u.ui))
+		C = ITER_END;
+	NEXT();
+}
+
+// When the iteration function is a compile-time known
+// light C func, this shortcut is as fast as it gets
+VMFUNC_IMM(fornext_leaf, Imm_Iterf)
+{
+	Val *v = LOCAL(imm->a);
+    // TODO: check for error?
+	if(imm->iterf(vm, v) <= 0) // Any exception is treated as end-of-loop
+		C = ITER_END;
+	NEXT();
+}
+
+// IDEA: Implement end-of-iteration on the script side
+// with a noreturn function, that when called, sets C = ITER_END
+// and returns until we hit a for scope
+
+// Actually script function iterators should be coroutines
+
+VMFUNC(fornext_dynamic_resume)
+{
+    // TODO: set C, set ins
+    NEXT();
+}
+
+// When the iteration function is dynamic, it becomes a regular call
+VMFUNC_IMM(fornext_dynamic, Imm_u32)
+{
+	Val *v = LOCAL(imm->a);
+    // TODO: call v[-1] with v[0..] as params
+    // ins = ...
+	NEXT();
+}
+
+// Specialized for(uint i = x..N) with N being a comptime constant
+VMFUNC_IMM(forloop_uint1_fixed, Imm_3xu32)
+{
+    Val *vi = LOCAL(imm->b);
+    knowntype(vi, PRIMTYPE_UINT);
+	if(LIKELY(vi->u.ui++ < imm->c)) // Assume we go back up.
+		CHAIN(jb);
+    NEXT();
+}
+
+
 
 VMFUNC(halt)
 {
@@ -951,6 +880,7 @@ static int vm_runloop(VM *vm)
         // funcparam upon return it needs to be saved there and restored here.
         Val * const sbase = vm->cur.sbase; // This is changed by calls, return, and unwind
         Val * const sp = vm->cur.sp;
+        int C = 0; // Could be uninitialized
         ins = op_curop(VMARGS);
         // We end up here on rer, yield, or error. Most likely a rer.
         // In that case just loop around since we got the next instruction

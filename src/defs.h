@@ -17,6 +17,7 @@ typedef uint32_t realui;
 // fixed-size types
 typedef int32_t s32;
 typedef uint32_t u32;
+typedef int16_t s16;
 typedef uint16_t u16;
 typedef unsigned char byte;
 
@@ -139,6 +140,7 @@ struct DType;
 struct DFunc;
 struct SymTable;
 struct DObj;
+struct VM;
 
 enum
 {
@@ -282,11 +284,16 @@ enum OperatorId
     OP_GETINDEX,
     OP_SETINDEX,
     OP_GETINDEXOPT,
+
+    // other
     OP_CALL,
 
     _OP_MAX_FUNC,
     
+    // Any operator past the limit is not encoded as an operator function (__op_add, ...)
+    // and has no such name.
     OP_QQM = _OP_MAX_FUNC,
+    OP_UNWRAP,
 
     _OP_MAX
 };
@@ -302,3 +309,36 @@ enum VisitResult
     VISIT_NOREC, // Break recursion, but call post
     VISIT_ABORT, // Don't even call post
 };
+
+
+// C leaf function; fastest to call but has some restrictions:
+// - Non-variadic, max(#parameters, #retvals) must be <= MINSTACK
+// - The VM will not try to allocate extra stack, MINSTACK has to suffice
+// - Read args from inout[0..], write return values to inout[0..]
+// - Must NOT call back into the VM (no call frame is pushed)
+// - Can not reallocate the VM stack
+// - Can't have upvalues
+// - You need to know the number of parameters and return values,
+//   and the function must be registered correctly so the VM
+//   and type system know this too.
+// - Stack space is limited; up to MINSTACK usable slots total
+// - Return how many values the function should return, or any RTError to throw a runtime error
+// - To cause a runtime error, return any of RTError < 0
+typedef int (*LeafFunc)(VM *vm, Val inout[]);
+
+
+
+// Full-fledged C function; slower to call
+// - May or may not be variadic (params, return values, or both)
+// - Calling back into the VM is allowed
+// - Can grow the stack
+// - Can have upvalues
+// ---- C function call protocol: ----
+// - Parameters are in inout[0..nargs)
+// - Write return values to inout[0..N), then return N (there will be enough space pre-allocated)
+// - If variadic returning N values: in the function, do this:
+//     inout = vm->stack_ensure(inout, N);
+//   Then proceed as above.
+// - To cause a runtime error, return a RTError value < 0
+typedef int (*CFunc)(VM *vm, size_t nargs, Val *inout, Val *upvals);
+
