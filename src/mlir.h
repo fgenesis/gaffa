@@ -15,13 +15,15 @@ enum MLCmd
 {
     ML_LIST = 0,        // always stmt
 
-    // Operators first. These are known to be unary or binary, so either 1 or 2 child nodes follow. Never lists.
+    // Operators first. These are known to be unary or binary, so either 1 or 2 child nodes follow.
+    // Never lists for regular operators.
+    // In case of OP_CALL, the rhs may be a list of params.
     _ML_OP_FIRST = 1,   // always expr
     _ML_OP_MAX = _OP_MAX,
 
                         // kind (#params) [#children] <byte a>
 
-    ML_CONST = 32,      // expr (1, const table idx)
+    ML_CONST = 33,      // expr (1, const table idx)
     ML_VAR,             // expr (1, local table idx)
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
@@ -33,7 +35,6 @@ enum MLCmd
     ML_FOR,             // stmt (0) [2, decls, block]
     ML_GETINDEX,        // expr (0) [2, obj, key]
     ML_GETNS,           // expr (0) [2, ns, key]
-    ML_FNCALL,          // expr (0) [2, funcexpr, paramexprs]
     ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs]
     ML_FUNC,            // expr (1, locals start) [3, argtypes, rettypes, block]
     ML_RETURN,          // stmt (0) [1, exprs]
@@ -102,7 +103,8 @@ union MLNode
         u32 p[2];
         u32 chOffs; // must be usable together with hl.node, HL_LIST, others. _ML_VAL conflicts.
         byte cmd;
-        // 3 unused bytes
+        byte nch;   // number of direct child nodes. Optional, but makes LLIR generation easier.
+        // 2 unused bytes
     } m;
     struct
     {

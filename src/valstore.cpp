@@ -22,10 +22,10 @@ ValStore::~ValStore()
     vals.dealloc(gc);
 }
 
-u32 ValStore::put(ValU v)
+tsize ValStore::put(ValU v)
 {
-    const size_t N = vals.size();
-    for(size_t i = 0; i < N; ++i) // FIXME: Make this smarter than a dumb linear search
+    const tsize N = vals.size();
+    for(tsize i = 0; i < N; ++i) // FIXME: Make this smarter than a dumb linear search
     {
         if(vals[i] == v)
             return i;

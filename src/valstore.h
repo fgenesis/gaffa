@@ -14,7 +14,7 @@ class ValStore
 public:
     ValStore(GC& gc);
     ~ValStore();
-    u32 put(ValU v);
+    tsize put(ValU v);
 
     void serialize(BufSink *sk, const StringPool& sp) const;
 

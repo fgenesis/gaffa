@@ -141,7 +141,6 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_ASSIGN:
         case ML_WHILE:
         case ML_FOR:
-        case ML_FNCALL:
         case ML_GETINDEX:
         case ML_GETNS:
         case ML_CALLADJ:
@@ -620,7 +619,7 @@ dolist:
             return;
 
         case HLNODE_CALL:
-            _setupChDefault(q, dst, hl, ML_FNCALL);
+            _setupChDefault(q, dst, hl, (MLCmd)OP_CALL);
             return;
 
         case HLNODE_MTHCALL:
@@ -993,7 +992,7 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
         case ML_LIST:
             return numResultValuesOfList(node->firstChild(), node->numchildren(), ft);
 
-        case ML_FNCALL:
+        case OP_CALL:
         {
             assert(false); // TODO -- ideally we have a folded function at this point that already has its types deduced
         }
@@ -1507,7 +1506,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         }
         break;
 
-        case ML_FNCALL:
+        case OP_CALL:
         {
             MLNode *funcexpr = node->firstChild();
             assert(funcexpr->m.cmd != ML_LIST);
@@ -1545,9 +1544,12 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
 {
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
     MLPreVisitResult res = { VISIT_CONTINUE, 0 };
+    const MLCmd cmd = (MLCmd)node->m.cmd;
 
     if(node->m.cmd == _ML_ERROR)
         ft.error(node, ft.str(node->m.p[0]).s);
+    else
+        node->m.nch = mlirNumChildren(cmd); // Annotate for the LLIR stage
 
     return res;
 }

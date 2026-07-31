@@ -289,7 +289,7 @@ enum OperatorId
     OP_CALL,
 
     _OP_MAX_FUNC,
-    
+
     // Any operator past the limit is not encoded as an operator function (__op_add, ...)
     // and has no such name.
     OP_QQM = _OP_MAX_FUNC,
