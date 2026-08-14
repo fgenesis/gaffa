@@ -28,7 +28,6 @@ enum MLCmd
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
     ML_DECL,            // stmt (1, local start) [2, typeexprs, exprs] -- num of vars = #typeexprs
-    ML_CLOSE,           // stmt (2, local start, N)
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
     ML_WHILE,           // stmt (0) [2, cond, block]
@@ -168,6 +167,7 @@ struct MLVar
         ValU val; // if kind == CONSTVAL, this is the value, and the type
         struct
         {
+            _AnyValU _pad;
             Type type; // PRIMTYPE_AUTO if unknown
         } local;
     } u;

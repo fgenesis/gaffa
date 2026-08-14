@@ -264,21 +264,3 @@ static size_t writeInst(void *p, VMFunc f, const T& imm)
     ((S*)p)->imm = imm;
     return sizeof(S);
 }
-
-struct LocalTracker
-{
-    // Alloc one slot for a local variable
-    u32 allocSlot();
-    void freeSlot(u32);
-
-    // Alloc contiguous array of slots, returns first index
-    u32 allocSlots(u32 n);
-    void freeSlots(u32 first, u32 n);
-
-private:
-    Heap<u32> _h;
-    u32 _max;
-    GC& gc;
-
-    void _shorten();
-};

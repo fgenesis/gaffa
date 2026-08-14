@@ -802,6 +802,25 @@ VMFUNC_IMM(forloop_uint1_fixed, Imm_3xu32)
     NEXT();
 }
 
+VMFUNC_IMM(jnv, Imm_2xu32) // used when src var is immutable (simple check; can't re-assign so the var is just an alias)
+{
+	Val *v = LOCAL(imm->a);
+	if(!v->isValidValue())
+		ins += imm->b;
+	NEXT();
+}
+
+VMFUNC_IMM(juo, Imm_3xu32) // when src var is mutable (value is copied in case src var is re-assigned)
+{
+	Val *src = LOCAL(imm->a);
+	Val *dst = LOCAL(imm->b);
+	*dst = *src;
+	if(!src->isValidValue())
+		ins += imm->c;
+	NEXT();
+}
+
+
 
 
 VMFUNC(halt)
@@ -1058,55 +1077,4 @@ Val* VM::prepareArgs(size_t n)
 const Val* VM::getReturns()
 {
     return state >= 0 ? cur.sbase : NULL;
-}
-
-u32 LocalTracker::allocSlot()
-{
-    u32 x = _h.size() ? _h.pop() : _max + 1;
-    if(x > _max)
-        _max = x;
-    return x;
-}
-
-void LocalTracker::freeSlot(u32 x)
-{
-    assert(x < _max);
-    if(x == _max-1) // Need to find a new maximum?
-    {
-        _shorten();
-        return;
-    }
-    _h.push(gc, x);
-}
-
-u32 LocalTracker::allocSlots(u32 n)
-{
-    u32 x = _max;
-    _max += n;
-    return x;
-}
-
-void LocalTracker::freeSlots(u32 first, u32 n)
-{
-    assert(n && n <= _h.size());
-    u32 end = first + n;
-    if(end == _max) // Need to find a new maximum?
-    {
-        _shorten();
-        return;
-    }
-    for(size_t i = 0; i < n; ++i)
-        _h.push(gc, first + i);
-}
-
-void LocalTracker::_shorten()
-{
-    u32 maxval = 0;
-    for(size_t i = 0; i < _h.size(); ++i)
-    {
-        u32 v = _h.a[i];
-        if(maxval < v)
-            maxval = v;
-    }
-    _max = maxval;
 }

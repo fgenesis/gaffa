@@ -233,6 +233,9 @@ struct Val : public ValU
     const SymTable *asSymTab() const;
     const DObj     *asDObj() const;
     const DType    *asDType() const;
+
+    // To check optional validity. false if nil or error.
+    inline bool isValidValue() const { return type > PRIMTYPE_ERROR; }
 };
 
 // Size of an element of type t, when multiple elements of this type are stored in an array

@@ -9,7 +9,8 @@ union MLNode;
 // In the low-level representation, as much as possible is lowered to function calls.
 // Not intended for execution in this stage, even though it would be possible to implement an interpreter for this.
 // This adopts some design decisions of the actual VM to make code generation easier, but is probably not optimal
-// for JITting. This is particularly obvious in the selection of jump opcodes, and the presence of C.
+// for JITting. This is particularly obvious in the selection of jump opcodes, and the presence of the C register.
+// (Then again, most architectures have processor flags in some form, which is kinda the same)
 //
 // In the MLIR -> LLIR step, the following gets lost:
 // - Type infos
@@ -35,6 +36,7 @@ enum LLCmd
     LL_MOV,         // R.dst R.src  (move between regs)
     LL_SETUPVAL,    // U.dst R.src
     LL_GETUPVAL,    // R.dst U.src
+    LL_MOVUPVAL,    // U.dst U.src
     LL_CLOSEUPVAL,  // U.idx
     LL_TYPECHECK,   // R K.typeidx
     LL_RET,         //
@@ -65,6 +67,31 @@ struct LLIns
     u16 p[3];
 };
 
+struct LLVar
+{
+    /*enum Flags
+    {
+        MUTABLE       = 0x01,
+        USED_AS_UPVAL = 0x02
+    };
+    u32 flags;*/
+    //u32 localslot;
+    //int upvalslot; // Default -1. If used as upval, this is >= 0
+    const DType *dtype;
+    const MLVar *mlvar;
+};
+
+struct LLVarRef
+{
+    tsize slot;
+    bool upval;
+};
+
+struct LLIters
+{
+    void emitAdvanceAndLoop(u32 labelid); // advance iters, than loop back to labelid if the loop continues
+};
+
 /*struct LLIns_aB
 {
     u16 cmd;
@@ -72,9 +99,18 @@ struct LLIns
     u32 B;
 };*/
 
+
+
+// A low-level codegen operates on a single function. Any closure inside of a function spawns a new LLCodegen.
+// TODO: store locals as MLVar*[]? upvals too?
+//
+
+a
+
 class LLCodegen
 {
 public:
+    LLCodegen(const MLIR& mlir);
     typedef u32 Reg;
     typedef u32 Const;
     typedef u32 Upv;
@@ -93,11 +129,18 @@ public:
         inline operator LabelId() const { return id; }
     };
 
+    struct FuncScopeData
+    {
+        u32 nextLocalSlot;
+        u32 nextUpvalSlot;
+    };
+
     inline Label label()                                  { return Label(this, nextlabel++); }
     inline LabelId labelhere()                            { return _label(nextlabel++); }
     inline LabelId _label(LabelId id)                     { emit(LL_LABEL, id); return id; }
     inline void loadk(Reg dst, Const c)                   { emit(LL_LOADK, c); }
     inline void mov(Reg dst, Reg src)                     { emit(LL_MOV, dst, src); }
+    inline void movupval(Upv dst, Upv src)                { emit(LL_MOVUPVAL, dst, src); }
     inline void setupval(Upv u, Reg src)                  { emit(LL_SETUPVAL, u, src); }
     inline void getupval(Reg dst, Upv u)                  { emit(LL_GETUPVAL, dst, u); }
     inline void closeupval(Upv u)                         { emit(LL_CLOSEUPVAL, u); }
@@ -119,29 +162,58 @@ public:
 
     // helpers
     void load(Reg dst, const Val& v); // put in constant table if necessary, emit loadk()
-    void lower(const MLNode& ml);
+    void generate(const MLNode& ml);
     void conditionAndJumpOnFail(const MLNode& ml, LabelId fail);
-    void conditionAndJumpOnSuccess(const MLNode& ml, LabelId success);
+    //void conditionAndJumpOnSuccess(const MLNode& ml, LabelId success);
+
+    LLVar *allocVars(size_t n);
 
     // TODO: assignment helper that emits typecheck if necessary (and picks correct mov, getupval, setupval, etc)
 
+    struct Scope
+    {
+        Scope(LLCodegen *gen, u32 reason)
+            : prevTotalLocals(gen->vars.size()), reason(reason), endlabel(0), prevscope(gen->funcscope)
+        {}
+
+        void close(LLCodegen *gen);
+        LabelId getEndLabel(LLCodegen *gen) { if(!endlabel) endlabel = gen->nextlabel++; return endlabel; }
+
+        const tsize prevNumLocals;
+        const u32 reason; // MLCmd
+        LabelId endlabel; // 0 if unused
+        tsize prevTotalLocals;
+        FuncScopeData prevscope;
+    };
 
 
 private:
 
-    unsigned nextlabel;
+    Scope *pushScope(u32 reason);
+    void popScope();
+    void closeUpvalsUntil(tsize idx);
+
+    void emitAssignment(tsize dst, tsize src); // does the correct sequence for locals/upvals or mixed
+    LLVarRef getVarRef(tsize id) const;
+    void loadConstant(u32 idx, Val c);
+    u32 getVarIdxFromMLIdx(u32 mlvar) const;
+
+    void _lower_scopedExplicit(const MLNode& ml, u32 reason);
+    void _lower_scoped(const MLNode& ml);
+    void _lower_inner(const MLNode& ml);
+    size_t _lower_expr(const MLNode& ml, size_t dstidx);
+    LLIters _lower_iters(const MLNode& ml);
+
+    LabelId nextlabel;
+
+    // These are set back to 0 whenever we enter a function, and restored when the function scope is left
+    FuncScopeData funcscope;
+
     PodArray<LLIns> code;
+    PodArray<LLVar> vars;
+    PodArray<Scope> scopes;
+    PodArray<u32> mlvar2idx;
     ValStore consts;
     GC& gc;
-
+    const MLIR& mlir;
 };
-
-class LLIR
-{
-public:
-
-
-private:
-
-};
-

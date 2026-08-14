@@ -81,7 +81,6 @@ static bool mlirIsStmt(MLCmd cmd)
     {
     case ML_NAMEDECL:
     case ML_DECL:
-    case ML_CLOSE:
     case ML_ASSIGN:
     case ML_IFELSE:
     case ML_WHILE:
@@ -106,9 +105,6 @@ static size_t mlirNumParams(MLCmd cmd)
         case ML_FUNC:
             return 1;
 
-        case ML_CLOSE:
-            return 2;
-
         default: ;
     }
 
@@ -125,7 +121,6 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_CONST:
         case ML_VAR:
         case ML_EXT:
-        case ML_CLOSE:
         case _ML_VAL:
             return 0;
 
