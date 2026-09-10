@@ -99,6 +99,17 @@ public:
         return &a[N];
     }
 
+    void move(PodArray<T>& o)
+    {
+        dealloc();
+        ptr = o.ptr;
+        sz = o.sz;
+        cap = o.cap;
+        o.ptr = NULL;
+        o.sz = 0;
+        o.cap = 0;
+    }
+
 private:
     FORCEINLINE T *_chsize(GC& gc, tsize n) { return (T*)PodArrayBase::_chsize(gc, n, sizeof(T)); }
     FORCEINLINE T *_enlarge(GC& gc) { return (T*)PodArrayBase::_enlarge(gc, sizeof(T)); }

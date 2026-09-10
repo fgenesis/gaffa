@@ -21,10 +21,10 @@ enum MLCmd
     _ML_OP_FIRST = 1,   // always expr
     _ML_OP_MAX = _OP_MAX,
 
-                        // kind (#params) [#children] <byte a>
+                        // kind (#params) [#children]
 
-    ML_CONST = 33,      // expr (1, const table idx)
-    ML_VAR,             // expr (1, local table idx)
+    ML_CONST = 33,      // expr (1, consts idx)
+    ML_VAR,             // expr (1, vars idx)
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
     ML_DECL,            // stmt (1, local start) [2, typeexprs, exprs] -- num of vars = #typeexprs
@@ -51,6 +51,7 @@ enum MLCmd
     _ML_EMPTY,
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
+    _ML_UPVAL,          // expr (1, vars idx)
     _ML_UVAR, // Unresolved identifier // special (2, name, symid) // replaced before type analysis
     _ML_UDECL, // Unremapped decl node
     _ML_ERROR, // Error. If encountered after folding, the tree isn't sound and no code can be generated.
@@ -118,6 +119,10 @@ union MLNode
     {
         const HLNode *hlnode; // Temporarily stored during construction
     } tmp;
+    struct
+    {
+        DFunc *f;
+    } func;
 
     MLNode *firstChild();
     const MLNode *firstChild() const;
@@ -153,7 +158,7 @@ struct MLVar
         CVAR,       // Local variable, not mutable
         MUTVAR,     // Local variable, mutable
         // --- not serialized ---
-        CONSTVAL, // During optimization step: When a CVAR was replaced by a constant value
+        CONSTVAL,   // During optimization step: When a CVAR was replaced by a constant value
     };
     Kind kind;
     sref name;
@@ -170,7 +175,7 @@ struct MLVar
             _AnyValU _pad;
             Type type; // PRIMTYPE_AUTO if unknown
         } local;
-    } u;
+    } u; // Arranged so that val.type and local.type overlap
 
     inline bool isMutable() const { return kind == MUTVAR; }
 };
@@ -211,6 +216,7 @@ public:
     bool fold(VM& vm, Symstore& syms, SymTable &env);
 
     size_t indexOf(const MLNode *node) const;
+    size_t indexOf(const MLVar *v) const;
     const MLInfo *infoOf(const MLNode *node) const;
 
     void visit(MLVisitorPre pre, MLVisitorPost post, void *ud);

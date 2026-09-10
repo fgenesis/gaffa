@@ -1,10 +1,10 @@
 #include "llir.h"
 #include <assert.h>
 #include "mlir.h"
+#include "runtime.h"
 
-
-LLCodegen::LLCodegen(GC& gc)
-    : nextlabel(0), consts(gc), gc(gc)
+LLCodegen::LLCodegen(Runtime& rt, const MLIR& mlir)
+    : nextlabel(0), consts(rt.gc), mlir(mlir), _rt(rt)
 {
 }
 
@@ -19,7 +19,7 @@ enum ScopeExt // Values are anything outside the MLCmd range
 
 void LLCodegen::emit(LLCmd cmd, u32 a, u32 b, u32 c)
 {
-    LLIns *z = code.alloc_n(gc, 1); // TODO: handle OOM
+    LLIns *z = code.alloc_n(gc(), 1); // TODO: handle OOM
     z->cmd = cmd;
     z->p[0] = a;
     z->p[1] = b;
@@ -36,17 +36,28 @@ void LLCodegen::load(Reg dst, const Val& v)
     loadk(dst, a);
 }
 
-void LLCodegen::generate(const MLNode& ml)
+LLSection *LLCodegen::generate(const MLNode& ml)
 {
+    assert(ml.m.cmd == ML_FUNC);
+    code.clear();
+
+    int err = 0;
+
     labelhere(); // Initial unused label so that we can simply check for LabelId != 0
     pushScope(SCOPE_ROOTBLOCK);
-    _lower_inner(ml);
+    err = _lower_inner(ml);
     popScope();
+
+    LLSection *sec = gc_new_unmanaged_T<LLSection>(gc());
+    GA_PLACEMENT_NEW(sec) LLSection;
+    sec->code.move(this->code);
+
+    return sec;
 }
 
 LLCodegen::Scope* LLCodegen::pushScope(u32 reason)
 {
-    Scope *s = scopes.alloc_n(gc, 1);
+    Scope *s = scopes.alloc_n(gc(), 1);
     if(s)
         GA_PLACEMENT_NEW(s) Scope(this, reason);
     return s;
@@ -110,6 +121,11 @@ void LLCodegen::_lower_scoped(const MLNode& ml)
     popScope();
 }
 
+int LLCodegen::_initUpvalues(const Val* upvals, size_t nupvals)
+{
+
+}
+
 void LLCodegen::_lower_scopedExplicit(const MLNode& ml, u32 reason)
 {
     pushScope(reason);
@@ -117,7 +133,7 @@ void LLCodegen::_lower_scopedExplicit(const MLNode& ml, u32 reason)
     popScope();
 }
 
-void LLCodegen::_lower_inner(const MLNode& ml)
+int LLCodegen::_lower_inner(const MLNode& ml)
 {
     const size_t nch = ml.m.nch;
     const MLNode *ch = nch ? ml.firstChild() : NULL;
@@ -237,6 +253,8 @@ void LLCodegen::_lower_inner(const MLNode& ml)
 
 
     }
+
+    return 0;
 }
 
 void LLCodegen::loadConstant(u32 idx, Val c)
@@ -250,7 +268,7 @@ u32 LLCodegen::getVarIdxFromMLIdx(u32 mlvar) const
     return mlvar2idx[mlvar];
 }
 
-size_t LLCodegen::_lower_expr(const MLNode & ml, size_t dstidx)
+int LLCodegen::_lower_expr(const MLNode & ml, size_t dstidx)
 {
     assert(false); // TODO
 

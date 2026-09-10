@@ -4,6 +4,8 @@
 #include "array.h"
 #include "valstore.h"
 
+class Runtime;
+
 union MLNode;
 
 // In the low-level representation, as much as possible is lowered to function calls.
@@ -20,18 +22,31 @@ union MLNode;
 //   - Loops become jumps
 //   - Upvalues are tracked as such
 //   - Locals are allocated as slots
-//
+// Notes:
+// - This is call-heavy. Most operations are implemented as calls.
+//   - Math ops
+//   - Indexing, lookup
+//   - Actual function calls
+//   - ... see enum OperatorId
+// - A "call" here is not an actual function call, but a call to a DFunc object
+//   that will resolve to a VM opcode or a regular function call in the next codegen stage.
+// - LLIR is generated per-funtion, and does not cross function boundaries
+
 
 // K: constant
 // R: register
 // U: upvalue
 // L: label
 // C: special temporary comparison result register
+// S: code section
 
 enum LLCmd
 {
     LL_MARKER,      // debug marker
     LL_LABEL,       // L.id  (label & landing pad; jumps can only target labels)
+    LL_CALL,        // K.idx R.dstbase R.argbase  (call constant)
+    LL_CALLREG,     // R.idx R.dstbase R.argbase  (call indirect)
+    LL_CALLUPVAL,   // U.idx R.dstbase R.argbase  (call upvalue)
     LL_LOADK,       // R.dst K.idx  (reg = load constant)
     LL_MOV,         // R.dst R.src  (move between regs)
     LL_SETUPVAL,    // U.dst R.src
@@ -56,8 +71,7 @@ enum LLCmd
     LL_GETGT,       // R.dst  (reg = C > 0)
     LL_GETLE,       // R.dst  (reg = C <= 0)
     LL_GETGE,       // R.dst  (reg = C >= 0)
-    LL_CALL,        // K.idx R.dstbase R.argbase  (call constant)
-    LL_CALLREG,     // R.idx R.dstbase R.argbase  (call indirect)
+    LL_CLOSURE,     // R.dst S.idx R.upvalbase (load section as function)
     _LL_MAX
 };
 
@@ -67,16 +81,39 @@ struct LLIns
     u16 p[3];
 };
 
+// A section of code is one function, either in its fully compiled form,
+// or as a link to the original MLNode tree if full compilation wasn't possible.
+// If some types are referenced as upvalues, we can only compile the
+// section once the upvalues are known and have a value.
+struct LLSection
+{
+    // If delay-expanded, this is non-NULL.
+    MLIR *mlir;
+    size_t startnode;
+
+    // If everything is pre-compiled, mlir==NULL, and this is filled
+    PodArray<LLIns> code;
+
+    tsize nupvals;
+    tsize nparams;
+    tsize nrets;
+};
+
+class LLModule
+{
+    PodArray<LLSection*> sections;
+};
+
 struct LLVar
 {
-    /*enum Flags
+    enum Flags
     {
         MUTABLE       = 0x01,
         USED_AS_UPVAL = 0x02
     };
-    u32 flags;*/
-    //u32 localslot;
-    //int upvalslot; // Default -1. If used as upval, this is >= 0
+    u32 flags;
+    u32 localslot;
+    int upvalslot; // Default -1. If used as upval, this is >= 0
     const DType *dtype;
     const MLVar *mlvar;
 };
@@ -92,25 +129,22 @@ struct LLIters
     void emitAdvanceAndLoop(u32 labelid); // advance iters, than loop back to labelid if the loop continues
 };
 
-/*struct LLIns_aB
-{
-    u16 cmd;
-    u16 a;
-    u32 B;
-};*/
-
-
 
 // A low-level codegen operates on a single function. Any closure inside of a function spawns a new LLCodegen.
 // TODO: store locals as MLVar*[]? upvals too?
 //
 
-a
-
 class LLCodegen
 {
 public:
-    LLCodegen(const MLIR& mlir);
+    LLCodegen(Runtime& rt, const MLIR& mlir);
+
+    // Attempt to compile a function node into LLIR.
+    // This will return an incomplete section if that isn't possible
+    // due to upvalues that will only be present at runtime.
+    // (This is only for static compilation)
+    LLSection *generate(const MLNode& ml);
+    
     typedef u32 Reg;
     typedef u32 Const;
     typedef u32 Upv;
@@ -162,7 +196,6 @@ public:
 
     // helpers
     void load(Reg dst, const Val& v); // put in constant table if necessary, emit loadk()
-    void generate(const MLNode& ml);
     void conditionAndJumpOnFail(const MLNode& ml, LabelId fail);
     //void conditionAndJumpOnSuccess(const MLNode& ml, LabelId success);
 
@@ -179,7 +212,7 @@ public:
         void close(LLCodegen *gen);
         LabelId getEndLabel(LLCodegen *gen) { if(!endlabel) endlabel = gen->nextlabel++; return endlabel; }
 
-        const tsize prevNumLocals;
+        //const tsize prevNumLocals;
         const u32 reason; // MLCmd
         LabelId endlabel; // 0 if unused
         tsize prevTotalLocals;
@@ -198,11 +231,13 @@ private:
     void loadConstant(u32 idx, Val c);
     u32 getVarIdxFromMLIdx(u32 mlvar) const;
 
-    void _lower_scopedExplicit(const MLNode& ml, u32 reason);
-    void _lower_scoped(const MLNode& ml);
-    void _lower_inner(const MLNode& ml);
-    size_t _lower_expr(const MLNode& ml, size_t dstidx);
+    int _initUpvalues(const Val *upvals, size_t nupvals);
+    int _lower_scopedExplicit(const MLNode& ml, u32 reason);
+    int _lower_scoped(const MLNode& ml);
+    int _lower_inner(const MLNode& ml);
+    int _lower_expr(const MLNode& ml, size_t dstidx);
     LLIters _lower_iters(const MLNode& ml);
+    GC& gc();
 
     LabelId nextlabel;
 
@@ -211,9 +246,11 @@ private:
 
     PodArray<LLIns> code;
     PodArray<LLVar> vars;
+    PodArray<LLVar> upvals;
     PodArray<Scope> scopes;
     PodArray<u32> mlvar2idx;
     ValStore consts;
-    GC& gc;
     const MLIR& mlir;
+
+    Runtime& _rt;
 };

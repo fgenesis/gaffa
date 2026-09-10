@@ -100,6 +100,7 @@ static size_t mlirNumParams(MLCmd cmd)
     {
         case ML_CONST:
         case ML_VAR:
+        case _ML_UPVAL:
         case ML_NAMEDECL:
         case ML_DECL:
         case ML_FUNC:
@@ -120,6 +121,7 @@ static size_t mlirNumChildren(MLCmd cmd)
     {
         case ML_CONST:
         case ML_VAR:
+        case _ML_UPVAL:
         case ML_EXT:
         case _ML_VAL:
             return 0;
@@ -343,6 +345,13 @@ size_t MLIR::indexOf(const MLNode* node) const
     const MLNode *base = nodes.data();
     assert(base <= node && node < base + nodes.size());
     return node - base;
+}
+
+size_t MLIR::indexOf(const MLVar* v) const
+{
+    size_t offs = vars.data() - v;
+    assert(offs < vars.size());
+    return offs;
 }
 
 const MLInfo * MLIR::infoOf(const MLNode * node) const
@@ -1306,6 +1315,12 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                     return;
                 }
             }
+
+            assert(v->decl);
+
+            // Make it an upvalue reference if the var is declared outside of the currrent function
+            if(varid < funcLocalsStart)
+                node->m.cmd = _ML_UPVAL;
         }
         break;
 
