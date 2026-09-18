@@ -80,10 +80,10 @@ struct FuncInfo
         None = 0,
 
         FuncTypeMask = 3 << 0, // lowest 2 bits:
-        LFunc = 0, // light/leaf C function (much more efficient to call)
-        CFunc = 1, // regular/variadic C function
-        GFunc = 2, // bytecode function
-        Proto = 3, // HLNode, not yet folded
+        Proto = 0, // Not yet folded
+        LFunc = 1, // light/leaf C function (much more efficient to call)
+        CFunc = 2, // regular/variadic C function
+        GFunc = 3, // bytecode function
 
         VarArgs = 1 << 2, // set if variadic
         VarRets = 1 << 3,
@@ -139,7 +139,7 @@ struct DFunc : public GCobj
         } gfunc;
     } u;
 
-    Val *upvals;
+    Val *upvals; // FIXME: remove
 
     FuncInfo info;
     // TODO: (DType: Func(Args, Ret))
@@ -152,11 +152,21 @@ struct DFunc : public GCobj
     int call(VM *vm, Val *a) const;
 };
 
+struct DUpval : GCbase
+{
+    static DUpval *GCNew(GC& gc);
+
+    Val *ptr;
+    Val val;
+    inline void close() { val = *ptr; ptr = &val; }
+};
+
 //
 struct DClosure : public GCobj
 {
     static DClosure *GCNew(GC& gc);
 
     DFunc *func;
+    PodArray<DUpval*> upvals;
 };
 

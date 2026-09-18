@@ -104,6 +104,7 @@ static size_t mlirNumParams(MLCmd cmd)
         case ML_NAMEDECL:
         case ML_DECL:
         case ML_FUNC:
+        case _ML_FUNCIDX:
             return 1;
 
         default: ;
@@ -124,6 +125,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case _ML_UPVAL:
         case ML_EXT:
         case _ML_VAL:
+        case _ML_FUNCIDX:
             return 0;
 
         case ML_RETURN:
@@ -846,6 +848,7 @@ struct MLFoldTracker
     std::string filename;
     std::vector<std::string> errors;
     std::vector<u32> typesrc; // x = typesrc[y] -> Which other node x did get node y its type from
+    std::vector<u32> funcStack; // indices in MLIR::funcs[], so that [i-1] encloses [i]
 
     void error(const MLNode *where, const char *msg);
     void warn(const MLNode *where, const char *msg);
@@ -1319,8 +1322,9 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             assert(v->decl);
 
             // Make it an upvalue reference if the var is declared outside of the currrent function
-            if(varid < funcLocalsStart)
-                node->m.cmd = _ML_UPVAL;
+            // FIXME
+            //if(varid < funcLocalsStart)
+            //    node->m.cmd = _ML_UPVAL;
         }
         break;
 
@@ -1511,8 +1515,9 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             // ALL values got replaced by compile-time known constants? Don't need this decl node, kick it.
             // All ML_VAR referenced later that were declared here it will be replaced with constants,
             // so there will be no reference left.
-            if(numconstval == N)
-                node->makedummy();
+            //if(numconstval == N)
+            //    node->makedummy();
+            // ^ DO NOT ELIMINATE DECLS!! post-folding needs it
         }
         break;
 
@@ -1528,9 +1533,37 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         }
         break;
 
+        case ML_WHILE:
+        {
+            MLNode *cond = node->firstChild();
+            if(cond->isconst() && !cond->asVal().isTruthy())
+                node->makedummy();
+        }
+        break;
+
+        case ML_IFELSE:
+        {
+            MLNode *cond = node->firstChild();
+            if(cond->isconst())
+            {
+                MLNode *ifbr = cond + 1;
+                MLNode *elsebr = cond + 2;
+                MLNode *taken = cond->asVal().isTruthy() ? ifbr : elsebr;
+                node->m.cmd = ML_LIST;
+                node->list.len = 1;
+                node->m.chOffs = ft.mlir.indexOf(taken);
+            }
+        }
+        break;
+
         case _ML_UVAR:
             assert(false); // should have been resolved by now
             break;
+
+        /*case ML_FUNC:
+        {
+        }
+        break;*/
 
         default:
             if(cmd < _ML_OP_MAX)
@@ -1552,16 +1585,148 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 
 static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud)
 {
+    // Precondition: The tree has been completely folded (foldPre, foldPost already ran)
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
     MLPreVisitResult res = { VISIT_CONTINUE, 0 };
     const MLCmd cmd = (MLCmd)node->m.cmd;
 
-    if(node->m.cmd == _ML_ERROR)
-        ft.error(node, ft.str(node->m.p[0]).s);
-    else
-        node->m.nch = mlirNumChildren(cmd); // Annotate for the LLIR stage
+    switch(cmd)
+    {
+        case _ML_ERROR:
+            ft.error(node, ft.str(node->m.p[0]).s);
+            break;
+
+        case ML_FUNC:
+        {
+            MLFunc *mf = GA_PLACEMENT_NEW(ft.mlir.funcs.alloc_n(ft.gc(), 1)) MLFunc; // TODO: alloc fail
+            mf->myidx = ft.mlir.indexOf(node);
+
+            // Any function on top of the stack encloses the function created now
+            mf->enclosingFuncIdxPlus1 = !ft.funcStack.empty()
+                ? 0
+                : (ft.funcStack.back() + 1);
+
+            ft.funcStack.push_back(ft.mlir.funcs.size() - 1);
+
+            // Add func params as locals
+            u32 firstvar = node->m.p[0];
+            MLNode *argtypes = node->firstChild();
+            size_t nlocals = argtypes->numchildren();
+            u32 *plocals = mf->locals.alloc_n(ft.gc(), nlocals);
+            for(size_t i = 0; i < nlocals; ++i)
+                plocals[i] = firstvar + i;
+        }
+        break;
+
+        // -- Cases that introduce new local variables --
+
+        case ML_DECL:
+        {
+            u32 firstvar = node->m.p[0];
+            MLFunc& mf = ft.mlir.funcs[ft.funcStack.back()];
+            MLNode *typeexprs = node->firstChild();
+            size_t nvars = typeexprs->numchildren();
+            u32 *plocals = mf.locals.alloc_n(ft.gc(), nvars);
+            for(size_t i = 0; i < nvars; ++i)
+                plocals[i] = firstvar + i;
+        }
+        break;
+
+        default:
+            break; // Nothing to do
+    }
 
     return res;
+}
+
+static tsize addUpvalueReference(MLIR& mlir, MLFunc& f, u32 varidx)
+{
+    // Nothing to do if upvalue is already known as such
+    for(tsize i = 0; i < f.upvals.size(); ++i)
+        if(f.upvals[i].varidx == varidx)
+            return i;
+
+    MLVar &v = mlir.vars[varidx];
+    assert(v.decl);
+
+    MLFunc *enclosing = f.enclosingFuncIdxPlus1 ? &mlir.funcs[f.enclosingFuncIdxPlus1 - 1] : NULL;
+
+    MLUpvalRef ur;
+    ur.varidx = varidx;
+    ur.transient = enclosing && v.decl < enclosing->myidx; // Var declared before enclosing function? It's a transient upvalue.
+
+    if(!ur.transient)
+    {
+        // It's a local. Find the slot.
+        for(size_t i = 0; i < f.locals.size(); ++i)
+            if(f.locals[i] == varidx)
+            {
+                ur.slot = i;
+                goto add;
+            }
+        assert(false); // local not found??
+        ur.transient = true;
+    }
+
+    // The enclosing functions needs to reference this upvalue so we can get it later
+    ur.slot = addUpvalueReference(mlir, *enclosing, varidx);
+
+add:
+    f.upvals.push_back(mlir.gc, ur); // TODO: alloc fail
+    return f.upvals.size() - 1;
+}
+
+static void checkVarReference(MLIR& mlir, MLFunc& f, MLNode *node)
+{
+    u32 varidx = node->m.p[0];
+    MLVar &v = mlir.vars[varidx];
+    assert(v.decl);
+
+    if(v.decl < f.myidx) // Var declared before current function? It's an upvalue.
+    {
+        u32 slot = addUpvalueReference(mlir, f, varidx);
+        node->m.cmd = _ML_UPVAL;
+        node->m.p[0] = slot;
+        return;
+    }
+
+
+    for(size_t i = 0; i < f.locals.size(); ++i)
+        if(f.locals[i] == varidx)
+        {
+            node->m.cmd = _ML_LOCAL;
+            node->m.p[0] = i;
+            return;
+        }
+
+    assert(false); // local not found??
+}
+
+static void foldPostSplitFunctions(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
+{
+    MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    MLCmd cmd = (MLCmd)node->m.cmd;
+    switch(cmd)
+    {
+        case ML_FUNC:
+        {
+            // Ensure this is really the correct function and everything is linked up properly
+            assert(ft.mlir.funcs[ft.funcStack.back()].myidx == ft.mlir.indexOf(node));
+            node->m.cmd = _ML_FUNCIDX;
+            node->m.p[0] = ft.funcStack.back();
+            ft.funcStack.pop_back();
+        }
+        break;
+
+        case ML_VAR:
+        {
+            MLFunc& f = ft.mlir.funcs[ft.funcStack.back()];
+            checkVarReference(ft.mlir, f, node);
+        }
+        break;
+    }
+
+    node->m.nch = mlirNumChildren(cmd); // Annotate for the LLIR stage
 }
 
 bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
@@ -1571,6 +1736,8 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
     preFoldExternals(externals.data(), externals.size(), ft);
     preFoldVars(vars.data(), vars.size(), ft);
     visit(foldPre, foldPost, &ft);
-    visit(foldPreErrorCheck, NULL, &ft); // needs no post
+    assert(ft.funcStack.empty());
+    visit(foldPreErrorCheck, foldPostSplitFunctions, &ft);
+    assert(ft.funcStack.empty());
     return ft.errors.empty();
 }

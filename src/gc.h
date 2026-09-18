@@ -49,7 +49,7 @@ struct GC
 
 
 void gc_step(GC& gc, size_t n);
-GCobj *gc_new(GC& gc, size_t bytes, PrimType gctype); // new object is uninitialized; use GA_PLACEMENT_NEW() to init
+GCbase *gc_new(GC& gc, size_t bytes, PrimType gctype); // new object is uninitialized; use GA_PLACEMENT_NEW() to init
 void *gc_alloc_unmanaged(GC& gc, void *p, size_t oldsize, size_t newsize);
 
 template<typename T>

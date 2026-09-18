@@ -5,6 +5,7 @@
 #include "valstore.h"
 
 class Runtime;
+class MLIR;
 
 union MLNode;
 
@@ -19,7 +20,7 @@ union MLNode;
 //   - Types are used to select functions to be called
 //   - If needed, LL_TYPECHECK is emitted
 // - AST & structure
-//   - Loops become jumps
+//   - Loops become jumps. Jumps can only target labels.
 //   - Upvalues are tracked as such
 //   - Locals are allocated as slots
 // Notes:
@@ -42,9 +43,9 @@ union MLNode;
 
 enum LLCmd
 {
-    LL_MARKER,      // debug marker
+    LL_MARKER,      // debug marker (a nop, but can carry data)
     LL_LABEL,       // L.id  (label & landing pad; jumps can only target labels)
-    LL_CALL,        // K.idx R.dstbase R.argbase  (call constant)
+    LL_CALLK,       // K.idx R.dstbase R.argbase  (call constant)
     LL_CALLREG,     // R.idx R.dstbase R.argbase  (call indirect)
     LL_CALLUPVAL,   // U.idx R.dstbase R.argbase  (call upvalue)
     LL_LOADK,       // R.dst K.idx  (reg = load constant)
@@ -64,13 +65,13 @@ enum LLCmd
     LL_JZ,          // L.zero, L.nonzero  (simple jump on C, don't use for loops)
     LL_JLEG,        // L<  L=  L>  (3-way jump based on C; ok to use to implement loops)
     LL_SETC,        // R.src  (C = Sign(reg) )
-    LL_GETC,        // R.dst  (reg = result of previous comparison as an int)
-    LL_GETEQ,       // R.dst  (reg = C == 0)
-    LL_GETNE,       // R.dst  (reg = C != 0)
-    LL_GETLT,       // R.dst  (reg = C < 0)
-    LL_GETGT,       // R.dst  (reg = C > 0)
-    LL_GETLE,       // R.dst  (reg = C <= 0)
-    LL_GETGE,       // R.dst  (reg = C >= 0)
+    LL_GETC,        // R.dst = (C)    // result of previous comparison as an int
+    LL_GETEQ,       // R.dst = (C == 0)
+    LL_GETNE,       // R.dst = (C != 0)
+    LL_GETLT,       // R.dst = (C <  0)
+    LL_GETGT,       // R.dst = (C >  0)
+    LL_GETLE,       // R.dst = (C <= 0)
+    LL_GETGE,       // R.dst = (C >= 0)
     LL_CLOSURE,     // R.dst S.idx R.upvalbase (load section as function)
     _LL_MAX
 };
@@ -115,7 +116,6 @@ struct LLVar
     u32 localslot;
     int upvalslot; // Default -1. If used as upval, this is >= 0
     const DType *dtype;
-    const MLVar *mlvar;
 };
 
 struct LLVarRef
@@ -144,7 +144,7 @@ public:
     // due to upvalues that will only be present at runtime.
     // (This is only for static compilation)
     LLSection *generate(const MLNode& ml);
-    
+
     typedef u32 Reg;
     typedef u32 Const;
     typedef u32 Upv;

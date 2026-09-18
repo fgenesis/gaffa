@@ -67,6 +67,7 @@ static const byte TypeElementSizes[] =
     /* PRIMTYPE_OBJECT */ sizeof(GCobj*),
     /* PRIMTYPE_ANY    */ sizeof(ValU), // both type + opaque
     /* PRIMTYPE_AUTO   */ sizeof(ValU),
+    /* PRIMTYPE_UPVAL  */ 0,
     /* _PRIMTYPE_X_SUBTYPE,  */ 0,
     /* PRIMTYPE_NORETURN */ 0,
     /* PRIMTYPE_NOTYPE */ 0
@@ -97,6 +98,7 @@ static const char *TypeNames[] =
     /* PRIMTYPE_OBJECT */ "object",
     /* PRIMTYPE_ANY    */ "any",
     /* PRIMTYPE_AUTO   */ "auto",
+    /* PRIMTYPE_UPVAL  */ "upval",
     /* _PRIMTYPE_X_SUBTYPE,  */ "_x_subtype",
     /* PRIMTYPE_NORETURN */ "noreturn",
     /* PRIMTYPE_NOTYPEN */ "notype"

@@ -54,7 +54,7 @@ DType* DType::GCNew(GC& gc, TDesc *desc, DType* typeType)
 
 DFunc* DFunc::GCNew(GC& gc)
 {
-    return (DFunc*)gc_new(gc, sizeof(DFunc), PRIMTYPE_FUNC);
+    return reinterpret_cast<DFunc*>(gc_new(gc, sizeof(DFunc), PRIMTYPE_FUNC));
 }
 
 int DFunc::call(VM *vm, Val* a) const
@@ -126,3 +126,8 @@ Val *DFunc::call(VM *vm, Val* a, int *psz) const
     return nret >= 0 ? rets : NULL;
 }
 #endif
+
+DUpval* DUpval::GCNew(GC& gc)
+{
+    return reinterpret_cast<DUpval*>(gc_new(gc, sizeof(DUpval), PRIMTYPE_UPVAL));
+}

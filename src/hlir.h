@@ -449,30 +449,6 @@ struct HLNode
         this->clear(gc);
         return this->unsafemorph<T>();
     }
-
-    HLNode *fold(HLFoldTracker &ft);
-
-    size_t memoryNeeded() const;
-    HLNode *clone(HLFoldTracker& ft) const;
-
-    void visit(HLPreVisitor pre, HLPostVisitor post, void *ud);
-
-private:
-    DType *getDType();
-    void _foldRec(HLFoldTracker &ft);
-    void _foldUnop(HLFoldTracker &ft);
-    void _foldBinop(HLFoldTracker &ft);
-    void _applyTypeFrom(HLFoldTracker& ft, HLNode *from);
-    void _applyTypeFromList(HLFoldTracker& ft, HLNode *from);
-    void propagateMyType(HLFoldTracker &ft, const HLNode *typesrc);
-
-    void _deductMyType(HLFoldTracker &ft);
-    void _propagateTypeFromChildren(HLFoldTracker &ft);
-    void _propagateTypeToChildren(HLFoldTracker &ft);
-    void _inheritType(HLFoldTracker &ft, HLNode *from);
-
-    HLNode *_clone(void *mem, size_t bytes, HLFoldTracker& ft) const;
-    byte *_cloneRec(byte *m, HLNode *target, HLFoldTracker& ft) const;
 };
 
 

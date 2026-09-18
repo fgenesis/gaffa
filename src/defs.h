@@ -91,6 +91,7 @@ enum PrimType
     PRIMTYPE_AUTO,     // special marker for type analysis
     _PRIMTYPE_X_SUBTYPE,  // special marker for subtype specialization
     PRIMTYPE_NORETURN, // special type that can't be constructed -> can't return this, ever
+    PRIMTYPE_UPVAL, // special type to mark allocated upvalues; for GC use only
     // These are the engine-level types. Runtime-created types are any IDs after this.
     PRIMTYPE_NOTYPE,
     PRIMTYPE_MAX,
@@ -147,22 +148,31 @@ enum
     GCOBJ_MASK_PRIMTYPE = 0xff
 };
 
-// This is the base of every GC collectible object.
+struct GCShared
+{
+    u32 typeAndFlags;
+    tsize size;
+};
+
+// This is the base of every GC collectible thing.
 // Most likely (but not necessarily!) preceded in memory by a GCprefix, see gc.h
-struct GCobj
+struct GCbase
 {
     // -------------------------
     // Beware: These are overlaid with GCprefix members and intentionally NOT initialized in a ctor!
     // The GC initializes the overlay part already and it MUST NOT be touched afterwards.
-    u32 gcTypeAndFlags;
-    tsize gcsize;
+    GCShared gcsh;
     // -------------------------
-    // Regular members below
+    // Regular members follow
+};
 
+// This is the base of every GC collectible object -- ie. everything that has a type of its own
+struct GCobj : GCbase
+{
     DType *dtype;
 
 
-    inline PrimType primtype() const { return PrimType(gcTypeAndFlags & GCOBJ_MASK_PRIMTYPE); }
+    inline PrimType primtype() const { return PrimType(gcsh.typeAndFlags & GCOBJ_MASK_PRIMTYPE); }
 };
 
 union _AnyValU
@@ -236,6 +246,8 @@ struct Val : public ValU
 
     // To check optional validity. false if nil or error.
     inline bool isValidValue() const { return type > PRIMTYPE_ERROR; }
+
+    inline bool isTruthy() const { return isValidValue() && (type != PRIMTYPE_BOOL || u.ui); }
 };
 
 // Size of an element of type t, when multiple elements of this type are stored in an array

@@ -50,7 +50,7 @@ LLSection *LLCodegen::generate(const MLNode& ml)
 
     LLSection *sec = gc_new_unmanaged_T<LLSection>(gc());
     GA_PLACEMENT_NEW(sec) LLSection;
-    sec->code.move(this->code);
+    sec->code.move(gc(), this->code);
 
     return sec;
 }
@@ -77,7 +77,7 @@ LLVarRef LLCodegen::getVarRef(tsize id) const
         const Scope& s = scopes[i];
         if(s.reason == ML_FUNC)
         {
-            ret.upval = id < s.prevNumLocals;
+            ret.upval = id < s.prevTotalLocals;
             ret.slot = vars[id].upvalslot;
             assert(vars[id].upvalslot >= 0);
             break;
@@ -110,27 +110,30 @@ void LLCodegen::closeUpvalsUntil(tsize idx)
                 closeupval(vars[i].upvalslot);
             }
 
-        vars.resize(gc, idx);
+        vars.resize(gc(), idx);
     }
 }
 
-void LLCodegen::_lower_scoped(const MLNode& ml)
+int LLCodegen::_lower_scoped(const MLNode& ml)
 {
     pushScope(ml.m.cmd);
-    _lower_inner(ml);
+    int ret = _lower_inner(ml);
     popScope();
+    return ret;
 }
 
 int LLCodegen::_initUpvalues(const Val* upvals, size_t nupvals)
 {
-
+    assert(false);
+    return 0;
 }
 
-void LLCodegen::_lower_scopedExplicit(const MLNode& ml, u32 reason)
+int LLCodegen::_lower_scopedExplicit(const MLNode& ml, u32 reason)
 {
     pushScope(reason);
-    _lower_inner(ml);
+    int ret = _lower_inner(ml);
     popScope();
+    return ret;
 }
 
 int LLCodegen::_lower_inner(const MLNode& ml)
@@ -220,7 +223,7 @@ int LLCodegen::_lower_inner(const MLNode& ml)
                 LLVar * const v = allocVars(n);
 
                 if(mlvar2idx.size() < firstMLVar + n)
-                    mlvar2idx.resize(gc, firstMLVar + n);
+                    mlvar2idx.resize(gc(), firstMLVar + n);
 
                 for(size_t i = 0; i < n; ++i)
                 {
@@ -296,7 +299,7 @@ void LLCodegen::conditionAndJumpOnFail(const MLNode& ml, LabelId fail)
 
 LLVar* LLCodegen::allocVars(size_t n)
 {
-    LLVar *v = vars.alloc_n(gc, n); // TODO: handle alloc fail
+    LLVar *v = vars.alloc_n(gc(), n); // TODO: handle alloc fail
     for(size_t i = 0; i < n; ++i)
     {
         v[i].flags = 0;

@@ -99,9 +99,9 @@ public:
         return &a[N];
     }
 
-    void move(PodArray<T>& o)
+    void move(GC& gc, PodArray<T>& o)
     {
-        dealloc();
+        dealloc(gc);
         ptr = o.ptr;
         sz = o.sz;
         cap = o.cap;

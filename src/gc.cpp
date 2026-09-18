@@ -39,8 +39,7 @@ struct GCprefix
     GCheader hdr;
     // --------
     // This is overlaid in memory. The following fields are the same as in GCobj.
-    u32 gcTypeAndFlags;
-    tsize gcsize;
+    GCShared gcsh;
 
     enum { HDR_SIZE = sizeof(GCheader) };
 
@@ -49,17 +48,17 @@ struct GCprefix
 
 static GCprefix *prefixof(GCobj *obj)
 {
-    assert(obj->gcTypeAndFlags & _GCF_GC_ALLOCATED);
+    assert(obj->gcsh.typeAndFlags & _GCF_GC_ALLOCATED);
     return reinterpret_cast<GCprefix*>(((char*)obj) - GCprefix::HDR_SIZE);
 }
 
 static void makegrey(GC& gc, GCobj *o)
 {
-    u32 f = o->gcTypeAndFlags;
+    u32 f = o->gcsh.typeAndFlags;
     if(f & _GCF_GREY)
         return;
 
-    o->gcTypeAndFlags = f | _GCF_GREY;
+    o->gcsh.typeAndFlags = f | _GCF_GREY;
 
     GCprefix *p = prefixof(o);
     p->hdr.gcnext = gc.grey;
@@ -225,8 +224,8 @@ static int traverse_obj(ga_RT& rt, GCobj *obj, int steps)
     makegrey(rt.gc, obj->dtype);
 
     GCprefix *pre = prefixof(obj);
-    u32 f = obj->gcTypeAndFlags;
-    obj->gcTypeAndFlags = f | _GCF_BLACK;
+    u32 f = obj->gcsh.typeAndFlags;
+    obj->gcsh.typeAndFlags = f | _GCF_BLACK;
 
     PrimType prim = PrimType(f & 0xff);
 
@@ -250,8 +249,8 @@ static int traverse_obj(ga_RT& rt, GCobj *obj, int steps)
 static void _gc_freeobj(GC& gc, GCprefix *o)
 {
     --gc.info.live_objs;
-    gc.info.used -= o->gcsize;
-    gc.alloc(gc.gcud, o, o->gcsize, 0);
+    gc.info.used -= o->gcsh.size;
+    gc.alloc(gc.gcud, o, o->gcsh.size, 0);
 
 }
 
@@ -268,9 +267,9 @@ void makePinnedGrey(GC& gc)
     {
         GCprefix *const next = o->hdr.gcnext;
 
-        if(o->gcTypeAndFlags & _GCF_PINNED) // Keep pinned object pinned, and make it grey
+        if(o->gcsh.typeAndFlags & _GCF_PINNED) // Keep pinned object pinned, and make it grey
         {
-            o->gcTypeAndFlags |= _GCF_BLACK;
+            o->gcsh.typeAndFlags |= _GCF_BLACK;
             o->hdr.gcnext = greyhead;
             greyhead = o;
         }
@@ -314,7 +313,7 @@ int splicestep(GC& gc, int n)
     do
     {
         GCprefix * const next = o->hdr.gcnext;
-        u32 f = o->gcTypeAndFlags;
+        u32 f = o->gcsh.typeAndFlags;
 
         if(f & _GCF_BLACK)
         {
@@ -322,7 +321,7 @@ int splicestep(GC& gc, int n)
 
             f &= ~(_GCF_BLACK | _GCF_GREY);
 
-            o->gcTypeAndFlags = f;
+            o->gcsh.typeAndFlags = f;
 
             if(!(f & _GCF_PINNED)) // Regular objects go back into the regular list;
             {                      // which may have some new objects allocated in the meantime.
@@ -368,14 +367,14 @@ static void freesomedead(ga_RT& rt)
     {
         GCprefix * const next = o->hdr.gcnext;
 
-        u32 f = o->gcTypeAndFlags;
+        u32 f = o->gcsh.typeAndFlags;
 
         // Finalizer?
         if(f & _GCF_FINALIZER)
         {
             // Resurrect (make white), but don't run the finalizer again
             f &= ~(_GCF_FINALIZER | _GCF_GREY | _GCF_BLACK);
-            o->gcTypeAndFlags = f;
+            o->gcsh.typeAndFlags = f;
             o->hdr.gcnext = NULL;
 
             // This may or may not store o somewhere so that it's reachable again
@@ -438,7 +437,7 @@ void gc_step(ga_RT& rt, size_t n)
     }
 }
 
-GCobj *gc_new(GC& gc, size_t bytes, PrimType gctype)
+GCbase *gc_new(GC& gc, size_t bytes, PrimType gctype)
 {
     STATIC_ASSERT(PRIMTYPE_ANY < 0xff);
 
@@ -452,8 +451,8 @@ GCobj *gc_new(GC& gc, size_t bytes, PrimType gctype)
     gc.info.used += bytes;
     ++gc.info.live_objs;
 
-    p->gcTypeAndFlags = _GCF_GC_ALLOCATED | gctype;
-    p->gcsize = bytes;
+    p->gcsh.typeAndFlags = _GCF_GC_ALLOCATED | gctype;
+    p->gcsh.size = bytes;
 
     // Link object into the gc list. If a collection is in progress,
     p->hdr.gcnext = gc.normallywhite;

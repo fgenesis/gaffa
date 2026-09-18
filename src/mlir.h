@@ -4,6 +4,7 @@
 #include "array.h"
 #include "table.h"
 #include "typing.h"
+#include "gaobj.h"
 
 struct HLNode;
 struct BufSink;
@@ -27,7 +28,7 @@ enum MLCmd
     ML_VAR,             // expr (1, vars idx)
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
-    ML_DECL,            // stmt (1, local start) [2, typeexprs, exprs] -- num of vars = #typeexprs
+    ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- num of vars = #typeexprs; varidx = start of locals
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
     ML_WHILE,           // stmt (0) [2, cond, block]
@@ -35,7 +36,7 @@ enum MLCmd
     ML_GETINDEX,        // expr (0) [2, obj, key]
     ML_GETNS,           // expr (0) [2, ns, key]
     ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs]
-    ML_FUNC,            // expr (1, locals start) [3, argtypes, rettypes, block]
+    ML_FUNC,            // expr (1, varidx) [3, argtypes, rettypes, block] -- varidx = start of locals
     ML_RETURN,          // stmt (0) [1, exprs]
     ML_EMIT,            // stmt (0) [1, exprs]
     ML_ITERPACK,        // expr (0) [1, exprs]
@@ -48,10 +49,13 @@ enum MLCmd
     // (Trying to keep the 7th bit and up free for more efficient encoding)
 
     // Below: Internal, not serialized
+    _ML_UPVAL,          // expr (1, func's upvals idx)
+    _ML_LOCAL,          // expr (1, func's locals idx)
+    _ML_FUNCIDX,        // expr (1, func idx)  // function + mgmt infos. Recursion breaker.
     _ML_EMPTY,
+
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
-    _ML_UPVAL,          // expr (1, vars idx)
     _ML_UVAR, // Unresolved identifier // special (2, name, symid) // replaced before type analysis
     _ML_UDECL, // Unremapped decl node
     _ML_ERROR, // Error. If encountered after folding, the tree isn't sound and no code can be generated.
@@ -119,10 +123,6 @@ union MLNode
     {
         const HLNode *hlnode; // Temporarily stored during construction
     } tmp;
-    struct
-    {
-        DFunc *f;
-    } func;
 
     MLNode *firstChild();
     const MLNode *firstChild() const;
@@ -186,8 +186,6 @@ struct MLExternal
     Val val;
 };
 
-
-
 struct MLPreVisitResult
 {
     VisitResult res;
@@ -195,6 +193,28 @@ struct MLPreVisitResult
 };
 typedef MLPreVisitResult (*MLVisitorPre)(MLNode *node, MLNode *parent, void *ud);
 typedef void (*MLVisitorPost)(MLNode *node, MLNode *parent, void *ud, uintptr_t aux);
+
+
+struct MLUpvalRef
+{
+    u32 varidx; // Index into MLIR::vars[]
+    u32 slot;
+
+    // if false, this is a local in the enclosing function, and slot is the index in MLFunc::locals
+    // if true, this refers to the upvalue slot of the enclosing function, and slot is the index in MLFunc::upvals
+    bool transient;
+};
+
+
+
+struct MLFunc
+{
+    size_t myidx; // index of this node in MLIR::nodes[]
+    MLNode node; // A copy of the original MLNode
+    size_t enclosingFuncIdxPlus1; // If 0, this is a root function, ie. file scope
+    PodArray<u32> locals; // The first info.nargs entries are params, the rest declared locals
+    PodArray<MLUpvalRef> upvals;
+};
 
 class MLIR
 {
@@ -226,6 +246,7 @@ public:
     PodArray<MLInfo> infos;
     PodArray<MLVar> vars;
     PodArray<MLExternal> externals;
+    PodArray<MLFunc> funcs;
 
     GC& gc;
 
