@@ -209,9 +209,11 @@ struct MLUpvalRef
 
 struct MLFunc
 {
+    inline MLFunc() : myidx(-1), name(0), enclosingFuncIdxPlus1(0) {}
     size_t myidx; // index of this node in MLIR::nodes[]
     MLNode node; // A copy of the original MLNode
-    size_t enclosingFuncIdxPlus1; // If 0, this is a root function, ie. file scope
+    sref name;
+    size_t enclosingFuncIdxPlus1; // If 0, this is the root function, ie. file scope
     PodArray<u32> locals; // The first info.nargs entries are params, the rest declared locals
     PodArray<MLUpvalRef> upvals;
 };

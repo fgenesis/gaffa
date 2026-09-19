@@ -100,7 +100,11 @@
 --func i2f(int i) -> float { return i }
 
 --var w = uint::zero
---uint x, y = 1, 2
+uint x, y = 1, 2
+
+func test(uint a)
+	return x+y+a
+
 --uint z = x+y
 uint z = 1+2
 return ??z

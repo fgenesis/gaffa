@@ -55,6 +55,11 @@ Str StringPool::get(const std::string& s) const
 
 Strp StringPool::lookup(size_t id) const
 {
+    if(!id)
+    {
+        Strp ret = {};
+        return ret;
+    }
     const MemBlock mb = Dedup::get(id);
     const Strp sp = { mb.p, mb.n };
     return sp;

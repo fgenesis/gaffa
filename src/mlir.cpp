@@ -339,6 +339,7 @@ MLIR::~MLIR()
     infos.dealloc(gc);
     vars.dealloc(gc);
     externals.dealloc(gc);
+    funcs.dealloc(gc);
 }
 
 size_t MLIR::indexOf(const MLNode* node) const
@@ -1265,6 +1266,147 @@ static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
     }
 }
 
+// exprlist is optional, it must be presnet for ML_DECL nodes,
+// but is not needed for function parameters
+static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typelist, MLNode *exprlist)
+{
+    MLSub typeexprs = typelist.aslist();
+    MLSub exprs = {};
+    if(exprlist)
+        exprs = exprlist->aslist();
+
+    const size_t N = typeexprs.n;
+    const size_t declidx = ft.mlir.indexOf(&declroot);
+
+    // Assign types first
+    for(size_t i = 0; i < N; ++i)
+    {
+        MLNode *te = &typeexprs.ch[i];
+        MLVar *v = &ft.mlir.vars[localid + i];
+        v->decl = declidx;
+        switch(v->kind)
+        {
+            case MLVar::CVAR:
+            case MLVar::MUTVAR:
+                if(te->isconst())
+                {
+                    Val tv = te->asVal();
+                    if(tv.type == PRIMTYPE_TYPE)
+                        assignVarType(v, tv.asDType()->tid, ft);
+                    else
+                    {
+                        std::ostringstream os;
+                        os << "Attempt to use a value as variable '" << ft.str(v->name) << "' type that is not a type";
+                        te->setError(ft.sp(), os.str().c_str());
+                    }
+                }
+                else
+                {
+                    std::ostringstream os;
+                    os << "Variable '" << ft.str(v->name) << "' type can't be deduced at this stage, assuming 'any'";
+                    ft.warn(te, os.str().c_str());
+                    v->u.local.type = PRIMTYPE_ANY;
+                }
+                break;
+
+            case MLVar::CONSTVAL:
+                assert(false && "constval during decl, should not be folded yet");
+                break;
+
+        }
+    }
+
+    if(exprs.n)
+    {
+        // Check amount
+        // Any expression can return a number of results, which needs to be known to know
+        // how many variables to typecheck per expr.
+        NumValuesResult nv = numResultValuesOfList(exprs.ch, exprs.n, ft);
+
+        switch(nv.verdict)
+        {
+            case NumValuesResult::ERROR:
+                assert(false);
+                return;
+
+            case NumValuesResult::EXACT_NUMBER:
+                if(nv.n < N)
+                {
+                    std::ostringstream os;
+                    os << "Getting " << nv.n << " values, but " << N << " are needed";
+                    node->setError(ft.sp(), os.str().c_str());
+                    return;
+                }
+                else if(nv.n > N)
+                {
+                    std::ostringstream os;
+                    os << "Getting " << nv.n << " values, but only " << N << " are assigned (" << (nv.n - N) << " are dropped)";
+                    ft.warn(node, os.str().c_str());
+                }
+                break;
+
+            case NumValuesResult::MIN_NUMBER:
+                if(nv.n < N)
+                {
+                    // TODO: allow this when the tail ones are optionals?
+                    std::ostringstream os;
+                    os << "Getting " << nv.n << " or more values, but " << N << " are needed";
+                    node->setError(ft.sp(), os.str().c_str());
+                    return;
+                }
+                else if(nv.n > N)
+                {
+                    std::ostringstream os;
+                    os << "Getting " << nv.n << " or more values, but only " << N << " are assigned (" << (nv.n - N) << " are always dropped)";
+                    ft.warn(node, os.str().c_str());
+                }
+                break;
+        }
+    }
+
+    size_t idx = localid;
+
+    // Assign type based on value if automatic, or report type clash
+    size_t numconstval = 0;
+    for(size_t i = 0; i < exprs.n; ++i)
+    {
+        MLNode *e = &exprs.ch[i];
+        NumValuesResult eres = numResultValues(e, ft);
+        Type t = e->type();
+        assert(eres.n >= 1);
+        if(eres.n > 1)
+        {
+            TypeIdList tl = ft.tr().getlist(t);
+            for(size_t k = 0; k < tl.n; ++k)
+            {
+                Type tt = tl.ptr[k];
+                MLVar *v = &ft.mlir.vars[idx++];
+                assignVarType(v, tt, ft);
+            }
+            // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
+        }
+        else
+        {
+            MLVar *v = &ft.mlir.vars[idx++];
+            if(!v->isMutable() && e->isconst())
+            {
+                v->kind = MLVar::CONSTVAL;
+                v->u.val = e->asVal();
+                ++numconstval;
+            }
+            else
+                assignVarType(v, t, ft);
+        }
+    }
+
+    // ALL values got replaced by compile-time known constants? Don't need this decl node, kick it.
+    // All ML_VAR referenced later that were declared here it will be replaced with constants,
+    // so there will be no reference left.
+    //if(numconstval == N)
+    //    node->makedummy();
+    // ^ DO NOT ELIMINATE DECLS!! post-folding needs it
+}
+
 static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
@@ -1388,138 +1530,13 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
             MLNode *ch = node->firstChild();
             const size_t localid = node->m.p[0];
 
-            MLSub typeexprs = ch[0].aslist();
-            MLSub exprs = ch[1].aslist();
-
-            const size_t N = typeexprs.n;
-            const size_t declidx = ft.mlir.indexOf(node);
-
-            // Assign types first
-            for(size_t i = 0; i < N; ++i)
-            {
-                MLNode *te = &typeexprs.ch[i];
-                MLVar *v = &ft.mlir.vars[localid + i];
-                v->decl = declidx;
-                switch(v->kind)
-                {
-                    case MLVar::CVAR:
-                    case MLVar::MUTVAR:
-                        if(te->isconst())
-                        {
-                            Val tv = te->asVal();
-                            if(tv.type == PRIMTYPE_TYPE)
-                                assignVarType(v, tv.asDType()->tid, ft);
-                            else
-                            {
-                                std::ostringstream os;
-                                os << "Attempt to use a value as variable '" << ft.str(v->name) << "' type that is not a type";
-                                te->setError(ft.sp(), os.str().c_str());
-                            }
-                        }
-                        else
-                        {
-                            std::ostringstream os;
-                            os << "Variable '" << ft.str(v->name) << "' type can't be deduced at this stage, assuming 'any'";
-                            ft.warn(te, os.str().c_str());
-                            v->u.local.type = PRIMTYPE_ANY;
-                        }
-                        break;
-
-                    case MLVar::CONSTVAL:
-                        assert(false && "constval during decl, should not be folded yet");
-                        break;
-
-                }
-            }
-
-            // Check amount
-            // Any expression can return a number of results, which needs to be known to know
-            // how many variables to typecheck per expr.
-            NumValuesResult nv = numResultValuesOfList(exprs.ch, exprs.n, ft);
-
-            switch(nv.verdict)
-            {
-                case NumValuesResult::ERROR:
-                    assert(false);
-                    return;
-
-                case NumValuesResult::EXACT_NUMBER:
-                    if(nv.n < N)
-                    {
-                        std::ostringstream os;
-                        os << "Getting " << nv.n << " values, but " << N << " are needed";
-                        node->setError(ft.sp(), os.str().c_str());
-                        return;
-                    }
-                    else if(nv.n > N)
-                    {
-                        std::ostringstream os;
-                        os << "Getting " << nv.n << " values, but only " << N << " are assigned (" << (nv.n - N) << " are dropped)";
-                        ft.warn(node, os.str().c_str());
-                    }
-                    break;
-
-                case NumValuesResult::MIN_NUMBER:
-                    if(nv.n < N)
-                    {
-                        // TODO: allow this when the tail ones are optionals?
-                        std::ostringstream os;
-                        os << "Getting " << nv.n << " or more values, but " << N << " are needed";
-                        node->setError(ft.sp(), os.str().c_str());
-                        return;
-                    }
-                    else if(nv.n > N)
-                    {
-                        std::ostringstream os;
-                        os << "Getting " << nv.n << " or more values, but only " << N << " are assigned (" << (nv.n - N) << " are always dropped)";
-                        ft.warn(node, os.str().c_str());
-                    }
-                    break;
-            }
-
-            size_t idx = localid;
-
-            // Assign type based on value if automatic, or report type clash
-            size_t numconstval = 0;
-            for(size_t i = 0; i < exprs.n; ++i)
-            {
-                MLNode *e = &exprs.ch[i];
-                NumValuesResult eres = numResultValues(e, ft);
-                Type t = e->type();
-                assert(eres.n >= 1);
-                if(eres.n > 1)
-                {
-                    TypeIdList tl = ft.tr().getlist(t);
-                    for(size_t k = 0; k < tl.n; ++k)
-                    {
-                        Type tt = tl.ptr[k];
-                        MLVar *v = &ft.mlir.vars[idx++];
-                        assignVarType(v, tt, ft);
-                    }
-                    // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
-                }
-                else
-                {
-                    MLVar *v = &ft.mlir.vars[idx++];
-                    if(!v->isMutable() && e->isconst())
-                    {
-                        v->kind = MLVar::CONSTVAL;
-                        v->u.val = e->asVal();
-                        ++numconstval;
-                    }
-                    else
-                        assignVarType(v, t, ft);
-                }
-            }
-
-            // ALL values got replaced by compile-time known constants? Don't need this decl node, kick it.
-            // All ML_VAR referenced later that were declared here it will be replaced with constants,
-            // so there will be no reference left.
-            //if(numconstval == N)
-            //    node->makedummy();
-            // ^ DO NOT ELIMINATE DECLS!! post-folding needs it
         }
         break;
+
+        case OP_FUNC:
+        {
+            MLNode *argtypes = 
+        }
 
         case OP_CALL:
         {
@@ -1598,20 +1615,20 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
 
         case ML_FUNC:
         {
+            assert(!ft.funcStack.empty());
+
             MLFunc *mf = GA_PLACEMENT_NEW(ft.mlir.funcs.alloc_n(ft.gc(), 1)) MLFunc; // TODO: alloc fail
             mf->myidx = ft.mlir.indexOf(node);
 
             // Any function on top of the stack encloses the function created now
-            mf->enclosingFuncIdxPlus1 = !ft.funcStack.empty()
-                ? 0
-                : (ft.funcStack.back() + 1);
+            mf->enclosingFuncIdxPlus1 = ft.funcStack.back() + 1;
 
             ft.funcStack.push_back(ft.mlir.funcs.size() - 1);
 
             // Add func params as locals
             u32 firstvar = node->m.p[0];
             MLNode *argtypes = node->firstChild();
-            size_t nlocals = argtypes->numchildren();
+            const size_t nlocals = argtypes->aslist().n;
             u32 *plocals = mf->locals.alloc_n(ft.gc(), nlocals);
             for(size_t i = 0; i < nlocals; ++i)
                 plocals[i] = firstvar + i;
@@ -1625,7 +1642,7 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
             u32 firstvar = node->m.p[0];
             MLFunc& mf = ft.mlir.funcs[ft.funcStack.back()];
             MLNode *typeexprs = node->firstChild();
-            size_t nvars = typeexprs->numchildren();
+            const size_t nvars = typeexprs->aslist().n;
             u32 *plocals = mf.locals.alloc_n(ft.gc(), nvars);
             for(size_t i = 0; i < nvars; ++i)
                 plocals[i] = firstvar + i;
@@ -1690,7 +1707,6 @@ static void checkVarReference(MLIR& mlir, MLFunc& f, MLNode *node)
         return;
     }
 
-
     for(size_t i = 0; i < f.locals.size(); ++i)
         if(f.locals[i] == varidx)
         {
@@ -1718,7 +1734,7 @@ static void foldPostSplitFunctions(MLNode *node, MLNode *parent, void *ud, uintp
         }
         break;
 
-        case ML_VAR:
+        case ML_VAR: // At this point a variable reference becomes a local or an upvalue reference
         {
             MLFunc& f = ft.mlir.funcs[ft.funcStack.back()];
             checkVarReference(ft.mlir, f, node);
@@ -1729,15 +1745,49 @@ static void foldPostSplitFunctions(MLNode *node, MLNode *parent, void *ud, uintp
     node->m.nch = mlirNumChildren(cmd); // Annotate for the LLIR stage
 }
 
+static void debugPrintVar(MLFoldTracker& ft, size_t gidx, const char *t, u32 idx)
+{
+    MLVar& v = ft.mlir.vars[idx];
+    const char *name = ft.str(v.name);
+    printf("  %s %u: '%s'\n", t, (unsigned)gidx, name);
+}
+
+static void debugPrintFuncInfo(MLFoldTracker& ft, const MLFunc& f)
+{
+    const char *name = ft.str(f.name);
+    printf("FUNC '%s', %u locals, %u upvalues:\n",
+        name, (unsigned)f.locals.size(), (unsigned)f.upvals.size());
+    for(size_t i = 0; i < f.locals.size(); ++i)
+        debugPrintVar(ft, i, "local", f.locals[i]);
+    for(size_t i = 0; i < f.upvals.size(); ++i)
+        debugPrintVar(ft, i, "upval", f.upvals[i].varidx);
+}
+
 bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
 {
     MLFoldTracker ft = { *this, vm, syms, env, true };
     ft.typesrc.resize(nodes.size());
     preFoldExternals(externals.data(), externals.size(), ft);
     preFoldVars(vars.data(), vars.size(), ft);
+
+    // This does constant folding & propagation
     visit(foldPre, foldPost, &ft);
     assert(ft.funcStack.empty());
+
+    // Create the root function that encompasses the entire file scope
+    MLFunc *mf = GA_PLACEMENT_NEW(ft.mlir.funcs.alloc_n(ft.gc(), 1)) MLFunc; // TODO: alloc fail
+    mf->myidx = 0;
+    mf->enclosingFuncIdxPlus1 = 0;
+    ft.funcStack.push_back(funcs.size() - 1);
+    // Break the tree into individual functions and do some finalization.
     visit(foldPreErrorCheck, foldPostSplitFunctions, &ft);
+    ft.funcStack.pop_back();
     assert(ft.funcStack.empty());
+
+    size_t N = funcs.size();
+    printf("MLIR: Broke tree into %u functions:\n", (unsigned)N);
+    for(size_t i = 0; i < N; ++i)
+        debugPrintFuncInfo(ft, funcs[i]);
+
     return ft.errors.empty();
 }
