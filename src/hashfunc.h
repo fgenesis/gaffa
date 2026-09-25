@@ -48,3 +48,9 @@ HStr lenhash(uhash h, const char * const s);
 uhash memhash(uhash h, const void *buf, size_t size);
 
 uhash hashvalue(uhash h, ValU v);
+
+
+enum { FNV1A_BASE = 0x811c9dc5 };
+uhash fnv1aUpdate(uhash h, const void *buf, size_t size);
+inline static uhash fnv1aHash(const void *buf, size_t size) { return fnv1aUpdate(FNV1A_BASE, buf, size); }
+

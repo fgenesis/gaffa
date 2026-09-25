@@ -4,6 +4,7 @@
 #include "valstore.h"
 #include "symstore.h"
 #include "runtime.h"
+#include "hashfunc.h"
 
 #include <sstream>
 
@@ -25,7 +26,6 @@
 - Declarations can only be removed when every isMutableRefType() object stays comptime-constant
 
 */
-
 
 struct MLWriter
 {
@@ -72,8 +72,6 @@ struct MLDumper
 // statements have no associated type
 static bool mlirIsStmt(MLCmd cmd)
 {
-    STATIC_ASSERT(_ML_OP_MAX < ML_CONST); // If this fails, increase ML_CONST
-
     if(cmd < _ML_OP_MAX)
         return true;
 
@@ -126,6 +124,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_EXT:
         case _ML_VAL:
         case _ML_FUNCIDX:
+        case _ML_ERROR:
             return 0;
 
         case ML_RETURN:
@@ -133,6 +132,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_ITERPACK:
         case ML_NEW_ARRAY:
         case ML_NEW_TABLE:
+        case ML_EXPORT:
             return 1;
 
         case ML_NAMEDECL:
@@ -158,6 +158,40 @@ static size_t mlirNumChildren(MLCmd cmd)
     assert(false);
     return 0;
 }
+
+struct MLSig
+{
+    // Exclude ML_LIST
+    enum { Fields = _ML_MAX - 1, SigSize = 1 + ((Fields + 1) / 2) };
+    uhash hash;
+
+    MLSig()
+    {
+        byte sig[SigSize];
+        size_t w = 0;
+        sig[w++] = _ML_MAX;
+        size_t t = 1;
+        for(unsigned i = 1; i < _ML_MAX; ++i)
+        {
+            MLCmd cmd = (MLCmd)i;
+            t <<= 4u;
+            t |= !!mlirIsStmt(cmd) | (mlirNumParams(cmd) << 1u) | (mlirNumChildren(cmd) << 2u);
+            if(t > 0xff)
+            {
+                sig[w++] = (byte)t;
+                t = 1;
+            }
+        }
+        if(t > 1)
+            sig[w++] = (byte)t;
+
+        hash = fnv1aHash(&sig[0], sizeof(sig));
+    }
+
+};
+
+static const MLSig mlsig;
+
 
 static void mlirDumpNode(MLDumper& dump, const MLNode *node, size_t idx)
 {
@@ -340,6 +374,7 @@ MLIR::~MLIR()
     vars.dealloc(gc);
     externals.dealloc(gc);
     funcs.dealloc(gc);
+    symToVarRemap.dealloc(gc);
 }
 
 size_t MLIR::indexOf(const MLNode* node) const
@@ -361,6 +396,12 @@ const MLInfo * MLIR::infoOf(const MLNode * node) const
 {
     size_t idx = indexOf(node);
     return idx < infos.size() ? &infos[idx] : NULL;
+}
+
+MLVar* MLIR::getVarFromSymid(size_t symid)
+{
+    size_t idx = symToVarRemap[symid];
+    return &vars[idx];
 }
 
 static void visitRec(PodArray<MLNode>& nodes, MLVisitorPre pre, MLVisitorPost post, void *ud, u32 nodeidx, u32 parentidx)
@@ -416,7 +457,7 @@ void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
         dst->makedummy();
 }
 
-sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist)
+sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const StringPool& sp)
 {
     if(!decllist || !decllist->numchildren())
     {
@@ -431,11 +472,13 @@ sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist)
 
     const HLIdent *firstIdent = dch[0]->as<HLVarDef>()->ident->as<HLIdent>();
 
+    printf("MLIR::_decllist size %u\n", (unsigned)s.n);
     for(size_t i = 0; i < s.n; ++i)
     {
         const HLVarDef *vd = dch[i]->as<HLVarDef>();
         const HLIdent *id = vd->ident->as<HLIdent>();
-        printf("ML decl %u, symid %u, strid %u\n", (unsigned)i, id->symid, id->nameStrId);
+        const char *name = sp.lookup(id->nameStrId).s;
+        printf("ML decl %u '%s', symid %u, strid %u\n", (unsigned)i, name, id->symid, id->nameStrId);
 
         // Symbols are declared in a row -> symbol IDs are given consecutively
         assert(id->symid == firstIdent->symid + i);
@@ -472,7 +515,7 @@ void MLIR::_opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl)
 }
 
 // Don't call this recursively, call _cons() instead
-void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
+void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, const StringPool& sp)
 {
     const HLNodeType hltype = (HLNodeType)hl->type;
 
@@ -506,7 +549,7 @@ dolist:
 
             const HLNode *decls = hl->u.vardecllist.decllist;
             MLNode *ch = &nodes[s.chIdx];
-            dst->m.p[0] = _decllist(q, ch, decls); // may reallocate hlch
+            dst->m.p[0] = _decllist(q, ch, decls, sp); // may reallocate hlch
             dst->m.cmd = _ML_UDECL; // Must be remapped later
 
             // Continue expanding RHS expressions
@@ -539,7 +582,7 @@ dolist:
             assert(s.n == 3);
             MLNode *ch = &nodes[s.chIdx];
 
-            dst->m.p[0] = _decllist(q, ch, fh->paramlist);
+            dst->m.p[0] = _decllist(q, ch, fh->paramlist, sp);
 
             _cons(q, &ch[1], fh->rettypes);
             _cons(q, &ch[2], f.body);
@@ -666,7 +709,7 @@ void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options
     Cons r { root, indexOf(_add(1)) };
     for(;;)
     {
-        _construct(q, &nodes[r.mlidx], r.hl); // This may reallocate nodes[], don't keep a pointer
+        _construct(q, &nodes[r.mlidx], r.hl, sp); // This may reallocate nodes[], don't keep a pointer
 
         if(!(options & STRIP_DEBUGINFO))
         {
@@ -708,8 +751,7 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
     printf("Resolve %u occurences referencing %u symbols ...\n", (unsigned)N, (unsigned)nsyms);
     vars.reserve(gc, nsyms); // Need at least this many; maybe some more for upvalues
 
-    PodArray<u32> remap; // Maps symbol index to index in vars[]
-    remap.resize(gc, nsyms);
+    symToVarRemap.resize(gc, nsyms);
 
     // Setup all symbols
     for(size_t symid = 0; symid < nsyms; ++symid)
@@ -723,17 +765,17 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
             assert(!mut);
             assert(!(sym->usage & SYMUSE_UPVAL));
 
-            remap[symid] = (u32)externals.size();
+            symToVarRemap[symid] = (u32)externals.size();
 
             MLExternal *e = externals.alloc_n(gc, 1);
             e->name = sym->nameStrId;
 
             printf("EXT[%u]: %s @ symidx %u\n",
-                remap[symid], sp.lookup(e->name).s, (unsigned)symid);
+                symToVarRemap[symid], sp.lookup(e->name).s, (unsigned)symid);
         }
         else
         {
-            remap[symid] = (u32)vars.size();
+            symToVarRemap[symid] = (u32)vars.size();
 
             MLVar *v = vars.alloc_n(gc, 1);
 
@@ -741,7 +783,7 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
             v->kind = mut ? MLVar::MUTVAR : MLVar::CVAR;
 
             printf("VAR[%u]: %s [kind %u] @ symidx %u\n",
-                remap[symid], sp.lookup(v->name).s, v->kind, (unsigned)symid);
+                symToVarRemap[symid], sp.lookup(v->name).s, v->kind, (unsigned)symid);
         }
     }
 
@@ -759,22 +801,20 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
                 const Symstore::Sym *sym = syms.getsym(hlident->symid);
 
                 node->m.cmd = (sym->referencedHow & SYMREF_EXTERNAL) ? ML_EXT : ML_VAR;
-                node->m.p[0] = remap[hlident->symid];
+                node->m.p[0] = symToVarRemap[hlident->symid];
                 break;
             }
 
             case _ML_UDECL:
                 // Unresolved decl still refers the symid; refer to var idx instead
                 node->m.cmd = ML_DECL;
-                node->m.p[0] = remap[node->m.p[0]];
+                node->m.p[0] = symToVarRemap[node->m.p[0]];
                 break;
 
             default:
                 unreachable();
         }
     }
-
-    remap.dealloc(gc);
 }
 
 typedef void (*ConvertFunc)(MLNode& m, HLNode& h);
@@ -1266,14 +1306,11 @@ static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
     }
 }
 
-// exprlist is optional, it must be presnet for ML_DECL nodes,
+// exprlist is optional, it must be present for ML_DECL nodes,
 // but is not needed for function parameters
 static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typelist, MLNode *exprlist)
 {
     MLSub typeexprs = typelist.aslist();
-    MLSub exprs = {};
-    if(exprlist)
-        exprs = exprlist->aslist();
 
     const size_t N = typeexprs.n;
     const size_t declidx = ft.mlir.indexOf(&declroot);
@@ -1282,7 +1319,7 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
     for(size_t i = 0; i < N; ++i)
     {
         MLNode *te = &typeexprs.ch[i];
-        MLVar *v = &ft.mlir.vars[localid + i];
+        MLVar *v = ft.mlir.getVarFromSymid(localid + i);
         v->decl = declidx;
         switch(v->kind)
         {
@@ -1316,8 +1353,11 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         }
     }
 
-    if(exprs.n)
+    MLSub exprs = {};
+    if(exprlist)
     {
+        exprs = exprlist->aslist();
+
         // Check amount
         // Any expression can return a number of results, which needs to be known to know
         // how many variables to typecheck per expr.
@@ -1334,14 +1374,14 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
                 {
                     std::ostringstream os;
                     os << "Getting " << nv.n << " values, but " << N << " are needed";
-                    node->setError(ft.sp(), os.str().c_str());
+                    exprlist->setError(ft.sp(), os.str().c_str());
                     return;
                 }
                 else if(nv.n > N)
                 {
                     std::ostringstream os;
                     os << "Getting " << nv.n << " values, but only " << N << " are assigned (" << (nv.n - N) << " are dropped)";
-                    ft.warn(node, os.str().c_str());
+                    ft.warn(exprlist, os.str().c_str());
                 }
                 break;
 
@@ -1351,14 +1391,14 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
                     // TODO: allow this when the tail ones are optionals?
                     std::ostringstream os;
                     os << "Getting " << nv.n << " or more values, but " << N << " are needed";
-                    node->setError(ft.sp(), os.str().c_str());
+                    exprlist->setError(ft.sp(), os.str().c_str());
                     return;
                 }
                 else if(nv.n > N)
                 {
                     std::ostringstream os;
                     os << "Getting " << nv.n << " or more values, but only " << N << " are assigned (" << (nv.n - N) << " are always dropped)";
-                    ft.warn(node, os.str().c_str());
+                    ft.warn(exprlist, os.str().c_str());
                 }
                 break;
         }
@@ -1412,10 +1452,19 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
     const MLCmd cmd = (MLCmd)node->m.cmd;
 
+    if(parent && parent->m.cmd == ML_FUNC && node == parent->firstChild())
+    {
+        // Special case: Just finished the parameter list of a function.
+        // Add those to the list of known locals before handling the rest of the function.
+        const size_t localid = parent->m.p[0];
+        doDecl(ft, localid, *parent, *node, NULL);
+    }
+
     switch(cmd)
     {
         case _ML_VAL: // Constants can't be folded further
         case ML_LIST: // all good, took care of the list recursively already before returning here
+        case ML_FUNC:
             return;
 
         case ML_EXT:
@@ -1521,22 +1570,49 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         break;
 
         case ML_NAMEDECL:
-            assert(false);
-            break;
+        {
+            MLNode *ns = node->firstChild();
+            MLNode *val = ns + 1;
+            sref nameid = node->m.p[0];
+            const char *name = ft.str(nameid);
+            printf("ML namedecl '%s'\n", name);
+            // TODO: register by name
+            switch(ns->aslist().n)
+            {
+            case 0:
+                // It's a dummy entry -> no namespace -> make it a const local
+            case 1:
+                // Regsiter in namespace
+                if(ns->isconst() && val->isconst())
+                {
+                    // Known at compile time -> register now
+                }
+                else
+                {
+                    // Need to do it at runtime
+                }
+            default:
+                assert(false);
+            }
+        }
+        break;
 
 
         case ML_DECL:
         {
             MLNode *ch = node->firstChild();
             const size_t localid = node->m.p[0];
-
+            doDecl(ft, localid, *node, ch[0], &ch[1]);
         }
         break;
 
-        case OP_FUNC:
+        /*case ML_FUNC:
         {
-            MLNode *argtypes = 
+            MLNode *argtypes = node->firstChild();
+            const size_t localid = node->m.p[0];
+            doDecl(ft, localid, *node, *argtypes, NULL);
         }
+        break;*/
 
         case OP_CALL:
         {
@@ -1695,7 +1771,7 @@ add:
 
 static void checkVarReference(MLIR& mlir, MLFunc& f, MLNode *node)
 {
-    u32 varidx = node->m.p[0];
+    u32 varidx = mlir.symToVarRemap[node->m.p[0]];
     MLVar &v = mlir.vars[varidx];
     assert(v.decl);
 

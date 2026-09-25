@@ -24,8 +24,8 @@ enum MLCmd
 
                         // kind (#params) [#children]
 
-    ML_CONST = 33,      // expr (1, consts idx)
-    ML_VAR,             // expr (1, vars idx)
+    ML_CONST = _OP_MAX, // expr (1, consts idx)
+    ML_VAR,             // expr (1, symid)
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
     ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- num of vars = #typeexprs; varidx = start of locals
@@ -46,10 +46,12 @@ enum MLCmd
     ML_CALLADJ,         // expr (0) [2, numexpr. callexpr]
     //ML_VALBLOCK,
 
+    _ML_MAX,
+
     // (Trying to keep the 7th bit and up free for more efficient encoding)
 
     // Below: Internal, not serialized
-    _ML_UPVAL,          // expr (1, func's upvals idx)
+    _ML_UPVAL = _ML_MAX,// expr (1, func's upvals idx)
     _ML_LOCAL,          // expr (1, func's locals idx)
     _ML_FUNCIDX,        // expr (1, func idx)  // function + mgmt infos. Recursion breaker.
     _ML_EMPTY,
@@ -241,6 +243,8 @@ public:
     size_t indexOf(const MLVar *v) const;
     const MLInfo *infoOf(const MLNode *node) const;
 
+    MLVar *getVarFromSymid(size_t symid);
+
     void visit(MLVisitorPre pre, MLVisitorPost post, void *ud);
     void dump(BufSink *sink, const StringPool& sp, Options options) const;
 
@@ -249,6 +253,8 @@ public:
     PodArray<MLVar> vars;
     PodArray<MLExternal> externals;
     PodArray<MLFunc> funcs;
+
+    PodArray<u32> symToVarRemap; // Maps symbol index to index in vars[]
 
     GC& gc;
 
@@ -271,7 +277,7 @@ private:
 
     void _resolveVars(const size_t *unresolved, size_t n, Symstore& syms, StringPool& sp);
 
-    void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl); // may reallocate dst
+    void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, const StringPool& sp); // may reallocate dst
     void _cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl);
 
     MLNode *_add(size_t n); // add a couple nodes to the end as one block; points to first node.
@@ -279,7 +285,6 @@ private:
     MLCh _setupList(MLNode *& node, size_t n); // makes node a list, returns ptr to start of list elems. may reallocate and invalidate note.
     MLCh _setupChDefault(Queue<Cons>& q, MLNode *node, const HLNode *hl, MLCmd cmd);
 
-    sref _decllist(Queue<Cons>& q, MLNode *& dst, const HLNode *decllist);
+    sref _decllist(Queue<Cons>& q, MLNode *& dst, const HLNode *decllist, const StringPool& sp);
     void _opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl);
-
 };

@@ -22,9 +22,23 @@ HStr lenhash(uhash h, const char * const s)
 // same hash but known length
 uhash memhash(uhash h, const void *buf, size_t size)
 {
+    assert(size);
     const unsigned char *p = (const unsigned char*)buf;
     do
         h = (h << 5u) + (h >> 2u) + *p++;
+    while(--size);
+    return h;
+}
+
+uhash fnv1aUpdate(uhash h, const void *buf, size_t size)
+{
+    assert(size);
+    const unsigned char *p = (const unsigned char*)buf;
+    do
+    {
+        h ^= *p++;
+        h *= 0x1000193;
+    }
     while(--size);
     return h;
 }
