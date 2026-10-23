@@ -1,0 +1,7 @@
+-- Type errors involving upvalues
+### mutable upvalue assigned a value of another type
+uint a := 1
+func f() { a = +1 }
+### upvalue returned as the wrong type
+uint a = 1
+func f() -> string return a

@@ -1,0 +1,42 @@
+-- Newlines are insignificant, except that a call's '(' must be on the callee's line
+### call arguments spanning lines
+func f(uint a, uint b) return a + b
+var x = f(
+    1,
+    2
+)
+### binary operator at line end continues the expression
+uint a = 1 +
+    2
+### binary operator at line start continues the expression
+uint a = 1
+    + 2
+### method call chain across lines
+string s = "abc"
+var n = s
+    :sub(0, 1)
+    :len()
+### field access across lines
+table t = {x={y=1}}
+var v = t
+    .x
+    .y
+### return without value before closing brace on the next line
+func f()
+{
+    return
+}
+### block on the line after a declaration
+-- must stay a block if T{...} construction sugar is added
+uint x = 1
+var a = x
+{ uint b = 2 }
+### return values continuing on the next line after a comma
+func f() return 1,
+    2
+### return value expression continuing on the next line
+func f() return 1 +
+    2
+### return without value at end of file
+func f() { }
+return

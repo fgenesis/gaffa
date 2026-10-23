@@ -1,0 +1,42 @@
+-- Malformed function definitions
+### mutual recursion without defer
+func aa() return bb()
+func bb() return aa()
+### function redefinition
+func f() {}
+func f() {}
+### function name clashes with a variable
+uint f = 1
+func f() {}
+### method redefinition in the same namespace
+type T = {x=float}
+func T.f(T a) {}
+func T:f() {}
+### variadic parameter not last
+func f(uint ..., uint x) {}
+### two variadic parameters
+func f(uint ..., float ...) {}
+### variadic return type not last
+func f() -> uint..., float {}
+### unknown return marker not last
+func f() -> ?, uint {}
+### missing parameter list
+func f {}
+### missing body
+func f()
+### anonymous function as a statement
+func() {}
+### method definition with :::
+type T = {x=float}
+func T:::len() return 1
+### namespaced function defined with ::
+type T = {x=float}
+func T::f() {}
+### return arrow without types
+func f() -> {}
+### unknown function attribute
+func [fast] f() {}
+### closure referring to itself through its variable
+-- the variable is not visible in its own initializer, so 'f' is an external symbol
+-- that then clashes with the local declaration
+var f = func(uint n) return f(n)

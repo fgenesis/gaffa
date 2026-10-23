@@ -1,0 +1,19 @@
+-- Literals that don't fit their target type
+### negative literal to uint
+uint a = -1
+### float literal with fraction to int
+int a = 1.5
+### integer literal not exactly representable as float
+float a = 16777217
+### unsigned literal too large for int
+int a = 9223372036854775808
+### positive signed literal overflowing int
+int a = +9223372036854775808
+### string to number
+uint a = "5"
+### number to string
+string s = 5
+### nil to non-optional
+uint a = nil
+### nil to any
+any a = nil

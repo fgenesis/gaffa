@@ -1,0 +1,93 @@
+-- Statements and control flow
+### function call as statement
+func f() return 1
+f()
+### method call as statement
+table t = {}
+t:clear()
+### call with ignored return values
+func f() return 1, 2
+f()
+f()#1
+### assignment to field and index
+table t = {}
+t.x = 1
+t["y"] = 2
+t.x, t.y = 3, 4
+### assignment to nested field
+table t = {a={}}
+t.a.b = 1
+### assignment to field of a method call result
+table t = {}
+t:get().x = 1
+### assignment to field of a call result
+func f() return {}
+f().x = 1
+### parenthesized assignment target
+uint a := 0
+(a) = 1
+### if / else chain
+bool a = true
+if(a) {} else if(!a) {} else {}
+### if without braces
+bool a = true
+uint b := 0
+if(a) b = 1 else b = 2
+### dangling else binds to the inner if
+bool a = true
+uint b := 0
+if(a) if(a) b = 1 else b = 2
+### while loop
+uint i := 0
+while(i < 10) i = i + 1
+### while loop with block
+uint i := 0
+while(i < 10) { i = i + 1 }
+### for over range
+for(uint i = 0..10) {}
+### for over range with step
+for(uint i = 0..10..2) {}
+### for over range without start
+uint n = 10
+for(uint i = ..n) {}
+### for over open range
+for(uint i = 0..) { break }
+### open range with step
+for(uint i = 0.. ..2) { break }
+### for over table
+table t = {}
+for(var k, v = t) {}
+for(var v = t) {}
+### for with several iterators
+table t = {}
+for(var k, v = t; uint i = 0..) {}
+### break and continue
+for(uint i = 0..10) { if(i == 5) break else continue }
+### nested loops without braces
+for(uint i = 0..3) for(uint j = 0..3) {}
+### return at file level
+return 1
+### return with several values at file level
+return 1, "two", 3.0
+### return without values
+func f() { return }
+### return without values followed by a declaration
+-- 'return' must not take the next line's declaration as its value
+func f(bool b)
+{
+    if(b) return
+    uint x = 1
+}
+### return without values at end of nested block
+func f() { if(true) { return } }
+### empty blocks
+{}
+{{}}
+{ {} {} }
+### semicolons as statement separators
+uint a := 0; a = 1; a = 2;
+### export declarations
+export uint a = 1
+export func f() return 1
+### export with explicit name
+export ("b") uint a = 1

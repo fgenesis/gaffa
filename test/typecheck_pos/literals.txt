@@ -1,0 +1,33 @@
+-- Literal typing and implicit conversion of constants
+### unsigned literal
+uint a = 5
+### signed literals
+int a = +5
+int b = -5
+### unsigned literal to int when the value fits
+int a = 5
+### signed literal to uint when the value fits
+uint a = +5
+uint b = -0
+### integer literal to float
+float a = 1
+float b = -1
+float c = +16777216
+### float literal
+float a = 0.1
+### largest literals
+uint a = 18446744073709551615
+int b = -9223372036854775808
+int c = +9223372036854775807
+### literal forms keep their value
+uint a = 0x10
+uint b = 0b101
+uint c = 0o17
+uint d = 1_000
+float e = 0.
+float f = .5
+### string literal
+string s = "x"
+### bool constants
+bool a = true
+bool b = false

@@ -1,0 +1,4 @@
+-- a ( on a new line must not silently continue the previous expression as a call
+var f = func(int x) return x
+var a = f
+(+1)

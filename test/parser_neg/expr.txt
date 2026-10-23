@@ -1,0 +1,56 @@
+-- Malformed expressions
+### binary operator without right operand at end of file
+uint a = 1 +
+### binary operator without right operand before next statement
+uint a = 1 +
+uint b = 2
+### unbalanced parentheses
+uint a = (1 + 2
+### extra closing parenthesis
+uint a = 1 + 2)
+### empty parentheses
+uint a = ()
+### unclosed table constructor
+table t = {1, 2
+### unclosed array constructor
+var a = [1, 2
+### missing comma in table constructor
+table t = {x=1 y=2}
+### missing comma in array constructor
+var a = [1 2]
+### statement keyword as value
+uint a = return
+### value block prefix without block
+uint a = $
+### range outside of an iterator
+var r = 0..10
+### ternary operator does not exist
+uint a = true ? 1 : 2
+### assignment used as expression
+uint a := 0
+uint b := 0
+a = (b = 1)
+### chained assignment
+uint a := 0
+uint b := 0
+a = b = 1
+### compound assignment does not exist
+uint a := 0
+a += 1
+### increment does not exist
+uint a := 0
+a++
+### method call without parentheses
+string s = "a"
+var n = s:len
+### field name is a keyword
+table t = {}
+var a = t.if
+### binary ! does not exist
+bool a = true ! false
+### call adjust on something that is not a call
+uint x = 1
+var a = (x)#1
+### two commas in call arguments
+func f(uint a, uint b) return a
+var x = f(1,,2)

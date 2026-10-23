@@ -1,0 +1,8 @@
+-- Lexer error tokens. Lexer::errtok() does not advance past the bad input and
+-- Parser::advance() retries in a loop, so each of these currently hangs the parser.
+### unrecognized character
+uint a = 1 ` 2
+### at sign not followed by a quote
+uint a = @x
+### unterminated string literal
+string s = "abc

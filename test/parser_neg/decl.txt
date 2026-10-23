@@ -1,0 +1,66 @@
+-- Declarations that must be rejected by the parser
+### declaration without value
+int a
+### missing value at end of file
+uint a =
+### missing value before next statement
+uint a =
+uint b = 1
+### mutable deferred declaration
+int x := defer
+### assignment to immutable variable
+uint a = 1
+a = 2
+### assignment to immutable variable from a nested block
+uint a = 1
+{ a = 2 }
+### redefinition in the same scope
+uint a = 1
+uint a = 2
+### use before declaration in the same scope
+uint b = a
+uint a = 1
+### self-referencing declaration at file scope
+-- 'a' on the right is an external symbol, which then clashes with the local 'a'
+var a = a
+### self-referencing declaration with a type
+T t = t
+### type name reused as variable name
+int int = 1
+### variable used as its own type
+a a = 0
+### both := and =
+uint a := 1 = 2
+### var without name
+var = 1
+### type after var without colon
+var x int = 1
+### two type names in a row
+uint int x = 1
+### := outside of a declaration
+uint a := 1
+a := 2
+### trailing comma in value list
+uint a, b = 1, 2,
+### trailing comma in name list
+uint a, = 1
+### deferred symbol used but never re-declared
+int x = defer
+func f() return x
+### deferred symbol used directly before it is declared
+int x = defer
+int y = x
+int x = +0
+### export inside a function
+func f()
+{
+    export uint x = 1
+}
+### assignment to function parameter
+func f(uint a) { a = 1 }
+### parameter without type
+func f(x) {}
+### assignment to loop variable
+for(uint i = 0..3) i = 1
+### assignment to loop variable from a closure
+for(uint i = 0..3) { var f = func() { i = 1 } }

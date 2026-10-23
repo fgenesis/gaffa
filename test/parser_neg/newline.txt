@@ -1,0 +1,23 @@
+-- A '(' on a new line is ambiguous (call or new statement) and must be rejected.
+-- Values of return/emit must start on the same line as the keyword.
+### parenthesized statement after a declaration
+table t = {}
+var a = t
+(t).x = 1
+### call result followed by parentheses on the next line
+func f() return func(uint x) return x
+var g = f()
+(1)
+### return value on the next line
+-- 'return' ends at the line break, so '1' is a stray statement
+func f() -> uint
+{
+    return
+        1
+}
+### several return values starting on the next line
+func f()
+{
+    return
+        1, 2
+}

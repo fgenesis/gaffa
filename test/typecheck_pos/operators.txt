@@ -1,0 +1,43 @@
+-- Operator typing and constant folding
+### operand order of subtraction
+-- underflows if the operands get swapped
+uint a = 5 - 3
+### operand order of division
+float a = 1.0 / 4.0
+uint b = 7 // 2
+### operand order of concatenation
+string s = "a" ++ "b"
+### operand order of shift
+uint a = 1 << 3
+### division yields float
+float a = 3 / 2
+### integer division of ints
+int a = +7 // +2
+### mixed literal and int
+int a = +1 + 1
+### concatenation converts to string
+string s = "n=" ++ 5
+### comparisons yield bool
+bool a = 1 == 1
+bool b = 1.0 < 2.0
+bool c = "a" == "a"
+### logic operators on bool
+bool a = true && !false || false
+### length yields uint
+uint a = #"abc"
+### unary minus turns uint into int
+uint u = 5
+int i = -u
+### unary plus turns uint into int
+uint u = 5
+int i = +u
+### bit operations
+uint a = ~0 ^ 0xff
+### long constant expression
+uint a = (1 + 2) * 3 - 4 // 2 + (7 - 6)
+### capture operator turns a failing expression into an error value
+uint? r = ??(1 // 0)
+### capture operator on a valid expression
+uint? r = ??(1 + 1)
+### modulo
+uint a = 7 % 3

@@ -1,0 +1,88 @@
+-- Function typing
+### deduced return type
+func f() return +1
+int a = f()
+### declared return type
+func f() -> int return +1
+int a = f()
+### literal converted to declared return type
+func f() -> float return 1
+float a = f()
+### several return values
+func f() return 1, 2.0
+uint a, float b = f()
+### extra return values are dropped
+func f() return 1, 2.0
+uint a = f()
+### return values adjusted with #
+func f() return 1, 2.0
+uint a = f()#1
+### parameters
+func add(uint a, uint b) return a + b
+uint x = add(1, 2)
+### literal arguments converted to parameter types
+func f(float a, int b) return a
+float x = f(1, 2)
+### recursion with declared return type
+func fact(uint n) -> uint { if(n == 0) return 1 return n * fact(n - 1) }
+uint x = fact(5)
+### recursion with deduced return type
+func fact(uint n) { if(n == 0) return 1 return n * fact(n - 1) }
+uint x = fact(5)
+### mutual recursion with defer
+var odd = defer
+func even(uint n) -> bool { if(n == 0) return true return odd(n - 1) }
+func odd(uint n) -> bool { if(n == 0) return false return even(n - 1) }
+bool x = even(4)
+### function as value
+func f(uint x) return x
+var g = f
+uint y = g(1)
+### function in a mutable variable
+func f(uint x) return x
+func g(uint x) return x + 1
+var h := f
+h = g
+uint y = h(1)
+### variadic function
+func sum(uint ...) { uint s := 0 for(uint x = ...) s = s + x return s }
+uint x = sum(1, 2, 3)
+### variadic count
+func n(...) return #...
+uint x = n(1, "a", 2.0)
+### several return values passed as arguments
+func two() return 1, 2
+func add(uint a, uint b) return a + b
+uint x = add(two())
+### only the last argument expands
+func two() return 1, 2
+func add3(uint a, uint b, uint c) return a + b + c
+uint x = add3(two()#1, two())
+### function with a type parameter returning a closure
+func mkadd(type T) return func(T a, T b) return a + b
+var addu = mkadd(uint)
+uint x = addu(1, 2)
+### function defined after a file-level return
+return 1
+func f() {}
+### unused function
+func f(uint a) return a
+### function referencing a later symbol through defer
+uint x = defer
+func f() return x
+uint x = 1
+uint y = f()
+### void function
+func f() -> void {}
+### method call
+type P = {x=float}
+func P:getx() return self.x
+P p = {x=1.0}
+float x = p:getx()
+### namespaced function call
+type P = {x=float}
+func P.make(float x) return P({x=x})
+P p = P.make(1.0)
+### method on a builtin type
+func string:twice() return self ++ self
+string s = "a":twice()

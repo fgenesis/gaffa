@@ -1,0 +1,4 @@
+-- ; ends the statement, so the ( starts a new one
+table t = {}
+var a = t;
+(t).x = 1

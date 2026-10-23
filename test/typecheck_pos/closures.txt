@@ -1,0 +1,75 @@
+-- Upvalues, closures and function splitting (exercises MLIR slot allocation)
+### immutable upvalue
+uint a = 1
+func f() return a
+uint b = f()
+### mutable upvalue
+uint a := 1
+func f() { a = a + 1 }
+### upvalue from enclosing function
+func outer(uint a)
+{
+    func inner() return a
+    return inner()
+}
+uint x = outer(1)
+### upvalues through two levels
+func A(uint a)
+{
+    func B(uint b)
+    {
+        func C(uint c) return a + b + c
+        return C
+    }
+    return B
+}
+var b = A(100)
+var c = b(20)
+uint x = c(3)
+### two closures sharing a mutable upvalue
+func counter()
+{
+    uint n := 0
+    var inc = func() { n = n + 1 }
+    var get = func() return n
+    return inc, get
+}
+var inc, get = counter()
+uint x = get()
+### closure capturing a loop variable
+for(uint i = 0..3) { var f = func() return i }
+### closure in a loop capturing a mutable outer variable
+uint total := 0
+for(uint i = 0..3) { var f = func() { total = total + i } }
+### closures three levels deep without braces
+var mk = func(uint a) return func(uint b) return func(uint c) return a + b + c
+uint x = mk(1)(2)(3)
+### upvalue used by sibling functions
+uint shared := 0
+func a() { shared = 1 }
+func b() return shared
+### local shadowing an outer variable
+uint x = 1
+func f()
+{
+    uint x = 2
+    return x
+}
+### function defined in a branch
+bool c = true
+if(c) { func f() return 1 }
+### function defined in a loop body
+for(uint i = 0..3) { func f() return i }
+### function capturing a deferred variable
+uint later = defer
+func f() return later
+uint later = 5
+### deeply nested blocks with locals
+{ uint a = 1 { uint b = a { uint c = b { uint d = c { uint e = d } } } } }
+### chain of functions
+func f1() return 1
+func f2() return f1() + 1
+func f3() return f2() + 1
+func f4() return f3() + 1
+func f5() return f4() + 1
+uint x = f5()

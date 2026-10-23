@@ -1,0 +1,35 @@
+-- Operator type errors and exceptions during constant folding
+### subtraction underflow
+uint a = 3 - 5
+### addition overflow
+uint a = 18446744073709551615 + 1
+### signed overflow
+int a = +9223372036854775807 + +1
+### integer division by zero
+uint a = 1 // 0
+### float NaN
+float a = 0.0 / 0.0
+### division yields float, not uint
+uint a = 4 / 2
+### mixed int and uint operands
+func f(uint u, int i) return u + i
+### equality requires identical types
+bool b = 5 == +5
+### comparison chain
+bool b = 1 < 2 < 3
+### logic operators require bool
+bool b = 1 && 2
+### not requires bool
+bool b = !1
+### bit operations on float
+float f = 1.0 & 2.0
+### bit inverse on float
+float f = ~1.0
+### + on strings
+string s = "a" + "b"
+### arithmetic on bool
+bool b = true + false
+### length of a number
+uint n = #5
+### negated uint returned as uint
+func f(uint u) -> uint return -u

@@ -1,0 +1,28 @@
+-- Lexer-level input that must be rejected, not silently turned into something else
+### keyword as variable name
+uint for = 1
+### nil as variable name
+uint nil = 1
+### keyword as function name
+func return() {}
+### keyword as namespaced function name without quoting
+type T = {x=float}
+func T.if() {}
+### number followed by letters
+uint a = 123abc
+### hex prefix without digits
+uint a = 0x
+### invalid hex digit
+uint a = 0xfg
+### two dots in a number
+float a = 1.5.3
+### invalid binary digit
+uint a = 0b102
+### invalid octal digit
+uint a = 0o9
+### exponent without digits
+float a = 1e
+### exponent with sign but without digits
+float a = 1e+
+### integer literal overflow
+uint a = 18446744073709551616

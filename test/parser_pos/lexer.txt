@@ -1,0 +1,88 @@
+-- Lexer edge cases that must parse
+### integer literal forms
+uint a = 0
+uint b = 000005
+uint c = 0xff
+uint d = 0XFF
+uint e = 0xDeadBeef
+int f = -0x10
+int g = +0
+int h = -0
+### digit separators
+uint a = 1_000_000
+uint b = 0xff_ff
+### binary and octal literals
+uint a = 0b0010100
+uint b = 0o777
+### float literal forms
+float a = 0.0
+float b = .5
+float c = 5.
+float d = -5.01
+float e = +.2
+float f = 387.87986
+### exponent notation
+float a = 1e10
+float b = 1.5e-3
+float c = 2E+4
+float d = .5e1
+float e = -1e3
+### hex float literals
+float a = 0x01.
+float b = -0x0.f0
+### string literal forms
+string a = "double"
+string b = 'single with "quotes" inside'
+string c = "escaped \" quote"
+string d = "comment -- inside a string"
+string e = ""
+string f = 'it\'s'
+### multi-line string literal
+string s = "line one
+line two"
+uint after = 1
+### identifiers starting with a keyword
+uint format = 0
+uint iffy = 1
+uint variable = 2
+uint orange = 3
+### more identifiers starting with a keyword
+uint android = 0
+uint nilly = 1
+uint elsewhere = 2
+uint constant = 3
+uint returned = 4
+uint emitter = 5
+uint deferred = 6
+uint exports = 7
+uint breakfast = 8
+uint continued = 9
+uint whilst = 10
+uint functional = 11
+### identifiers containing a keyword
+uint xfor = 0
+uint a_if = 1
+uint _var = 2
+### non-keyword builtin names can be shadowed locally
+{
+    uint self = 1
+    uint type2 = 2
+}
+### at-identifiers
+uint @"with space" = 1
+uint @"if" = 2
+uint x = @"with space" + @"if"
+### comment directly after code
+uint a = 1-- comment
+uint b = 2--comment
+### double minus starts a comment, as in Lua
+-- 5--1 is 5 followed by a comment, not 5 - (-1)
+uint a = 5--1
+### minus followed by a negative literal
+int a = +5 - -1
+### less-than followed by a negative literal
+int x = +0
+bool b = x<-1
+### comment at end of file without newline
+uint a = 1
+-- no newline after this

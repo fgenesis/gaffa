@@ -1,0 +1,83 @@
+-- Types as values, structs, tables, optionals
+### type alias
+type T = uint
+T a = 1
+### type in var declaration
+type T = uint
+var a: T = 1
+### mutable type variable keeps the type from declaration time
+type T := uint
+T a = 1
+T = string
+T b = "hi"
+### rebinding an imported type name
+type int := int
+int = float
+int x = 1.5
+### struct type from table
+type P = {x=float, y=0.0}
+P p = {x=1.0}
+P q = {x=1.0, y=2.0}
+### struct field literal converted
+type P = {x=float}
+P p = {x=1}
+### explicit struct construction
+type P = {x=float}
+var p = P({x=1.0})
+### struct field access
+type P = {x=float}
+P p = {x=1.0}
+float f = p.x
+### structurally equal types are the same type
+type A = {x=float}
+type B = {x=float}
+A a = {x=1.0}
+B b = a
+### optional field can be omitted
+type P = {x=float, y=float?}
+P p = {x=1.0}
+### nested struct
+type In = {v=uint}
+type Out = {i=In}
+Out o = {i={v=1}}
+uint v = o.i.v
+### array type constructor
+type FA = Array(float)
+FA a = [1.0, 2.0]
+### table type constructor
+var t: Table(string, uint) = {}
+### struct type created by a function at link time
+func mk(type T) return type({a=T, b=T})
+type V = mk(uint)
+V v = {a=1, b=2}
+### table literal types
+var a = {1, 2, 3}
+uint x = a[0]
+var b = {x=1}
+uint y = b.x
+### mixed table literal
+var t = {1, x=2, 3}
+uint y = t.x
+### array literal
+var a = [1, 2, 3]
+uint x = a[0]
+### specialized table to generic table
+var t = {1, 2}
+table g = t
+### value to optional
+uint? a = 1
+### optional unwrapped with =>
+uint? a = 1
+if(a => v) { uint w = v }
+### unwrap binding combined with another condition
+uint? a = 1
+if(a => v && v > 0) { uint w = v }
+### optional unwrapped with *
+uint? a = 1
+uint b = *a
+### any holds anything
+any a := 1
+a = "x"
+### any to concrete type is checked at runtime
+any a = 1
+uint b = a

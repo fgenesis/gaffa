@@ -1,0 +1,5 @@
+var f = func(int x) return x
+var a = f(+1)
+var b = f(
+    +1
+)

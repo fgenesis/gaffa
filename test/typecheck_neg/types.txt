@@ -1,0 +1,61 @@
+-- Type errors around types, structs, tables, optionals
+### variable used as a type
+uint a = 1
+a b = 2
+### value doesn't match type alias
+type T = uint
+T a = "x"
+### mutable type variable after reassignment
+type T := uint
+T = string
+T a = 1
+### non-type assigned to a type variable
+type T = 5
+### struct missing a required field
+type P = {x=float, y=float}
+P p = {x=1.0}
+### struct field with wrong type
+type P = {x=float}
+P p = {x="a"}
+### struct field order is part of the type
+type A = {x=float, y=float}
+type B = {y=float, x=float}
+A a = {x=1.0, y=2.0}
+B b = a
+### table variable is not implicitly a struct
+type P = {x=float}
+var t = {x=1.0}
+P p = t
+### types are immutable
+type P = {x=float}
+P.z = float
+### unknown field
+type P = {x=float}
+P p = {x=1.0}
+float f = p.y
+### optional to non-optional without unwrap
+uint? a = 1
+uint b = a
+### number in condition
+uint a = 1
+if(a) {}
+### string in condition
+if("a") {}
+### generic table to specialized table
+table t = {}
+var u: Table(uint, uint) = t
+### wrong value type for typed table
+var t: Table(string, uint) = {}
+t.x = "a"
+### array element type mismatch
+type FA = Array(float)
+FA a = ["x"]
+### index on a number
+uint a = 1
+uint b = a[0]
+### field access on a number
+uint a = 1
+uint b = a.x
+### unwrap binding outside of a condition
+uint? a = 1
+var b = a => v

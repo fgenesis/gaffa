@@ -1,0 +1,35 @@
+-- Loops and conditions
+### range loop
+for(uint i = 0..10) {}
+### range loop with int bounds
+for(int i = -5..+5) {}
+### float range with step
+for(float f = 0.0..1.0..0.25) {}
+### range with variable bound
+uint n = 10
+for(uint i = ..n) {}
+### loop variable used in body
+uint s := 0
+for(uint i = 0..10) s = s + i
+### table iteration
+var t = {x=1, y=2}
+for(var k, v = t) { string kk = k uint vv = v }
+### array iteration with index
+var a = [1, 2, 3]
+for(var i, v = a) { uint ii = i uint vv = v }
+### string iteration over bytes
+for(uint c = "abc") {}
+### several iterators
+var a = [1, 2, 3]
+for(var v = a; uint i = 0..) {}
+### while loop with mutable counter
+uint i := 0
+while(i < 10) i = i + 1
+### if with bool
+bool b = true
+if(b) {} else {}
+### if with optional
+uint? o = 1
+if(o) {}
+### nil in condition
+if(nil) {}

@@ -1,0 +1,16 @@
+-- Loop and condition type errors
+### range bounds of different types
+for(uint i = 0..+10) {}
+### loop variable type doesn't match range
+for(string s = 0..10) {}
+### float range to uint loop variable
+for(uint i = 0.0..1.0) {}
+### too many loop variables for a range
+uint n = 5
+for(var a, b = 0..n) {}
+### iterating over a number
+for(var x = 5) {}
+### non-bool while condition
+while(1) {}
+### non-bool if condition
+if(1) {}

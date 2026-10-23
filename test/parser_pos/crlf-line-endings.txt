@@ -1,0 +1,4 @@
+uint a = 1
+uint b = 2
+-- comment
+uint c = a + b

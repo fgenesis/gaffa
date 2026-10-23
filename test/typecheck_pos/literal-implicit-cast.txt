@@ -4,4 +4,3 @@ float c = 1
 float d = +1
 float e = -1
 uint f = +1
-bool g = 1

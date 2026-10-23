@@ -1,0 +1,83 @@
+-- Functions
+### named functions
+func a() {}
+func b() return 1
+func c(uint x) -> uint return x
+func d(uint x, float y) -> float, uint { return y, x }
+### parameters sharing a type
+func f(uint a, b, c) return a + b + c
+### parameters of different types
+func f(uint a, float b, string c) {}
+### variadic parameters
+func f(uint ...) {}
+func g(uint a, ...) {}
+### variadic count in the body
+func f(uint ...) { var n = #... }
+### iterating over variadic values
+func f(uint ...) { for(uint x = ...) {} }
+### forwarding variadic values
+func f(uint ...) return ...
+func g(uint ...) return f(...)
+### variadic return types
+func f() -> uint... return 1, 2, 3
+func g() -> uint, float... return 1
+### unknown return values
+func f() -> ? return 1
+func g() -> ... return 1
+### no return values
+func f() -> nil {}
+### void return type
+func f() -> void {}
+### recursion
+func fact(uint n) -> uint { if(n == 0) return 1 return n * fact(n - 1) }
+### mutual recursion with defer
+var odd = defer
+func even(uint n) -> bool { if(n == 0) return true return odd(n - 1) }
+func odd(uint n) -> bool { if(n == 0) return false return even(n - 1) }
+### nested function
+func outer(uint a)
+{
+    func inner(uint b) return a + b
+    return inner(1)
+}
+### three levels of upvalues
+func A(uint a)
+{
+    func B(uint b)
+    {
+        func C(uint c) return a + b + c
+        return C
+    }
+    return B
+}
+### closure returning a closure without braces
+var mk = func(uint a) return func(uint b) return a + b
+### namespaced function and method
+type Point = {x=float, y=float}
+func Point.zero() return Point({x=0.0, y=0.0})
+func Point:len() return self.x + self.y
+### method on a builtin type
+func string:twice() return self ++ self
+### same function name in different namespaces
+type A = {x=float}
+type B = {x=float}
+func A.len(A a) return a.x
+func B.len(B b) return b.x
+### namespaced function does not shadow a plain name
+type A = {x=float}
+func A.len(A a) return a.x
+var n = len("abc")
+### namespaced value assigned with ::
+type A = {x=float}
+A::origin = A({x=0.0})
+### function attribute
+func [pure] f(uint x) return x
+### closure with attribute
+var f = func [pure] (uint x) return x
+### struct construction without call parentheses
+type P = {x=float}
+var p = P{x=1.0}
+### returning a table literal without braces
+func f() return {x=1}
+### closure called immediately as a statement
+(func() return 1)()

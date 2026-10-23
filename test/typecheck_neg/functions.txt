@@ -1,0 +1,62 @@
+-- Function type errors
+### wrong return type
+func f() -> int return "x"
+### too few return values
+func f() -> int, int return +1
+### too many return values
+func f() -> int return +1, +2
+### missing return in function with return type
+func f() -> int {}
+### different return types in different branches
+func f(bool b) { if(b) return +1 return 1.5 }
+### different number of return values in different branches
+func f(bool b) { if(b) return 1 return 1, 2 }
+### void function returning a value
+func f() -> void return 1
+### using the result of a void function
+func f() -> void {}
+var x = f()
+### wrong argument type
+func f(int a) return a
+var x = f(1.5)
+### too many arguments
+func f(int a) return a
+var x = f(+1, +2)
+### too few arguments
+func f(int a, int b) return a
+var x = f(+1)
+### too few values for a declaration
+func f() return 1
+uint a, b = f()
+### call adjusted to more values than available
+func f() return 1, 2
+uint a, b, c = f()#3
+### call adjust binds to the call only
+-- f()#1 + 1 is one value, so b gets nothing
+func f() return 1, 2, 3
+uint a, b = f()#1 + 1
+### calling a non-function
+uint a = 1
+uint b = a()
+### calling a method that does not exist
+uint a = 1
+uint b = a:nope()
+### method called on a value of another type
+type P = {x=float}
+type Q = {y=float}
+func P:getx() return self.x
+Q q = {y=1.0}
+float x = q:getx()
+### recursion whose return type can't be deduced
+func f() return f()
+var x = f()
+### function assigned to a number
+uint u = func() return 1
+### parameter type is not a type
+uint T = 1
+func f(T x) return x
+### parameter type is fixed when the function is declared
+type T := uint
+func f(T x) return x
+T = string
+var y = f("hi")
