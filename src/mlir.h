@@ -12,6 +12,9 @@ class StringPool;
 class Symstore;
 class VM;
 
+// Rules:
+// exprs that survive folding must have <= 1 params, since MLNode::m.p[1] is overlaid with the deduced type
+// stmts can have up to 2 params
 enum MLCmd
 {
     ML_LIST = 0,        // always stmt
@@ -25,9 +28,9 @@ enum MLCmd
                         // kind (#params) [#children]
 
     ML_CONST = _OP_MAX, // expr (1, consts idx)
-    ML_VAR,             // expr (1, symid)
+    ML_VAR,             // expr (1, var idx)
     ML_EXT,             // expr (1, external table idx)
-    ML_NAMEDECL,        // stmt (1, name) [2, namespace, value]
+    ML_NAMEDECL,        // stmt (2, name, symid) [2, namespace, value]
     ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- num of vars = #typeexprs; varidx = start of locals
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
@@ -58,7 +61,7 @@ enum MLCmd
 
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
-    _ML_UVAR, // Unresolved identifier // special (2, name, symid) // replaced before type analysis
+    _ML_UVAR, // Unresolved identifier // special; replaced before type analysis
     _ML_UDECL, // Unremapped decl node
     _ML_ERROR, // Error. If encountered after folding, the tree isn't sound and no code can be generated.
 };
@@ -218,6 +221,7 @@ struct MLFunc
     size_t enclosingFuncIdxPlus1; // If 0, this is the root function, ie. file scope
     PodArray<u32> locals; // The first info.nargs entries are params, the rest declared locals
     PodArray<MLUpvalRef> upvals;
+    DFunc *dfunc;
 };
 
 class MLIR

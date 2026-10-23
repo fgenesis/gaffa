@@ -4,7 +4,7 @@
 
 
 SymTable::SymTable()
-    : tab(PRIMTYPE_ANY, PRIMTYPE_ANY)
+    : tab(PRIMTYPE_ANY, PRIMTYPE_ANY), next(NULL)
 {
 }
 
@@ -51,7 +51,8 @@ const Val* SymTable::lookupInNamespace(Type ns, sref key) const
     ValU k;
     k.type = (PrimType)key;
     k.u.opaque = ns;
-    return tab.getp(k);
+    const Val *v = tab.getp(k);
+    return v ? v : (next ? next->lookupInNamespace(ns, key) : NULL);
 }
 
 const Val *SymTable::lookupObjectMethod(const GCobj* obj, sref methodname)

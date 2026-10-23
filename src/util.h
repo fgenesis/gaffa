@@ -112,7 +112,7 @@ static __forceinline __declspec(noreturn) void unreachable() { __assume(false); 
 static inline void unreachable() { assert(false && "unreachable"); }
 #endif
 
-
+// return true on overflow
 template<typename T>
 inline bool add_check_overflow(T* res, T a, T b)
 {
@@ -123,6 +123,7 @@ inline bool add_check_overflow(T* res, T a, T b)
 #endif
 }
 
+// return true on overflow
 template<typename T>
 inline bool mul_check_overflow(T* res, T a, T b)
 {
@@ -134,7 +135,6 @@ inline bool mul_check_overflow(T* res, T a, T b)
     return a && tmp / a != b;
 #endif
 }
-
 
 struct MaybeNum
 {
@@ -153,6 +153,7 @@ MaybeNum strtouint(const char* s, size_t maxlen = -1);
 
 MaybeNum strtouint_dec(const char* s, size_t maxlen = -1);
 // TODO: hex, oct, bin
+// TODO: remove, seems not needed anymore
 
 
 template<typename T>

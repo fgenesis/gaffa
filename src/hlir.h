@@ -12,7 +12,6 @@
 
 
 struct GC;
-struct HLFoldTracker;
 class Symstore;
 
 
@@ -68,10 +67,6 @@ enum HLNodeType
     HLNODE_EXPORT,
     HLNODE_NS_INDEX,
     HLNODE_NS_INDEXASSIGN,
-
-    // Intermediates; not produced by the parser
-    HLNODE_FUNC_PROTO,
-    HLNODE_RESOLVED_CALL
 };
 
 enum HLTypeFlags
@@ -288,45 +283,11 @@ struct HLFunction : HLNodeBase
     HLNode *body;
 };
 
-// generated during folding when function calls are resolved
-struct HLResolvedCall : HLNodeBase
-{
-    enum { EnumType = HLNODE_RESOLVED_CALL, Children = 1, DefaultValType = PRIMTYPE_AUTO };
-    HLNode *paramlist;
-    const DFunc *func;
-};
-
 struct HLExport : HLNodeBase
 {
     enum { EnumType = HLNODE_EXPORT, Children = 1 };
     HLNode *what;
     HLNode *name; // any expr
-};
-
-struct FuncProto
-{
-    FuncProto *New(GC& gc, size_t nodemem);
-    HLNode *body; // points to the AST behind the struct
-    FuncInfo info;
-    size_t refcount;
-    size_t memsize;
-    u32 lineend;
-
-    // cloned AST follows after the struct
-};
-
-// This intentionally has no automatic children, and serves as a recursion breaker.
-// The FuncProto is heap-allocated and potentially shared between multiple nodes when cloning.
-struct HLFuncProto : HLNodeBase
-{
-    enum { EnumType = HLNODE_FUNC_PROTO, Children = 0, DefaultValType = PRIMTYPE_FUNC };
-    FuncProto *proto;
-};
-
-enum HLFoldStep
-{
-    FOLD_INITIAL,    // Initial folding step that cloned the AST and does some initial optimization
-    FOLD_SPECIALIZE, // At this point, all external symbols need to be defined
 };
 
 struct HLPreVisitResult
@@ -372,8 +333,6 @@ struct HLNode
         HLSink sink;
         HLExport exprt;
         HLNamespaceIndex ns;
-        HLFuncProto funcproto;
-        HLResolvedCall resolvedcall;
 
         HLNode *aslist[3];
     } u;
@@ -485,7 +444,6 @@ public:
     inline HLNode *exprt()         { return allocT<HLExport>();        }
     inline HLNode *nsindex()       { return allocT<HLNamespaceIndex>();}
     inline HLNode *dummy()         { return allocT<HLDummy>();         }
-    inline HLNode *funcproto()     { return allocT<HLFuncProto>();     }
 
     HLNode *list(GC& gc, size_t prealloc);
 
@@ -498,27 +456,4 @@ private:
         HLNode *node = (HLNode*)bla.alloc(sizeof(HLNode));
         return node ? node->unsafemorph<T>() : NULL;
     }
-};
-
-struct HLFoldTracker
-{
-    VM &vm;
-    Symstore& syms;
-    SymTable &env;
-    HLIRBuilder& hlir;
-
-    unsigned stage;
-
-    std::vector<std::string> errors;
-    std::string filename;
-
-    inline bool isAutoToAny() const { return stage >= FOLD_SPECIALIZE; }
-    inline bool isPackageFunctions() const { return stage >= FOLD_SPECIALIZE; }
-
-
-    void error(const HLNode *where, const char *msg);
-    void warn(const HLNode *where, const char *msg);
-
-    // Ensures sub < reference. 'where' is the thing to typecheck, 'decl' is where reference comes from
-    bool checktype(Type sub, Type reference, const char *what, const HLNode *where, const HLNode *decl);
 };

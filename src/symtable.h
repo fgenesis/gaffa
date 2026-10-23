@@ -28,7 +28,12 @@ public:
     // Helpers
     const Val *lookupObjectMethod(const GCobj *obj, sref methodname);
 
+    inline tsize size() const { return tab.size(); }
+
 private:
     SymTable();
-    Table tab;
+    Table tab; // private for a reason, this is a non-standard table and must not be exposed
+public:
+    // Fallback pointer to next symbol table if a symbol isn't found in this one. Careful not to form circles!
+    const SymTable *next;
 };

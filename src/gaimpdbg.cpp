@@ -39,8 +39,6 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_FUNCTIONHDR:    return "functionhdr";
         case HLNODE_SINK:           return "sink";
         case HLNODE_EXPORT:         return "export";
-        case HLNODE_FUNC_PROTO:     return "funcproto";
-        case HLNODE_RESOLVED_CALL:  return "rcall";
     }
     return NULL;
 }
@@ -167,27 +165,6 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
             assert(false);
         }
     }
-    else if(n->type == HLNODE_FUNC_PROTO)
-    {
-        const FuncProto *fp = n->u.funcproto.proto;
-        printf(" -- Packaged function %s -> %s:\n", getTypeName(rt, fp->info.paramtype).c_str(), getTypeName(rt, fp->info.rettype).c_str());
-        dumprec(rt, fp->body, level+1);
-        return false;
-    }
-    else if(n->type == HLNODE_RESOLVED_CALL)
-    {
-        const HLResolvedCall& rc = n->u.resolvedcall;
-        const DFunc *f = rc.func;
-        const char *ft = NULL;
-        switch(f->info.flags & FuncInfo::FuncTypeMask)
-        {
-            case FuncInfo::LFunc: ft = "Lfunc"; break;
-            case FuncInfo::CFunc: ft = "Cfunc"; break;
-            case FuncInfo::GFunc: ft = "Gfunc"; break;
-            case FuncInfo::Proto: ft = "Proto"; break;
-        }
-        printf(" -- %s %s at %u", ft, getTypeName(rt, f->info.functype).c_str(), f->dbg ? f->dbg->linestart : 0);
-    }
     else
     {
         const char *tt = n->tok ? Lexer::GetTokenText((Lexer::TokenType)n->tok) : "";
@@ -209,11 +186,6 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
                 {
                     const DFunc *df = v.asFunc();
                     printf("function %s in line %d", df->dbg && df->dbg->name ? rt.sp.lookup(df->dbg->name).s : "?", df->dbg ? df->dbg->linestart : -1);
-                    if((df->info.flags & FuncInfo::FuncTypeMask) == FuncInfo::Proto)
-                    {
-                        printf(" -- Packaged function %s -> %s:\n", getTypeName(rt, df->info.paramtype).c_str(), getTypeName(rt, df->info.rettype).c_str());
-                        dumprec(rt, df->u.proto->body, level+1);
-                    }
                 }
                 break;
 

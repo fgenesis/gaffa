@@ -501,7 +501,7 @@ VMFUNC_IMM(callany, Imm_3xu32)
             case FuncInfo::CFunc:
                 pushFrame(VMARGS, imm, 0);
                 sbase = fbase;
-                return finishCCall(VMARGS, df->u.cfunc.f, nargs, df->upvals);
+                return finishCCall(VMARGS, df->u.cfunc.f, nargs, NULL); // TODO: upvalues?
 
             default:
                 unreachable();

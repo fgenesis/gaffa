@@ -563,6 +563,7 @@ dolist:
             const HLFuncDecl& decl = hl->u.funcdecl;
             HLIdent *hname = decl.ident->as<HLIdent>();
             dst->m.p[0] = hname->nameStrId;
+            dst->m.p[1] = hname->symid;
 
             MLCh s = _setupCh(dst, ML_NAMEDECL);
             assert(s.n == 2);
@@ -743,6 +744,10 @@ void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options
     unresolved.dealloc(gc);
 }
 
+// This is put on any external symToVarRemap[] so that referencing an external symbol accentidally
+// even though a local is intended it WILL cause an assert to fail
+enum { EXTERNAL_BIT = 1 << 31 };
+
 // Note: This could be split up into a function that does the vars and a postproc step
 // instead of pushing into unresolved vec (above). Would remove an allocation.
 void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, StringPool& sp)
@@ -765,13 +770,14 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
             assert(!mut);
             assert(!(sym->usage & SYMUSE_UPVAL));
 
-            symToVarRemap[symid] = (u32)externals.size();
+            u32 extid = (u32)externals.size();
+            symToVarRemap[symid] = extid | EXTERNAL_BIT;
 
             MLExternal *e = externals.alloc_n(gc, 1);
             e->name = sym->nameStrId;
 
             printf("EXT[%u]: %s @ symidx %u\n",
-                symToVarRemap[symid], sp.lookup(e->name).s, (unsigned)symid);
+                extid, sp.lookup(e->name).s, (unsigned)symid);
         }
         else
         {
@@ -795,13 +801,15 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
         {
             case _ML_UVAR: // Resolve and decide whether it becomes a local or an external
             {
+                // TODO: given EXTERNAL_BIT, can we get rid of storing the HLNode?
                 const HLIdent *hlident = node->tmp.hlnode->as<HLIdent>();
                 ScopeReferral referral = (ScopeReferral)hlident->ex.u.scoperef;
                 assert(referral != SCOPEREF_NOREF);
                 const Symstore::Sym *sym = syms.getsym(hlident->symid);
 
                 node->m.cmd = (sym->referencedHow & SYMREF_EXTERNAL) ? ML_EXT : ML_VAR;
-                node->m.p[0] = symToVarRemap[hlident->symid];
+                u32 idx = symToVarRemap[hlident->symid]; // var idx or ext idx
+                node->m.p[0] = idx & ~EXTERNAL_BIT;
                 break;
             }
 
@@ -890,6 +898,7 @@ struct MLFoldTracker
     std::vector<std::string> errors;
     std::vector<u32> typesrc; // x = typesrc[y] -> Which other node x did get node y its type from
     std::vector<u32> funcStack; // indices in MLIR::funcs[], so that [i-1] encloses [i]
+    std::vector<DFunc*> funcProtos; // DFunc objects that need to be built early for reasons and have yet to be integrated
 
     void error(const MLNode *where, const char *msg);
     void warn(const MLNode *where, const char *msg);
@@ -1319,7 +1328,7 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
     for(size_t i = 0; i < N; ++i)
     {
         MLNode *te = &typeexprs.ch[i];
-        MLVar *v = ft.mlir.getVarFromSymid(localid + i);
+        MLVar *v = &ft.mlir.vars[localid + i];
         v->decl = declidx;
         switch(v->kind)
         {
@@ -1347,6 +1356,7 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
                 break;
 
             case MLVar::CONSTVAL:
+            case MLVar::NAMEDECL:
                 assert(false && "constval during decl, should not be folded yet");
                 break;
 
@@ -1572,27 +1582,73 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         case ML_NAMEDECL:
         {
             MLNode *ns = node->firstChild();
-            MLNode *val = ns + 1;
+            MLNode *valnode = ns + 1;
             sref nameid = node->m.p[0];
+            u32 symid = node->m.p[1];
             const char *name = ft.str(nameid);
-            printf("ML namedecl '%s'\n", name);
-            // TODO: register by name
+            printf("ML namedecl '%s', symid %u\n", name, symid);
             switch(ns->aslist().n)
             {
-            case 0:
-                // It's a dummy entry -> no namespace -> make it a const local
-            case 1:
-                // Regsiter in namespace
-                if(ns->isconst() && val->isconst())
+                case 0:
                 {
-                    // Known at compile time -> register now
+                    // It's a dummy entry -> no namespace -> make it a const local, potentially exported
+                    // This is likely a function, but functions aren't availble yet.
+                    // Store the index of the node, which should hopefully be folded into a function
+                    // or some other constant value later.
+                    MLVar *v = ft.mlir.getVarFromSymid(symid);
+                    assert(v->name == nameid);
+                    v->kind = MLVar::CVAR;
+                    v->decl = ft.mlir.indexOf(node);
+                    Val val;
+
+                    // FIXME: folding a function does NOT immediately return it as an object
+                    switch(valnode->m.cmd)
+                    {
+                        case ML_FUNC:
+                        {
+                            DFunc *df = DFunc::GCNew(ft.gc());
+                            df->u.mlproto.nodeidx = ft.mlir.indexOf(valnode);
+                            df->dbg.name = nameid;
+                            // df->dbg.linestart =  // TODO
+                            // df->dbg.lineend =  // TODO
+                            val = Val(df);
+                        }
+                        break;
+                        case _ML_FUNCIDX:
+                        default:
+                            assert(false);
+                            break;
+                        case _ML_VAL:
+                            val = valnode->asVal();
+                            break;
+
+                    }
+
+                    v->u.val = val;
+
+                    //ft.env.addSymbol(ft.gc(), nameid, val);
+
+                    // TODO: exporting
                 }
-                else
-                {
-                    // Need to do it at runtime
-                }
-            default:
-                assert(false);
+                case 1:
+                    // Regsiter in namespace
+                    if(!ns->isconst())
+                    {
+                        // TODO: This restriction should be loosened at some point
+                        node->setError(ft.sp(), "Namespace should be a compile-time constant value");
+                        return;
+                    }
+
+                    if(val->isconst())
+                    {
+                        // Known at compile time -> register now
+                    }
+                    else
+                    {
+                        // Need to do it at runtime
+                    }
+                default:
+                    assert(false);
             }
         }
         break;
@@ -1841,7 +1897,11 @@ static void debugPrintFuncInfo(MLFoldTracker& ft, const MLFunc& f)
 
 bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
 {
-    MLFoldTracker ft = { *this, vm, syms, env, true };
+    SymTable *localenv = SymTable::GCNew(vm.rt->gc);
+    localenv->next = &env;
+    // TODO: also add an "exported" env; because we don't want to export ALL the local namedecls
+    MLFoldTracker ft = { *this, vm, syms, *localenv, true };
+
     ft.typesrc.resize(nodes.size());
     preFoldExternals(externals.data(), externals.size(), ft);
     preFoldVars(vars.data(), vars.size(), ft);
@@ -1857,8 +1917,11 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
     ft.funcStack.push_back(funcs.size() - 1);
     // Break the tree into individual functions and do some finalization.
     visit(foldPreErrorCheck, foldPostSplitFunctions, &ft);
+    // TODO: make func return localenv
     ft.funcStack.pop_back();
     assert(ft.funcStack.empty());
+
+    printf("Local symtol table: %u entries\n", localenv->size());
 
     size_t N = funcs.size();
     printf("MLIR: Broke tree into %u functions:\n", (unsigned)N);

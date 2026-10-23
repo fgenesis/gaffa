@@ -22,7 +22,6 @@ class DType;
 struct VM;
 struct HLNode;
 struct OpDef;
-struct FuncProto;
 
 // Base for any object instance.
 // Beware, variable sized! Do NOT derive from this class!
@@ -131,7 +130,10 @@ struct DFunc : public GCobj
             CFunc f;
 
         } cfunc;
-        FuncProto *proto; // Cloned from original parse tree as a single block of memory
+        struct
+        {
+            u32 nodeidx;
+        } mlproto;
         struct
         {
             InstChunk *chunk;
@@ -139,14 +141,12 @@ struct DFunc : public GCobj
         } gfunc;
     } u;
 
-    Val *upvals; // FIXME: remove
-
     FuncInfo info;
     // TODO: (DType: Func(Args, Ret))
 
     const OpDef *opdef; // Infos for codegen, if this function can be implemented as VM opcode directly
 
-    DebugInfo *dbg; // this is part of the vmcode but forwarded here for easier reference
+    DebugInfo dbg;
 
     // Slow path for compile-time eval and such
     int call(VM *vm, Val *a) const;
