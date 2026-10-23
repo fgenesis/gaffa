@@ -18,7 +18,6 @@ static const ShortEntry ShortTab[] =
     { "{",  Lexer::TOK_LCUR,   },
     { "}",  Lexer::TOK_RCUR,   },
     { "->", Lexer::TOK_RARROW, },
-    { "<-", Lexer::TOK_LARROW, },
     { "++", Lexer::TOK_CONCAT, },
     { "+",  Lexer::TOK_PLUS,   },
     { "-",  Lexer::TOK_MINUS,  },
@@ -54,6 +53,7 @@ static const ShortEntry ShortTab[] =
     { "&",  Lexer::TOK_BITAND  },
     { "|",  Lexer::TOK_BITOR   },
     { "$",  Lexer::TOK_DOLLAR  },
+    { "%",  Lexer::TOK_MOD     }
 };
 
 struct Keyword
@@ -64,7 +64,6 @@ struct Keyword
 
 static const Keyword Keywords[] =
 {
-    { "nil",       Lexer::TOK_NIL      },
     { "if",        Lexer::TOK_IF       },
     { "else",      Lexer::TOK_ELSE     },
     { "func",      Lexer::TOK_FUNC     },
@@ -80,6 +79,12 @@ static const Keyword Keywords[] =
     { "export",    Lexer::TOK_EXPORT   },
     { "emit",      Lexer::TOK_EMIT     },
     { "defer",     Lexer::TOK_DEFER    },
+    { "do",        Lexer::TOK_DO       },
+    { "try",       Lexer::TOK_TRY      },
+    { "catch",     Lexer::TOK_CATCH    },
+    { "orelse",    Lexer::TOK_ORELSE   },
+    { "iterator",  Lexer::TOK_ITERATOR },
+    { "pragma",    Lexer::TOK_PRAGMA   }
 };
 
 
@@ -134,20 +139,6 @@ static const char *eatident(const char *s)
     return s;
 }
 
-/*
-static unsigned char hexnorm(unsigned char x)
-{
-    if(x >= '0' && x <= '9')
-        return x;
-    if(x >= 'A' && x <= 'F')
-        return '0' + 10 + x - 'A';
-    else if(x >= 'a' && x <= 'f')
-        return '0' + 10 + x - 'a';
-
-    return 0;
-}
-*/
-
 // no parsing of escape sequences etc. just finds the end of the string.
 // returns pointer to first char behind the closing "
 static WsNoms eatstr(const char *p, char term)
@@ -165,7 +156,7 @@ static WsNoms eatstr(const char *p, char term)
         else if(c == '\n')
         {
             ++ret.nl;
-            ret.pnl = p + 1;
+            ret.pnl = p;
         }
     }
     return ret;
@@ -220,7 +211,8 @@ Lexer::Token Lexer::next()
         // keyword (all keywords are lowercase)
         for(size_t i = 0; i < Countof(Keywords); ++i)
             if(unsigned len = match(p, Keywords[i].kw))
-                return tok(Keywords[i].tt, p, p+len);
+                if(eatident(p + len) == p + len) // keyword must not be directly followed by something that could be an identifier, otherwise it's an identifier
+                    return tok(Keywords[i].tt, p, p+len);
 isident:
         return ident(p);
 

@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "hlir.h"
 #include "strings.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,13 +10,21 @@
 
 static const Str InvalidStr = {0, 0};
 
+static Val valerr(const char *err)
+{
+    Val v;
+    v.type = PRIMTYPE_NORETURN; // These stay inside the parser
+    v.u.p = (void*)err;
+    return v;
+}
+
 
 static Val parsefloat(uint intpart, const char *s, const char *end)
 {
     char *pend;
     real f = strtod(s, &pend); // FIXME: use grisu2
     if(pend != end)
-        return Val();
+        return valerr("Failed to parse float literal");
     f += real(intpart);
     return Val(f);
 }
@@ -25,7 +34,11 @@ static Val parsehex(const char *s, const char *end)
     uint u = 0;
     for(unsigned char c; s < end && (c = *s++);)
     {
-        u *= 16u;
+        // u *= 16;
+        if(mul_check_overflow(&u, u, uint(16)))
+            return valerr("Overflow when parsing hex literal");
+
+        // 4 bits are now free, no checks needed
         if(c >= '0' && c <= '9')
             u += c - '0';
         else if(c >= 'a' && c <= 'f')
@@ -33,7 +46,7 @@ static Val parsehex(const char *s, const char *end)
         else if(c >= 'A' && c <= 'F')
             u += 10 + c - 'A';
         else
-            return Val();
+           return valerr("Failed to parse hex number");
     }
     return Val(u);
 }
@@ -47,7 +60,7 @@ static Val makenum(const char *s, const char *end)
         {
             if(s[1] == 'x' || s[1] == 'X')
                 return parsehex(&s[2], end);
-            // TODO: bin, oct
+            // TODO: bin, oct, scientific 1e100
         }
     }
 
@@ -56,11 +69,15 @@ static Val makenum(const char *s, const char *end)
     {
         const unsigned char c = *s;
         if(c >= '0' && c <= '9')
-            u = u * 10u + (c - '0');
+        {
+            // u = u * 10u + (c - '0');
+            if(mul_check_overflow(&u, u, uint(10)) || add_check_overflow(&u, u, uint(c - '0')))
+                return valerr("Overflow in decimal literal");
+        }
         else if(c == '.')
             return parsefloat(u, s, end);
         else
-            return Val();
+            return valerr("Failed to parse number literal");
         ++s;
     }
     while(s < end);
@@ -234,8 +251,7 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_LITNUM, &Parser::litnum,   NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_IDENT,  &Parser::_identInExpr,NULL,         NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
-    { Lexer::TOK_NIL,    &Parser::nil,      NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
-    //{ Lexer::TOK_DOLLAR, &Parser::valblock, NULL,          NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_LCUR,   &Parser::tablecons,NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_LSQ,    &Parser::arraycons,NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_FUNC,   &Parser::closurecons,NULL,          NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
@@ -320,7 +336,13 @@ HLNode* Parser::stmt()
             ret = ensure(hlir->retn());
             ret->tok = curtok.tt; // so that we can distinguish yield and return
             advance();
-            ret->u.retn.what = _exprlist();
+            {
+                // Values must start on the same line, otherwise the next line is a new statement
+                const ParseRule *rule = GetRule(curtok.tt);
+                ret->u.retn.what = curtok.line == prevtok.line && rule && rule->prefix
+                    ? _exprlist()
+                    : ensure(hlir->list());
+            }
             break;
 
         case Lexer::TOK_LCUR:
@@ -404,6 +426,14 @@ HLNode *Parser::parsePrecedence(Prec p)
         if(!rule || p > rule->precedence || !rule->infix)
             break;
 
+        // 'f' followed by '(' on a later line could be a call or the start of a new statement
+        if(curtok.tt == Lexer::TOK_LPAREN && curtok.line != prevtok.line)
+        {
+            errorAt(curtok, "Ambiguous syntax: function call or new statement?",
+                "Put '(' on the same line to make it a call, or end the previous statement with ';'");
+            break;
+        }
+
         advance();
 
         node = (this->*(rule->infix))(ctx, rule, node);
@@ -415,6 +445,7 @@ HLNode *Parser::parsePrecedence(Prec p)
 
 HLNode* Parser::valblock()
 {
+    assert(false); // FIXME: implement this
     // '$' was just eaten
     eat(Lexer::TOK_LCUR);
     return block();
@@ -689,7 +720,6 @@ void Parser::_funcattribs(unsigned *pfuncflags)
     eatmatching(Lexer::TOK_RSQ, opening);
 }
 
-// -> nil
 // -> ...
 // -> ?
 // -> int, float, blah
@@ -698,9 +728,6 @@ void Parser::_funcattribs(unsigned *pfuncflags)
 HLNode* Parser::_funcreturns()
 {
     // '->' was just eaten
-
-    if(tryeat(Lexer::TOK_NIL))
-        return NULL;
 
     HLNode *list = ensure(hlir->list());
     if(list) for(;;)
@@ -871,9 +898,11 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
 
         // (int x, float y, ...)
         bool variadic = allowVariadic && tryeat(Lexer::TOK_TRIDOT);
+        bool optional = false;
 
         if(variadic)
         {
+            // int...
             // Keep the type and do nothing else
         }
         // either 'var' or a type name. This switches context.
@@ -883,12 +912,21 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
             lasttype = NULL;
             varctx = true;
         }
-        else
+        else // curtok is ident
         {
             lookAhead();
+
+            if(lookahead.tt == Lexer::TOK_QM)
+            {
+                // int? x
+                // Not an identifier just yet but the first one was marked as optional, so it must be a type.
+                // Next identifier must be a variable name.
+                optional = true;
+            }
+
             // If two identifiers in a row ('int x') --  First is the type, second one the variable.
             // If only one, it's parsed below, using the previous type.
-            if(lookahead.tt == Lexer::TOK_IDENT)
+            if(lookahead.tt == Lexer::TOK_IDENT || optional)
             {
                 varctx = false; // C-style decl
                 lasttype = first = typeident();
@@ -1206,12 +1244,12 @@ HLNode* Parser::_suffixed(HLNode *prefix)
 
 HLNode* Parser::litnum(Context ctx)
 {
-    return emitConstant(makenum(prevtok.begin, prevtok.begin + prevtok.u.len));
+    return emitConstant(prevtok, makenum(prevtok.begin, prevtok.begin + prevtok.u.len));
 }
 
 HLNode* Parser::litstr(Context ctx)
 {
-    return emitConstant(makestr(prevtok.begin, prevtok.begin + prevtok.u.len));
+    return emitConstant(prevtok, makestr(prevtok.begin, prevtok.begin + prevtok.u.len));
 }
 
 HLNode* Parser::name(const char *whatfor)
@@ -1473,11 +1511,6 @@ void Parser::errorAtCurrent(const char* msg, const char *hint)
     errorAt(curtok, msg, hint);
 }
 
-HLNode *Parser::nil(Context ctx)
-{
-    return ensure(hlir->constantValue());
-}
-
 HLNode* Parser::tablecons(Context ctx)
 {
     // { was just eaten while parsing an expr
@@ -1664,8 +1697,11 @@ HLNode* Parser::stmtlist(Lexer::TokenType endtok)
     return sl;
 }
 
-HLNode *Parser::emitConstant(const Val& v)
+HLNode *Parser::emitConstant(const Lexer::Token& tok, const Val& v)
 {
+    if(v.type == PRIMTYPE_NORETURN)
+        errorAt(tok, (const char*)v.u.p);
+
     HLNode *node = ensure(hlir->constantValue());
     if(node)
         node->u.constant.val = v;

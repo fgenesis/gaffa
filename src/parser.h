@@ -19,8 +19,8 @@ public:
         PREC_UNWRAP,      // =>
         PREC_OR,          // or
         PREC_AND,         // and
-        PREC_LOGIC_AND,   // &&
         PREC_LOGIC_OR,    // ||
+        PREC_LOGIC_AND,   // &&
         PREC_EQUALITY,    // == !=
         PREC_COMPARISON,  // < > <= >=
         PREC_RANGE,       // ..a  a..b  b..
@@ -130,7 +130,6 @@ protected:
     HLNode *ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref);
     HLNode *typeident();
     HLNode *_identInExpr(Context ctx);
-    HLNode *nil(Context ctx);
     HLNode *tablecons(Context ctx);
     HLNode *arraycons(Context ctx);
     HLNode *_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage, SymbolRefContext symref);
@@ -158,7 +157,7 @@ private:
     void errorAt(const Lexer::Token& tok, const char *msg, const char *hint = NULL);
     void error(const char *msg, const char *hint = NULL);
     void errorAtCurrent(const char *msg, const char *hint = NULL);
-    HLNode *emitConstant(const Val& v); // anything but nil
+    HLNode *emitConstant(const Lexer::Token& tok, const Val& v); // anything but nil or opaque
     void outOfMemory();
     Val makestr(const char *s, const char *end);
     Str _tokenStr(const Lexer::Token& tok);

@@ -43,8 +43,7 @@ public:
         TOK_DBLCOLON,// ::
         TOK_COLON,  // :
         TOK_COMMA,  // ,
-        TOK_LARROW, // ->
-        TOK_RARROW, // <-
+        TOK_RARROW, // ->
         TOK_SEMICOLON,// ;
         TOK_HAT,    // ^
         TOK_TILDE,  // ~
@@ -58,8 +57,8 @@ public:
         TOK_LOGOR,  // ||
         TOK_DOLLAR, // $
         TOK_CONCAT, // ++
+        TOK_MOD,    // %
         // keywords
-        TOK_NIL,    // nil
         TOK_IF,     // if
         TOK_ELSE,   // else
         TOK_FUNC,   // func
@@ -76,6 +75,12 @@ public:
         TOK_EXPORT, // export
         TOK_EMIT,   // emit
         TOK_DEFER,  // defer
+        TOK_DO,     // do
+        TOK_TRY,    // try
+        TOK_CATCH,  // catch
+        TOK_ORELSE, // orelse
+        TOK_ITERATOR,// iterator
+        TOK_PRAGMA, // pragma
         // rest
         TOK_LITSTR, // "...", '...'
         TOK_LITNUM, // 123, 123.45
