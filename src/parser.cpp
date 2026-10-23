@@ -443,7 +443,7 @@ HLNode *Parser::parsePrecedence(Prec p)
 
 }
 
-HLNode* Parser::valblock()
+HLNode* Parser::valblock(Context ctx)
 {
     assert(false); // FIXME: implement this
     // '$' was just eaten
@@ -878,64 +878,82 @@ void Parser::_checkAssignTarget(HLNode* node, const Lexer::Token& nodetok)
 // int a, float z
 // T a, b, Q c, d, e
 // int x, y, var z,q
+// int? xo, yo
+// int? xo, yo, ...
+// int x, y, ...
+// int a, b, float x, y, ...
+// int a, b, float...
+// int? a, b, float?...
 // Note that in a regular declaration, the symbol becomes visible only when the entire declaration itself is finished.
 // Otherwise we end up with something like 'var x = x' where x would refer to itself.
 // (This statement is actually legal, but the '= x' refers to the next best x in an upper scope, not the x being declared)
 HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
 {
-    // curtok is ident or 'var'
+    // ident, 'var', or '...' was eaten
+
     HLNode * const node = ensure(hlir->list());
     if(!node)
         return NULL;
 
     HLNode *lasttype = NULL;
     bool varctx = false;
+    bool allownext = true;
+    bool optional = false;
 
+    // A '...' can stand alone, without any type. Same as 'any?...'
+    if(allowVariadic && tryeat(Lexer::TOK_TRIDOT))
+    {
+        HLNode * const def = hlir->vardef();
+        node->u.list.add(def, gc);
+        def->flags |= HLFLAG_VARIADIC;
+        allownext = false;
+        goto finishvariadic;
+    }
 
     do
     {
+        // Precond: curtok is 'var', ident, or '...'
+
         HLNode *first = NULL;
 
         // (int x, float y, ...)
+        // A '...' can stand alone, without any type. Same as 'any?...'
         bool variadic = allowVariadic && tryeat(Lexer::TOK_TRIDOT);
-        bool optional = false;
 
         if(variadic)
         {
-            // int...
+            // ...
             // Keep the type and do nothing else
         }
         // either 'var' or a type name. This switches context.
-        // In 'var' context, types are deduced, in 'C' context, they need to be known.
+        // In 'var' context, types are deduced, in 'C' context, they need to be specified.
         else if(tryeat(Lexer::TOK_VAR))
         {
             lasttype = NULL;
             varctx = true;
+            optional = false;
+            variadic = false;
         }
         else // curtok is ident
         {
             lookAhead();
 
-            if(lookahead.tt == Lexer::TOK_QM)
-            {
-                // int? x
-                // Not an identifier just yet but the first one was marked as optional, so it must be a type.
-                // Next identifier must be a variable name.
-                optional = true;
-            }
+            // "int?" or "int..."
+            // Not a variable just yet but if the curret ident is marked optional or variadic, it must be a type.
+            // Next identifier must be a variable name.
+            bool optionalNow = lookahead.tt == Lexer::TOK_QM;
+            bool variadicNow = allowVariadic && lookahead.tt == Lexer::TOK_TRIDOT;
 
-            // If two identifiers in a row ('int x') --  First is the type, second one the variable.
+            // C-style decl, two identifiers in a row ('int x') --  First is the type, second one the variable.
             // If only one, it's parsed below, using the previous type.
-            if(lookahead.tt == Lexer::TOK_IDENT || optional)
+            if(lookahead.tt == Lexer::TOK_IDENT || optionalNow || variadicNow)
             {
                 varctx = false; // C-style decl
-                lasttype = first = typeident();
-            }
-            else if(allowVariadic && lookahead.tt == Lexer::TOK_TRIDOT)
-            {
-                // (int x, float y, int...)
-                variadic = true; // with known type
-                eat(Lexer::TOK_TRIDOT);
+                lasttype = first = typeident(); // Eats ident, optionally followed by '?'
+                optional = optionalNow;
+                variadic = variadicNow;
+                if(variadicNow)
+                    eat(Lexer::TOK_TRIDOT);
             }
             else if(!(lasttype || varctx))
             {
@@ -975,6 +993,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
             // The variadic entry is marked as such and terminates the list
             // We need that extra entry to optionally carry type information (ie. only int... follows)
             def->flags |= HLFLAG_VARIADIC; // Mark this as the terminating variadic element
+finishvariadic:
             node->flags |= HLFLAG_VARIADIC; // The list is marked as variadic too
 
             if(match(Lexer::TOK_COMMA))
@@ -982,7 +1001,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
             break;
         }
     }
-    while(tryeat(Lexer::TOK_COMMA));
+    while(allownext && tryeat(Lexer::TOK_COMMA));
 
     return node;
 }

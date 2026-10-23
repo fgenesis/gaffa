@@ -73,7 +73,7 @@ protected:
     HLNode *expr();
     HLNode *stmt();
 
-    HLNode *valblock(); // after $
+    HLNode *valblock(Context ctx); // after $
 
     // control flow
     HLNode *conditional(); // after if
