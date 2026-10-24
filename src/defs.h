@@ -89,7 +89,6 @@ enum PrimType
     PRIMTYPE_ANY,    // can hold any value. must be after specific types.
 
     PRIMTYPE_AUTO,     // special marker for type analysis
-    _PRIMTYPE_X_SUBTYPE,  // special marker for subtype specialization
     PRIMTYPE_NORETURN, // special type that can't be constructed -> can't return this, ever
     PRIMTYPE_UPVAL, // special type to mark allocated upvalues; for GC use only
     // These are the engine-level types. Runtime-created types are any IDs after this.

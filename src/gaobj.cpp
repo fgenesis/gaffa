@@ -36,15 +36,16 @@ tsize DObj::memberOffset(const Val* pmember) const
 }
 
 // A type is an object of the type 'type'
-DType::DType(TDesc* desc, DType* typeType)
+DType::DType(const TDesc* desc, DType* typeType)
     : tid(desc->h.tid), tdesc(desc)
     , fieldIndices(PRIMTYPE_STRING, PRIMTYPE_UINT)
 {
     this->dtype = typeType;
     assert(typeType->tid == PRIMTYPE_TYPE);
+    assert(!desc->h.dtype); // It's a 1:1 mapping, creating a 2nd instance is a bug
 }
 
-DType* DType::GCNew(GC& gc, TDesc *desc, DType* typeType)
+DType* DType::GCNew(GC& gc, const TDesc *desc, DType* typeType)
 {
     const tsize nfields = typeType->numfields();
     const size_t sz = sizeof(DType);

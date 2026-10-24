@@ -1,0 +1,30 @@
+### Alias for optional
+type T = int?
+f(int?)
+### Alias for variadic
+type T = int...
+f(int...)
+### Alias for variadic optional
+type T = int?...
+f(int?...)
+### Typelist building 1
+type TL = typelist(uint, uint)
+### Typelist building 2
+type TL = [uint, uint]
+### Typelist alias
+type TL = typelist(uint, uint)
+func f() -> TL { return 0, 0 }
+### Typelist flattening 1
+type TL = typelist(uint, uint)
+func f() -> TL, string { return 0, 0, "" }
+### Typelist flattening 2
+type TL = typelist(uint, uint)
+type TL2 = typelist(string, TL, string)
+func f() -> TL2 { return "", 0, 0, "" }
+### Union alias 1
+type SI = int | string
+### Union alias 2
+type SI = union(int, string)
+### Union flattening
+type SI = int | string
+type T = float | SI

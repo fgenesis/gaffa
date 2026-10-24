@@ -178,6 +178,14 @@ static inline T alignTo(T val, T aln)
     return ((val + (aln - 1)) / aln) * aln;
 }
 
+// 0 if arg doesn't fit in result type, otherwise arg
+template<typename Result, typename Arg>
+static inline Result fitIn(Arg a)
+{
+    Result r = (Result)a;
+    return Arg(r) == a ? r : 0;
+}
+
 template <typename T, T v>
 struct IntegralConstant
 {

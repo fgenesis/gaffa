@@ -6,37 +6,40 @@
 
 #include <string.h>
 
-enum
-{
-     // Currently there are 1 (Array<T>) or 2 (Table<K, V>, Func<P, R>) subtypes
-    MAX_SUBTYPES = 2
-};
 
 static const Val XNil = _Xnil();
 
-TDesc *TDesc_New(GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize)
+TDesc *TDesc_New(GC& gc, TypeKind kind, tsize n, tsize numdefaults, tsize extrasize)
 {
-    size_t minsz = sizeof(TDesc)
-        + n * sizeof(Type)
-        + n * sizeof(sref);
+    size_t minsz = sizeof(TDesc) + n * sizeof(Type);
 
-    // FIXME: this should be fine but find a better way to figure out alignment
-    size_t defaultsOffset = alignTo(minsz, sizeof(Val::u.opaque));
+    // Space for struct field names
+    if(kind == TKIND_STRUCT)
+        minsz += n * sizeof(sref);
 
+    // Alignment for default values block
+    // Given the lack of alignof() on older compilers, Val::u.opaque is the largest field
+    // that controls alignment, so just use that
+    STATIC_ASSERT(sizeof(Val::u.opaque) == sizeof(_FieldDefault::u));
+    tsize defaultsOffset = fitIn<tsize>(alignTo(minsz, sizeof(Val::u.opaque)));
+    if(!defaultsOffset)
+        return NULL;
+
+    // Size of default values block
     size_t dsz = numdefaults * sizeof(_FieldDefault);
 
-    size_t sz = defaultsOffset + dsz + extrasize;
-    TDesc *td = (TDesc*)gc_alloc_unmanaged_zero(gc, sz);
+    tsize sz = fitIn<tsize>(defaultsOffset + dsz + extrasize);
+    TDesc *td = (TDesc*)gc_alloc_unmanaged_zero(gc, sz); // This handles sz == 0 -> NULL
     if(td)
     {
         td->h.dtype = NULL;
         td->h.tid = PRIMTYPE_NIL;
+        td->kind = kind;
+        td->objprimtype = PRIMTYPE_NIL;
         td->n = n;
-        td->bits = bits;
-        td->allocsize = (tsize)sz;
-        td->defaultsOffset = (tsize)defaultsOffset;
+        td->allocsize = sz;
+        td->defaultsOffset = defaultsOffset;
         td->numdefaults = numdefaults;
-        td->primtype = PRIMTYPE_NIL; // This is later replaced with the actual type
     }
     return td;
 }
@@ -46,40 +49,40 @@ void TDesc_Delete(GC& gc, TDesc *td)
     gc_alloc_unmanaged(gc, td, td->allocsize, 0);
 }
 
+// Number of bytes at the start of TDesc that don't participate in deduplication
 enum
 {
     PrefixBytes = sizeof(((TDesc*)NULL)->h)
 };
 
 TypeRegistry::TypeRegistry(GC& gc)
-    : _tl(gc, false, 0)
-    , _tt(gc, false, PrefixBytes)
+    : _dedup(gc, false, PrefixBytes)
 {
 }
 
 TypeRegistry::~TypeRegistry()
 {
-    _tt.dealloc();
+    _dedup.dealloc();
 }
 
 bool TypeRegistry::init()
 {
     memset(_builtins, 0, sizeof(_builtins));
 
-    return _tt.init() && _tl.init();
+    return _dedup.init();
 }
 
 void TypeRegistry::dealloc()
 {
-    _tt.dealloc();
+    _dedup.dealloc();
 }
 
 Type TypeRegistry::mkstruct(const StructMember* m, size_t n, size_t numdefaults)
 {
-    u32 bits = 0; // TODO: make union? other bits?
-
-    TDesc *td = TDesc_New(_tt.gc, n, bits, numdefaults, 0);
-    td->primtype = PRIMTYPE_OBJECT;
+    TDesc *td = TDesc_New(_dedup.gc, TKIND_STRUCT, n, numdefaults, 0);
+    if(!td)
+        return PRIMTYPE_NIL;
+    td->objprimtype = PRIMTYPE_OBJECT;
     _FieldDefault *fd = td->defaults();
     for(size_t i = 0; i < n; ++i)
     {
@@ -108,9 +111,10 @@ Type TypeRegistry::mkstruct(const StructMember* m, size_t n, size_t numdefaults)
 
 Type TypeRegistry::mkstruct(const Table& t)
 {
+    Type ret = PRIMTYPE_NIL;
     const tsize N = t.size();
     PodArray<StructMember> tn;
-    if(!tn.resize(_tt.gc, N))
+    if(!tn.resize(_dedup.gc, N))
         return PRIMTYPE_NIL;
 
     tsize numdefaults = 0;
@@ -118,11 +122,14 @@ Type TypeRegistry::mkstruct(const Table& t)
     {
         const KV e = t.index(i);
         if(e.k.type != PRIMTYPE_STRING)
-            return PRIMTYPE_NIL;
+            goto fail;
         if(e.v.type == PRIMTYPE_TYPE)
         {
             tn[i].defaultval = XNil;
-            tn[i].t = e.v.asDType()->tid;
+            const DType *dt = e.v.asDType();
+            if(!canDeclareVar(dt->tdesc->kind))
+                goto fail;
+            tn[i].t = dt->tid;
         }
         else
         {
@@ -132,121 +139,39 @@ Type TypeRegistry::mkstruct(const Table& t)
         tn[i].name = e.k.u.str;
     }
 
-    Type ret = mkstruct(tn.data(), N, numdefaults);
-    tn.dealloc(_tt.gc);
+    ret = mkstruct(tn.data(), N, numdefaults);
 
+fail:
+    tn.dealloc(_dedup.gc);
     return ret;
 }
 
 Type TypeRegistry::mklist(const Type* ts, size_t n)
 {
-    Type dummy = PRIMTYPE_NIL;
-    if(!ts)
-        ts = &dummy;
-
-    for(size_t i = 0; i < n; ++i)
-        assert(!(ts[i] & TYPEBIT_TYPELIST));
-
-    return _mklist(ts, n);
-}
-
-Type TypeRegistry::_mklist(const Type* ts, size_t n)
-{
-    assert(ts);
-    sref id = _tl.putCopy(ts, sizeof(*ts) * n);
-    if(!id)
-        id = 1;
-    assert(id && id != -1); // FIXME: handle OOM
-    return (Type)(id | TYPEBIT_TYPELIST);
-}
-
-Type TypeRegistry::lookuplist(const Type* ts, size_t n) const
-{
-    Type dummy = PRIMTYPE_NIL;
-    if(!ts)
-        ts = &dummy;
-
-    sref id = _tl.find(ts, sizeof(*ts) * n);
-    if(id)
-        id |= TYPEBIT_TYPELIST;
-    return (Type)id;
-}
-
-TypeIdList TypeRegistry::getlist(Type t) const
-{
-    assert(!t || (t & TYPEBIT_TYPELIST));
-    t &= TYPEBASE_MASK;
-    MemBlock mb = _tl.get(t & ~TYPEBIT_TYPELIST);
-    TypeIdList tl = { (const Type*)mb.p, (tsize)mb.n / sizeof(Type) };
-    return tl;
-}
-
-// FIXME: this looks like wtf...
-TypeInfo TypeRegistry::getinfo(Type t) const
-{
-    unsigned flags = 0;
-    while(t & TYPEBIT_TYPELIST)
-    {
-        TypeIdList tl = getlist(t);
-        if(tl.n != 2)
-            flags |= TYPEFLAG_TYPELIST;
-        else
-        {
-            switch(tl.ptr[0] & TYPEBASE_MASK)
-            {
-                case _PRIMTYPE_X_SUBTYPE:
-                    flags |= TYPEFLAG_SUBTYPE;
-                    t = tl.ptr[1];
-                    break;
-                default:
-                    flags |= TYPEFLAG_TYPELIST;
-                    goto next;
-            }
-        }
-    }
-next:
-    if(t < PRIMTYPE_MAX)
-    {
-        // Nothing to do
-    }
-    else if(const TDesc *desc = lookupDesc(t))
-    {
-        flags |= desc->bits & (TYPEFLAG_STRUCT | TYPEFLAG_UNION);
-        t = desc->primtype;
-    }
-
-    TypeInfo ret;
-    ret.flags = TypeFlags(flags);
-    ret.base = t;
-    return ret;
+    TDesc *td = _listConcatFlatten(TKIND_TYPELIST, ts, n);
+    return _store(td);
 }
 
 Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
 {
     assert(prim < PRIMTYPE_ANY);
     assert(n <= MAX_SUBTYPES);
-    Type tmp[2 + MAX_SUBTYPES];
-    size_t w = 0;
-    tmp[w++] = _PRIMTYPE_X_SUBTYPE;
-    tmp[w++] = prim;
+    Type tmp[1 + MAX_SUBTYPES] = { (Type)prim };
     for(size_t i = 0; i < n; ++i)
-        tmp[w++] = sub[i];
+        tmp[i+1] = sub[i];
 
-    return _mklist(&tmp[0], w);
+    TDesc *td = _mklist(TKIND_SUBTYPED, &tmp[0], n+1);
+    td->objprimtype = prim;
+    return _store(td);
 }
 
 Type TypeRegistry::mkfunc(Type argt, Type rett)
 {
-    // Make sure that these are always type lists, even if it's 1 element
-    if(argt != PRIMTYPE_NIL && !(argt & TYPEBIT_TYPELIST))
-        argt = mklist(&argt, 1);
-    if(rett != PRIMTYPE_NIL && !(rett & TYPEBIT_TYPELIST))
-        rett = mklist(&rett, 1);
-
-    Type ts[] = { argt, rett };
-    return mksub(PRIMTYPE_FUNC, &ts[0], Countof(ts));
+    Type tmp[] = { PRIMTYPE_FUNC, argt, rett };
+    TDesc *td = _mklist(TKIND_SUBTYPED, &tmp[0], Countof(tmp));
+    td->objprimtype = PRIMTYPE_FUNC;
+    return _store(td);
 }
-
 
 TDesc* TypeRegistry::mkprimDesc(PrimType t)
 {
@@ -254,8 +179,8 @@ TDesc* TypeRegistry::mkprimDesc(PrimType t)
     TDesc *td = _builtins[t];
     if(!td)
     {
-        td = TDesc_New(_tt.gc, 0, 0, 0, 0);
-        td->primtype = t;
+        td = TDesc_New(_dedup.gc, TKIND_PRIMTYPE, 0, 0, 0);
+        td->objprimtype = t;
         td->h.tid = t;
         _builtins[t] = td;
     }
@@ -268,82 +193,45 @@ DType* TypeRegistry::mkprim(PrimType t)
     assert(tt && tt->tid == PRIMTYPE_TYPE);
     TDesc *desc = mkprimDesc(t);
     assert(!desc->h.dtype);
-    DType *d = DType::GCNew(_tt.gc, desc, tt);
+    DType *d = DType::GCNew(_dedup.gc, desc, tt);
     d->dtype = tt;
     desc->h.dtype = d;
     return d;
 }
 
-static void copydup(Type *dst, const Type *src, size_t copysize, Type pad, size_t totalsize)
-{
-    memcpy(dst, src, copysize * sizeof(*dst));
-    for(size_t i = copysize; i < totalsize; ++i)
-        dst[i] = pad;
-
-}
-
-Type TypeRegistry::resize(Type t, size_t n)
-{
-    TypeIdList ls = getlist(t);
-    if(!ls.n)
-        return PRIMTYPE_NIL;
-    if(n == ls.n) // Same size -> same thing
-        return t;
-    if(n < ls.n) // Sizing down -> easy
-        return mklist(ls.ptr, n);
-
-    // Can size up only if the last type entry is variadic
-    Type last = ls.ptr[ls.n - 1];
-    if(last & TYPEBIT_VARIADIC)
-    {
-        last &= ~TYPEBIT_VARIADIC;
-        if(n < 256)
-        {
-            Type tmp[256];
-            copydup(tmp, ls.ptr, ls.n, last, n);
-            return mklist(tmp, n);
-        }
-        else if(Type *tmp = gc_alloc_unmanaged_T<Type>(_tl.gc, NULL, 0, n)) // TODO: not sure if this case is needed
-        {
-            copydup(tmp, ls.ptr, ls.n, last, n);
-            Type cut = mklist(tmp, n);
-            gc_free_unmanaged_T(_tl.gc, tmp);
-            return cut;
-        }
-    }
-
-    return PRIMTYPE_NIL;
-}
-
 const TDesc *TypeRegistry::lookupDesc(Type t) const
 {
-    if(t & TYPEBIT_TYPELIST)
-        return NULL;
-
     t &= TYPEBASE_MASK;
 
     if(t < PRIMTYPE_MAX)
         return _builtins[t];
 
     sref idx = t - PRIMTYPE_MAX;
-    MemBlock mb = _tt.get(idx);
+    MemBlock mb = _dedup.get(idx);
     return (TDesc*)mb.p;
 }
 
-DType* TypeRegistry::lookup(Type t)
+DType *TypeRegistry::lookup(Type t)
 {
     const TDesc *td = lookupDesc(t);
     return td ? td->h.dtype : NULL;
 }
 
-FuncDTypes TypeRegistry::lookupFunc(Type t)
+const TDesc *TypeRegistry::lookupFunc(FuncTypes *ft, Type t)
 {
-    TypeIdList list = getlist(t);
-    assert(list.n == 4 && list.ptr[0] == _PRIMTYPE_X_SUBTYPE && list.ptr[1] == PRIMTYPE_FUNC);
-    FuncDTypes ret = {};
-    ret.params = lookup(list.ptr[2]);
-    ret.rets = lookup(list.ptr[3]);
-    return ret;
+    const TDesc *td = lookupDesc(t);
+    if(td->kind != TKIND_SUBTYPED)
+        return NULL;
+    const Type *ts = td->types();
+    if(td->n != 3 || ts[0] != PRIMTYPE_FUNC)
+        return NULL;
+
+    if(ft)
+    {
+        ft->params = _aslist(ts[1]);
+        ft->rets = _aslist(ts[2]);
+    }
+    return td;
 }
 
 bool TypeRegistry::isListCompatible(Type sub, Type bigger) const
@@ -351,11 +239,124 @@ bool TypeRegistry::isListCompatible(Type sub, Type bigger) const
     return sub == bigger; // FIXME
 }
 
+// This is mainly for figuring out the size before concatenating typelists.
+size_t TypeRegistry::_listLenRec(const Type *ts, size_t n)
+{
+    size_t ret = 0;
+    for(size_t i = 0; i < n; ++i)
+    {
+        Type t = ts[i];
+        if(t < PRIMTYPE_MAX)
+        {
+            ret += 1;
+            continue;
+        }
+
+        const TDesc *d = lookupDesc(t);
+        if(d->kind != TKIND_TYPELIST)
+        {
+            ret += 1;
+            continue;
+        }
+
+        ret += _listLenRec(d->types(), d->n);
+    }
+    return ret;
+}
+
+TDesc* TypeRegistry::_mklist(TypeKind kind, const Type* ts, size_t n)
+{
+    TDesc *d = TDesc_New(_dedup.gc, kind, n, 0, 0);
+    memcpy(d->types(), ts, n * sizeof(*ts));
+    return d;
+}
+
+bool TypeRegistry::_checkMustBeObjTypes(const Type* ts, size_t n)
+{
+    for(size_t i = 0; i < n; ++i)
+    {
+        Type t = ts[i];
+        if(t < PRIMTYPE_MAX)
+            continue;
+
+        const TDesc *d = lookupDesc(t);
+        if(!isObjectKind(d->kind))
+            return false;
+    }
+
+    return true;
+}
+
+TypeIdList TypeRegistry::_aslist(Type t)
+{
+    const TDesc *td = lookupDesc(t);
+    TypeIdList ret;
+    if(td->kind == TKIND_TYPELIST)
+    {
+        ret.ptr = td->types();
+        ret.n = td->n;
+    }
+    else
+    {
+        ret.ptr = &td->h.tid; // This doesn't move in memory
+        ret.n = 1;
+    }
+    return ret;
+}
+
+// Typelist concatenation results in a new typelist. Given these:
+//   A = (int, float)
+//   B = (string, string)
+//   T = Table(string, any)  <-- note that this is internally a typelist, too, but not semantically
+//   TL = typelist(A, Array(int), bool, B, T)
+// Then TL is:
+//   ((int, float), Array(int), bool, (string, string), Table(string, any))
+// Which is flattened to:
+//   (int, float, Array(int), bool, string, string, Table(string, any))
+// Because plain typelists can't be nested.
+// Important: ONLY plain typelists are flattened! All other type kinds stay
+// as they are, even if they are internally implemented as a list of types.
+TDesc* TypeRegistry::_listConcatFlatten(TypeKind kind, const Type* ts, size_t n)
+{
+    size_t len = _listLenRec(ts, n);
+    TDesc *d = TDesc_New(_dedup.gc, kind, len, 0, 0);
+    Type *end = _listCopy(d->types(), ts, n);
+    assert(d->types() + len == end);
+    return d;
+}
+
+Type* TypeRegistry::_listCopy(Type* dst, const Type* ts, size_t n)
+{
+    for(size_t i = 0; i < n; ++i)
+    {
+        Type t = ts[i];
+        if(t < PRIMTYPE_MAX)
+        {
+            *dst++ = t;
+            continue;
+        }
+
+        const TDesc *d = lookupDesc(t);
+        if(d->kind != TKIND_TYPELIST)
+        {
+            *dst++ = t;
+            continue;
+        }
+
+        dst = _listCopy(dst, d->types(), d->n); // Flatten it
+    }
+    return dst;
+}
+
 Type TypeRegistry::_store(TDesc *td)
 {
     size_t sz = td->allocsize;
-    Type ret = _tt.putTakeOver(td, sz, sz);
-    assert(ret); // TODO: handle OOM
-    ret += PRIMTYPE_MAX;
+    sref id = _dedup.putTakeOver(td, sz, sz);
+    assert(id); // TODO: handle OOM
+
+    // Record the actually used type id
+    td = (TDesc*)_dedup.get(id).p;
+    Type ret = (Type)(id + PRIMTYPE_MAX);
+    td->h.tid = ret;
     return ret;
 }

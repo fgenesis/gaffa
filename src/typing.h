@@ -14,53 +14,48 @@ class DType;
 // (A, B) is a type list with 2 types
 //
 
-
-// Structs have no defined field order.
-// But for the sake of making types comparable, the order of member types is sorted by ID.
-/*
-   +-TDesc (42)+          +-TDesc (23)---------+
-   | tref = 23 | ------>  | tref, sub = 0      |
-   +--(alias)--+          | x = PRIMTYPE_FLOAT |
-                          | y = PRIMTYPE_FLOAT |
-                          | z = PRIMTYPE_FLOAT |
-                          +--------------------+
-
-*/
-
 // Combine type id with these bits to modify the meaning
 // ie. (PRIMTYPE_STRING | TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC) is a string?...
+// -> There is no separate optional<T> type, to not allow weird shit like
+//    optional<optional<T>>.
 enum TypeBits
 {
     TYPEBIT_OPTIONAL = 1u << (sizeof(Type) * 8 - 1), // T -> T?
     TYPEBIT_VARIADIC = 1u << (sizeof(Type) * 8 - 2), // T -> T...
 
-    // Upper 2 bits are used for optional and variadic, this is an internal flag not exposed
-    // So in total, the upper 3 bits are needed as marker bits
-    TYPEBIT_TYPELIST = 1u << (sizeof(Type) * 8 - 3),
-
     TYPEBASE_MASK = ~(TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC)
 };
 
-enum TypeFlags
+// TypeKind changes the semantic meaning of a type.
+// plain typelist is a list of types without any special semantics
+// struct is a type list whose entries are struct members and have names
+// union is a typelist that behaves like 'any', but with constraints for the type system
+// subtyped is a type list where the first entry is the base type, anything after it are subtypes
+// primtype, struct, subtyped can create objects
+// typelist & union can't
+enum TypeKind
 {
-    TYPEFLAG_TYPELIST = 1u << 0u, //  > always up to 1 of these bits set, never more
-    TYPEFLAG_STRUCT   = 1u << 1u, //
-    TYPEFLAG_UNION    = 1u << 2u, //
-
-    TYPEFLAG_SUBTYPE  = 1u << 3u
+    TKIND_PRIMTYPE, // int, float, string, etc
+    TKIND_TYPELIST, // (A, B, C)
+    TKIND_UNION,    // type U = A | B | C
+    TKIND_STRUCT,   // struct S { A a, B c, C c }; aka type S = { a=A, b=B, c=C }
+    TKIND_SUBTYPED, // Table(string, any), encoded as (table, string, any)
+                    // or Array(float), encoded as (array, float)
 };
 
-struct TypeInfo
+// everything that can create objects
+static inline bool isObjectKind(TypeKind kind)
 {
-    TypeFlags flags;
-    Type base; // Resolved base type without vararg, optional, or subtyping
-};
+    return kind == TKIND_PRIMTYPE || kind == TKIND_STRUCT || kind == TKIND_SUBTYPED;
+}
 
-struct TDescAlias
+// everyting that can create objects, plus union type
+static inline bool canDeclareVar(TypeKind kind)
 {
-    Type t;
-    uint counter;
-};
+    return kind != TKIND_TYPELIST;
+}
+
+enum { MAX_SUBTYPES = 2 };
 
 struct _FieldDefault
 {
@@ -81,21 +76,18 @@ struct TDesc
         Type tid;
     } h;
 
+    TypeKind kind;
+    PrimType objprimtype; // Objects created of this type will have this as their underlying primtype
     tsize n; // n > 0, it's a struct
     tsize allocsize; // for the GC, but also adds some entropy for hashing/deduplication
-
-    // Defines what kind of type description this is.
-    // - Always: primtype < PRIMTYPE_ANY
-    // - if PRIMTYPE_OBJECT, n >= 0 and the types that follow are struct members
-    PrimType primtype;
-    u32 bits;
-
-    //Type members[n] follows behind the struct
-    //sref nameStrIds[n] follows behind that. Doesn't exist if it's a union.
 
     tsize defaultsOffset;
     tsize numdefaults;
 
+    //Type members[n] follows behind the struct
+    //sref nameStrIds[n] follows behind that. Only exists if it's a struct
+
+    inline Type id() const { return h.tid; }
 
     inline const Type *types() const
     {
@@ -103,7 +95,9 @@ struct TDesc
     }
     inline const sref *names() const
     {
-        return reinterpret_cast<const sref*>(types() + size());
+        return kind == TKIND_STRUCT
+            ? reinterpret_cast<const sref*>(types() + size())
+            : NULL;
     }
 
     inline Type *types()
@@ -112,7 +106,9 @@ struct TDesc
     }
     inline sref *names()
     {
-        return reinterpret_cast<sref*>(types() + size());
+        return kind == TKIND_STRUCT
+            ? reinterpret_cast<sref*>(types() + size())
+            : NULL;
     }
 
     inline _FieldDefault *defaults()
@@ -128,7 +124,7 @@ struct TDesc
     FORCEINLINE tsize size() const { return n; }
 };
 
-TDesc *TDesc_New(const GC& gc, tsize n, u32 bits, tsize numdefaults, tsize extrasize);
+TDesc *TDesc_New(const GC& gc, TypeKind kind, tsize n, tsize numdefaults, tsize extrasize);
 
 struct StructMember
 {
@@ -143,10 +139,10 @@ struct TypeIdList
     tsize n;
 };
 
-struct FuncDTypes
+struct FuncTypes
 {
-    DType *params;
-    DType *rets;
+    TypeIdList params;
+    TypeIdList rets;
 };
 
 class TypeRegistry
@@ -158,24 +154,13 @@ public:
     void dealloc();
 
     // Turn a list of type IDs into an ID, and register for later lookup. This does not create a DType.
-    Type mklist(const Type *ts, size_t n);
+    TDesc *mklist(const Type *ts, size_t n);
 
-    // Get the type id of a previously stored list of type IDs. Returns 0 when not.
-    Type lookuplist(const Type *ts, size_t n) const;
-
-    // Use this if you need the type list back. if .ptr is NULL, the ID was not registered.
-    TypeIdList getlist(Type t) const;
-
-    // Get some infos about a type and resolve the base type (without vararg, optional, or subtyping)
-    TypeInfo getinfo(Type t) const;
-
-    Type mkstruct(const StructMember *m, size_t n, size_t numdefaults);
-    Type mkstruct(const Table& t); // makes a struct from t (named)
+    TDesc *mkstruct(const StructMember *m, size_t n, size_t numdefaults);
+    TDesc *mkstruct(const Table& t); // makes a struct from t (named)
 
     TDesc *mkprimDesc(PrimType t);
     DType *mkprim(PrimType t);
-
-
 
     // Helper to create a function type. Both params must be type lists (created via mklist())
     Type mkfunc(Type argt, Type rett);
@@ -183,18 +168,11 @@ public:
     // Create a subtype of an existing internal type (eg. Table<string, Any>)
     Type mksub(PrimType prim, const Type *sub, size_t n);
 
-    // Given a type list type, return a new type containing the first n types:
-    // (A, B, C, D) n=2 -> (A, B)
-    // Variadics are expanded as needed to reach exactly n, eg.:
-    // (A, B...) n=4 -> (A, B, B, B)
-    // Returns PRIMTYPE_NIL if the list can't be expanded
-    Type resize(Type t, size_t n);
-
     // TODO: function to make union
 
     const TDesc *lookupDesc(Type t) const; // get type descriptor
     DType *lookup(Type t);
-    FuncDTypes lookupFunc(Type t);
+    const TDesc *lookupFunc(FuncTypes *ft, Type t);
 
     // Compares whether sub fits inside a bigger type. Considers variadics and optionals.
     // Some examples:
@@ -202,15 +180,32 @@ public:
     // A is compatible with (A, B...) since B is variadic (ie. 0 or more)
     // (A, B, B) is compatible with (A, B...)
     // (A, nil) is compatible with (A, B?)
+    // (A, B) is compatible with (A, B?) since a valid B is always a valid optional
+    // (A, B...) is compatible with (A, B?) since no B makes B? nil
+    // Negative examples:
+    // A is not compatible with (A, B) since B is missing
+    // (A, B?) is not compatible with (A, B) since B? doesn't guarantee a valid B
+
     bool isListCompatible(Type sub, Type bigger) const;
 
-    FORCEINLINE void mark(Type t) { if(t > PRIMTYPE_MAX) _tt.mark(t - PRIMTYPE_MAX); }
+    FORCEINLINE void mark(Type t) { if(t > PRIMTYPE_MAX) _dedup.mark(t - PRIMTYPE_MAX); }
 
 private:
-    Type _mklist(const Type *ts, size_t n);
+    // Simple typelist creation without flattening
+    TDesc *_mklist(TypeKind kind, const Type *ts, size_t n);
+    bool _checkMustBeObjTypes(const Type *ts, size_t n);
+
+    // Pointer to list start if plain typelist, or to single element
+    TypeIdList _aslist(Type t);
+
+    // How many type slots does type t require?
+    // types with kind == TKIND_TYPELIST are recursively evaluated, everything else counts as 1
+    size_t _listLenRec(const Type *ts, size_t n);
+    TDesc *_listConcatFlatten(TypeKind kind, const Type *ts, size_t n);
+    Type *_listCopy(Type *dst, const Type *ts, size_t n);
+    // TODO: union unionizing
 
     Type _store(TDesc *);
-    Dedup _tl; // for simple type lists (Type[] arrays only)
-    Dedup _tt; // for structs and such (TDesc based)
+    Dedup _dedup; // for structs and such (TDesc based)
     TDesc *_builtins[PRIMTYPE_MAX];
 };

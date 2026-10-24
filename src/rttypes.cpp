@@ -57,6 +57,7 @@ struct RTReg
         DType *symtab;
         DType *any;
         DType *noreturn;
+        DType *voidt;
     } types;
 
     struct
@@ -84,8 +85,8 @@ struct RTReg
 
     DFunc *regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets, FuncInfo::Flags extraflags)
     {
-        Type tp = tr.mklist(params, nparams);
-        Type tret = tr.mklist(rets, nrets);
+        Type tp = tr.mklist(params, nparams)->id();
+        Type tret = tr.mklist(rets, nrets)->id();
         Type tf = tr.mkfunc(tp, tret);
         sref sname = str(name);
 
@@ -143,7 +144,7 @@ static void _reg_numeric(ClassReg& xr)
 
 
 
-// This functions solves the hen-and-egg problem:
+// This function solves the hen-and-egg problem:
 // The type 'type' has itself as the underlying type. This is normally not possible to create.
 void reg_type_type(RTReg& r)
 {
@@ -174,9 +175,6 @@ void reg_type_type(RTReg& r)
 
 static void reg_type_func(RTReg& r)
 {
-    Type dummy[1] = {};
-    r.tids.empty = r.tr.mklist(dummy, 0);
-
     DType *d = r.tr.mkprim(PRIMTYPE_FUNC);
     r.types.func = d;
     ClassReg xfunc = r.regclass("anyfunc", d);
@@ -192,6 +190,14 @@ static int op_uint_plus(VM *, Val *v) // TEMP
     return 1;
 }
 
+static void reg_type_void(RTReg& r)
+{
+    TDesc *d  = r.tr.mklist(NULL, 0);
+    r.tids.empty = d->id();
+
+    r.types.voidt = DType::GCNew(r.gc, d, r.types.type);
+    ClassReg xvoid = r.regclass("void", r.types.voidt);
+}
 
 static void reg_type_uint(RTReg& r)
 {

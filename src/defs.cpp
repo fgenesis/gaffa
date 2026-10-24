@@ -17,7 +17,7 @@ Val::Val(DFunc *func)    { _init(PRIMTYPE_FUNC);   u.obj = func; }
 Val::Val(DObj *o)
 {
     PrimType pt = o->primtype();
-    assert(pt == o->dtype->tdesc->primtype);
+    assert(pt == o->dtype->tdesc->objprimtype);
     _init(pt);
     u.obj = o;
 }
@@ -68,7 +68,6 @@ static const byte TypeElementSizes[] =
     /* PRIMTYPE_ANY    */ sizeof(ValU), // both type + opaque
     /* PRIMTYPE_AUTO   */ sizeof(ValU),
     /* PRIMTYPE_UPVAL  */ 0,
-    /* _PRIMTYPE_X_SUBTYPE,  */ 0,
     /* PRIMTYPE_NORETURN */ 0,
     /* PRIMTYPE_NOTYPE */ 0
 };
@@ -99,7 +98,6 @@ static const char *TypeNames[] =
     /* PRIMTYPE_ANY    */ "any",
     /* PRIMTYPE_AUTO   */ "auto",
     /* PRIMTYPE_UPVAL  */ "upval",
-    /* _PRIMTYPE_X_SUBTYPE,  */ "_x_subtype",
     /* PRIMTYPE_NORETURN */ "noreturn",
     /* PRIMTYPE_NOTYPEN */ "notype"
 };

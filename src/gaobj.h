@@ -51,14 +51,17 @@ public:
 };
 
 // generated from TDesc
+// A DType is the runtime side of a TDesc and can be passed around as an object of type 'type'
 class DType : public GCobj
 {
 private:
-    DType(TDesc *desc, DType *typeType);
+    DType(const TDesc *desc, DType *typeType);
 public:
-    static DType *GCNew(GC& gc, TDesc *desc, DType *typeType);
-    const Type tid;
-    TDesc *tdesc;
+    // desc = Descriptor for type to create, typeType = runtime instance of the type 'type'
+    // (Types are instances of type 'type')
+    static DType *GCNew(GC& gc, const TDesc *desc, DType *typeType);
+    const Type tid; // Allocated by TypeRegistry, or a PRIMTYPE_*
+    const TDesc *tdesc;
     Table fieldIndices;
     tsize numfields() const { return tdesc->size(); }
 };
