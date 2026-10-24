@@ -128,7 +128,7 @@ protected:
     HLNode *name(const char *whatfor);
     HLNode *nameAsLitstr(const char *whatfor);
     HLNode *ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref);
-    HLNode *typeident();
+    HLNode *typeident(bool allowVariadic);
     HLNode *_identInExpr(Context ctx);
     HLNode *tablecons(Context ctx);
     HLNode *arraycons(Context ctx);
