@@ -6,7 +6,7 @@
 #include "runtime.h"
 
 template<typename T>
-struct FuncTypes
+struct TFuncTypes
 {
     // Each of these needs a template specialization struct below
     typedef bool (*CompBin)(T a, T b);
@@ -18,7 +18,7 @@ struct FuncTypes
 template<typename T>
 struct TDef {};
 
-template<> struct TDef<uint> : FuncTypes<uint>
+template<> struct TDef<uint> : TFuncTypes<uint>
 {
     static const PrimType Prim = PRIMTYPE_UINT;
     typedef uint Type;
@@ -26,7 +26,7 @@ template<> struct TDef<uint> : FuncTypes<uint>
     FORCEINLINE static void Set(ValU& v, uint x) { v.u.ui = x; }
 };
 
-template<> struct TDef<sint> : FuncTypes<sint>
+template<> struct TDef<sint> : TFuncTypes<sint>
 {
     static const PrimType Prim = PRIMTYPE_SINT;
     typedef sint Type;
@@ -34,7 +34,7 @@ template<> struct TDef<sint> : FuncTypes<sint>
     FORCEINLINE static void Set(ValU& v, sint x) { v.u.si = x; }
 };
 
-template<> struct TDef<real> : FuncTypes<real>
+template<> struct TDef<real> : TFuncTypes<real>
 {
     static const PrimType Prim = PRIMTYPE_FLOAT;
     typedef real Type;
@@ -42,7 +42,7 @@ template<> struct TDef<real> : FuncTypes<real>
     FORCEINLINE static void Set(ValU& v, real x) { v.u.f = x; }
 };
 
-template<> struct TDef<bool> : FuncTypes<bool>
+template<> struct TDef<bool> : TFuncTypes<bool>
 {
     static const PrimType Prim = PRIMTYPE_BOOL;
     typedef bool Type;
@@ -50,7 +50,7 @@ template<> struct TDef<bool> : FuncTypes<bool>
     FORCEINLINE static uint& Set(ValU& v, bool x) { v.u.ui = x; }
 };
 
-template<> struct TDef<widereal> : FuncTypes<widereal> // Dummy
+template<> struct TDef<widereal> : TFuncTypes<widereal> // Dummy
 {
     typedef uint Type;
 };
@@ -136,9 +136,9 @@ template<> struct IsCommutative<OP_XOR> : CompileTrue {};
 
 static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, OperatorId op, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
 {
-    const Type tp = rt.tr.mklist(params, nparams);
-    const Type tret = rt.tr.mklist(rets, nrets);
-    const Type tf = rt.tr.mkfunc(tp, tret);
+    const Type tp = rt.tr.mklistDesc(params, nparams)->id();
+    const Type tret = rt.tr.mklistDesc(rets, nrets)->id();
+    const Type tf = rt.tr.mkfuncDesc(tp, tret)->id();
     const char *opname = GetOperatorName(op);
     const sref sname = rt.sp.put(opname).id;
 

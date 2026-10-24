@@ -137,6 +137,7 @@ struct TypeIdList
 {
     const Type *ptr;
     tsize n;
+    TypeKind kind;
 };
 
 struct FuncTypes
@@ -154,25 +155,36 @@ public:
     void dealloc();
 
     // Turn a list of type IDs into an ID, and register for later lookup. This does not create a DType.
-    TDesc *mklist(const Type *ts, size_t n);
+    const TDesc *mklistDesc(const Type *ts, size_t n);
 
-    TDesc *mkstruct(const StructMember *m, size_t n, size_t numdefaults);
-    TDesc *mkstruct(const Table& t); // makes a struct from t (named)
+    const TDesc *mkstructDesc(const StructMember *m, size_t n, size_t numdefaults);
+    const TDesc *mkstructDesc(const Table& t); // makes a struct from t (named)
 
-    TDesc *mkprimDesc(PrimType t);
+    const TDesc *mkprimDesc(PrimType t);
     DType *mkprim(PrimType t);
 
     // Helper to create a function type. Both params must be type lists (created via mklist())
-    Type mkfunc(Type argt, Type rett);
+    const TDesc *mkfuncDesc(Type argt, Type rett);
 
     // Create a subtype of an existing internal type (eg. Table<string, Any>)
-    Type mksub(PrimType prim, const Type *sub, size_t n);
+    const TDesc *mksubDesc(PrimType prim, const Type *sub, size_t n);
 
     // TODO: function to make union
 
+    // Helpers for TDesc -> Type
+
+
+
+    DType *asObj(Type t) const;
+    DType *asObj(const TDesc *td) const;
+
+    // Pointer to list start if plain typelist, or to single element
+    TypeIdList aslist(Type t) const;
+
+
     const TDesc *lookupDesc(Type t) const; // get type descriptor
     DType *lookup(Type t);
-    const TDesc *lookupFunc(FuncTypes *ft, Type t);
+    const TDesc *lookupFunc(FuncTypes *ft, Type t) const;
 
     // Compares whether sub fits inside a bigger type. Considers variadics and optionals.
     // Some examples:
@@ -192,20 +204,17 @@ public:
 
 private:
     // Simple typelist creation without flattening
-    TDesc *_mklist(TypeKind kind, const Type *ts, size_t n);
-    bool _checkMustBeObjTypes(const Type *ts, size_t n);
-
-    // Pointer to list start if plain typelist, or to single element
-    TypeIdList _aslist(Type t);
+    TDesc *_mklist(TypeKind kind, const Type *ts, size_t n) const;
+    bool _checkMustBeObjTypes(const Type *ts, size_t n) const;
 
     // How many type slots does type t require?
     // types with kind == TKIND_TYPELIST are recursively evaluated, everything else counts as 1
-    size_t _listLenRec(const Type *ts, size_t n);
-    TDesc *_listConcatFlatten(TypeKind kind, const Type *ts, size_t n);
-    Type *_listCopy(Type *dst, const Type *ts, size_t n);
+    size_t _listLenRec(const Type *ts, size_t n) const;
+    TDesc *_listConcatFlatten(TypeKind kind, const Type *ts, size_t n) const;
+    Type *_listCopy(Type *dst, const Type *ts, size_t n) const;
     // TODO: union unionizing
 
-    Type _store(TDesc *);
+    TDesc *_store(TDesc *);
     Dedup _dedup; // for structs and such (TDesc based)
     TDesc *_builtins[PRIMTYPE_MAX];
 };

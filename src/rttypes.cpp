@@ -85,9 +85,9 @@ struct RTReg
 
     DFunc *regfunc(DType *ns, const char *name, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets, FuncInfo::Flags extraflags)
     {
-        Type tp = tr.mklist(params, nparams)->id();
-        Type tret = tr.mklist(rets, nrets)->id();
-        Type tf = tr.mkfunc(tp, tret);
+        Type tp = tr.mklistDesc(params, nparams)->id();
+        Type tret = tr.mklistDesc(rets, nrets)->id();
+        Type tf = tr.mkfuncDesc(tp, tret)->id();
         sref sname = str(name);
 
         DFunc *df = DFunc::GCNew(gc);
@@ -148,7 +148,7 @@ static void _reg_numeric(ClassReg& xr)
 // The type 'type' has itself as the underlying type. This is normally not possible to create.
 void reg_type_type(RTReg& r)
 {
-    TDesc *desc = r.tr.mkprimDesc(PRIMTYPE_TYPE);
+    TDesc *desc = const_cast<TDesc*>(r.tr.mkprimDesc(PRIMTYPE_TYPE)); // HACK
 
     // HACK: This is to init everything properly
     union
@@ -192,10 +192,9 @@ static int op_uint_plus(VM *, Val *v) // TEMP
 
 static void reg_type_void(RTReg& r)
 {
-    TDesc *d  = r.tr.mklist(NULL, 0);
+    const TDesc *d  = r.tr.mklistDesc(NULL, 0);
     r.tids.empty = d->id();
-
-    r.types.voidt = DType::GCNew(r.gc, d, r.types.type);
+    r.types.voidt = r.tr.asObj(d);
     ClassReg xvoid = r.regclass("void", r.types.voidt);
 }
 

@@ -69,13 +69,13 @@ static void buildTypeName(std::ostringstream& os, const Runtime& rt, Type t)
     }
     else
     {
-        TypeIdList tl = rt.tr.getlist(t);
-        if(tl.n > 2 && tl.ptr[0] == _PRIMTYPE_X_SUBTYPE)
+        TypeIdList tl = rt.tr.aslist(t);
+        if(tl.kind == TKIND_SUBTYPED)
         {
             buildTypeName(os, rt, tl.ptr[1]);
 
             os << "<";
-            for(size_t i = 2; i < tl.n; ++i)
+            for(size_t i = 1; i < tl.n; ++i)
             {
                 buildTypeName(os, rt, tl.ptr[i]);
                 if(i < tl.n - 1)

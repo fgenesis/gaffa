@@ -77,11 +77,11 @@ void TypeRegistry::dealloc()
     _dedup.dealloc();
 }
 
-Type TypeRegistry::mkstruct(const StructMember* m, size_t n, size_t numdefaults)
+const TDesc *TypeRegistry::mkstructDesc(const StructMember* m, size_t n, size_t numdefaults)
 {
     TDesc *td = TDesc_New(_dedup.gc, TKIND_STRUCT, n, numdefaults, 0);
     if(!td)
-        return PRIMTYPE_NIL;
+        return NULL;
     td->objprimtype = PRIMTYPE_OBJECT;
     _FieldDefault *fd = td->defaults();
     for(size_t i = 0; i < n; ++i)
@@ -109,14 +109,14 @@ Type TypeRegistry::mkstruct(const StructMember* m, size_t n, size_t numdefaults)
     return _store(td);
 }
 
-Type TypeRegistry::mkstruct(const Table& t)
+const TDesc *TypeRegistry::mkstructDesc(const Table& t)
 {
-    Type ret = PRIMTYPE_NIL;
     const tsize N = t.size();
     PodArray<StructMember> tn;
     if(!tn.resize(_dedup.gc, N))
-        return PRIMTYPE_NIL;
+        return NULL;
 
+    const TDesc *ret = NULL;
     tsize numdefaults = 0;
     for(tsize i = 0; i < N; ++i)
     {
@@ -139,20 +139,20 @@ Type TypeRegistry::mkstruct(const Table& t)
         tn[i].name = e.k.u.str;
     }
 
-    ret = mkstruct(tn.data(), N, numdefaults);
+    ret = mkstructDesc(tn.data(), N, numdefaults);
 
 fail:
     tn.dealloc(_dedup.gc);
     return ret;
 }
 
-Type TypeRegistry::mklist(const Type* ts, size_t n)
+const TDesc *TypeRegistry::mklistDesc(const Type* ts, size_t n)
 {
     TDesc *td = _listConcatFlatten(TKIND_TYPELIST, ts, n);
     return _store(td);
 }
 
-Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
+const TDesc *TypeRegistry::mksubDesc(PrimType prim, const Type* sub, size_t n)
 {
     assert(prim < PRIMTYPE_ANY);
     assert(n <= MAX_SUBTYPES);
@@ -165,7 +165,7 @@ Type TypeRegistry::mksub(PrimType prim, const Type* sub, size_t n)
     return _store(td);
 }
 
-Type TypeRegistry::mkfunc(Type argt, Type rett)
+const TDesc *TypeRegistry::mkfuncDesc(Type argt, Type rett)
 {
     Type tmp[] = { PRIMTYPE_FUNC, argt, rett };
     TDesc *td = _mklist(TKIND_SUBTYPED, &tmp[0], Countof(tmp));
@@ -173,7 +173,7 @@ Type TypeRegistry::mkfunc(Type argt, Type rett)
     return _store(td);
 }
 
-TDesc* TypeRegistry::mkprimDesc(PrimType t)
+const TDesc *TypeRegistry::mkprimDesc(PrimType t)
 {
     assert(t < Countof(_builtins));
     TDesc *td = _builtins[t];
@@ -191,11 +191,27 @@ DType* TypeRegistry::mkprim(PrimType t)
 {
     DType *tt = lookup(PRIMTYPE_TYPE);
     assert(tt && tt->tid == PRIMTYPE_TYPE);
-    TDesc *desc = mkprimDesc(t);
-    assert(!desc->h.dtype);
-    DType *d = DType::GCNew(_dedup.gc, desc, tt);
-    d->dtype = tt;
-    desc->h.dtype = d;
+    const TDesc *desc = mkprimDesc(t);
+    return asObj(desc);
+}
+
+DType *TypeRegistry::asObj(Type t) const
+{
+    return asObj(lookupDesc(t));
+}
+
+DType *TypeRegistry::asObj(const TDesc *td) const
+{
+    if(!td)
+        return NULL;
+    DType *d = td->h.dtype;
+    if(!d)
+    {
+        DType *typeType = _builtins[PRIMTYPE_TYPE]->h.dtype;
+        assert(typeType); // This must have been created by the runtime before
+        d = DType::GCNew(_dedup.gc, td, typeType);
+        const_cast<TDesc*>(td)->h.dtype = d; // HACK: This is in the non-deduplicated region and needed for internal mgmt
+    }
     return d;
 }
 
@@ -217,7 +233,7 @@ DType *TypeRegistry::lookup(Type t)
     return td ? td->h.dtype : NULL;
 }
 
-const TDesc *TypeRegistry::lookupFunc(FuncTypes *ft, Type t)
+const TDesc *TypeRegistry::lookupFunc(FuncTypes *ft, Type t) const
 {
     const TDesc *td = lookupDesc(t);
     if(td->kind != TKIND_SUBTYPED)
@@ -228,8 +244,8 @@ const TDesc *TypeRegistry::lookupFunc(FuncTypes *ft, Type t)
 
     if(ft)
     {
-        ft->params = _aslist(ts[1]);
-        ft->rets = _aslist(ts[2]);
+        ft->params = aslist(ts[1]);
+        ft->rets = aslist(ts[2]);
     }
     return td;
 }
@@ -240,7 +256,7 @@ bool TypeRegistry::isListCompatible(Type sub, Type bigger) const
 }
 
 // This is mainly for figuring out the size before concatenating typelists.
-size_t TypeRegistry::_listLenRec(const Type *ts, size_t n)
+size_t TypeRegistry::_listLenRec(const Type *ts, size_t n) const
 {
     size_t ret = 0;
     for(size_t i = 0; i < n; ++i)
@@ -264,14 +280,14 @@ size_t TypeRegistry::_listLenRec(const Type *ts, size_t n)
     return ret;
 }
 
-TDesc* TypeRegistry::_mklist(TypeKind kind, const Type* ts, size_t n)
+TDesc* TypeRegistry::_mklist(TypeKind kind, const Type* ts, size_t n) const
 {
     TDesc *d = TDesc_New(_dedup.gc, kind, n, 0, 0);
     memcpy(d->types(), ts, n * sizeof(*ts));
     return d;
 }
 
-bool TypeRegistry::_checkMustBeObjTypes(const Type* ts, size_t n)
+bool TypeRegistry::_checkMustBeObjTypes(const Type* ts, size_t n) const
 {
     for(size_t i = 0; i < n; ++i)
     {
@@ -287,10 +303,11 @@ bool TypeRegistry::_checkMustBeObjTypes(const Type* ts, size_t n)
     return true;
 }
 
-TypeIdList TypeRegistry::_aslist(Type t)
+TypeIdList TypeRegistry::aslist(Type t) const
 {
     const TDesc *td = lookupDesc(t);
     TypeIdList ret;
+    ret.kind = td->kind;
     if(td->kind == TKIND_TYPELIST)
     {
         ret.ptr = td->types();
@@ -316,7 +333,7 @@ TypeIdList TypeRegistry::_aslist(Type t)
 // Because plain typelists can't be nested.
 // Important: ONLY plain typelists are flattened! All other type kinds stay
 // as they are, even if they are internally implemented as a list of types.
-TDesc* TypeRegistry::_listConcatFlatten(TypeKind kind, const Type* ts, size_t n)
+TDesc* TypeRegistry::_listConcatFlatten(TypeKind kind, const Type* ts, size_t n) const
 {
     size_t len = _listLenRec(ts, n);
     TDesc *d = TDesc_New(_dedup.gc, kind, len, 0, 0);
@@ -325,7 +342,7 @@ TDesc* TypeRegistry::_listConcatFlatten(TypeKind kind, const Type* ts, size_t n)
     return d;
 }
 
-Type* TypeRegistry::_listCopy(Type* dst, const Type* ts, size_t n)
+Type* TypeRegistry::_listCopy(Type* dst, const Type* ts, size_t n) const
 {
     for(size_t i = 0; i < n; ++i)
     {
@@ -348,7 +365,7 @@ Type* TypeRegistry::_listCopy(Type* dst, const Type* ts, size_t n)
     return dst;
 }
 
-Type TypeRegistry::_store(TDesc *td)
+TDesc *TypeRegistry::_store(TDesc *td)
 {
     size_t sz = td->allocsize;
     sref id = _dedup.putTakeOver(td, sz, sz);
@@ -358,5 +375,5 @@ Type TypeRegistry::_store(TDesc *td)
     td = (TDesc*)_dedup.get(id).p;
     Type ret = (Type)(id + PRIMTYPE_MAX);
     td->h.tid = ret;
-    return ret;
+    return td;
 }

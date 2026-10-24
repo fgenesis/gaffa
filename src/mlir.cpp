@@ -1425,7 +1425,7 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         assert(eres.n >= 1);
         if(eres.n > 1)
         {
-            TypeIdList tl = ft.tr().getlist(t);
+            TypeIdList tl = ft.tr().aslist(t);
             for(size_t k = 0; k < tl.n; ++k)
             {
                 Type tt = tl.ptr[k];
