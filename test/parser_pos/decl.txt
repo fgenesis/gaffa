@@ -38,12 +38,6 @@ func f(int? x) return x
 uint a, _ = 1, 2
 ### sink as first name
 var _, b = 1, 2
-### shadowing in a nested block
-uint x = 1
-{
-    var x = x
-    uint y = x
-}
 ### same name in sibling blocks
 { uint x = 1 }
 { uint x = 2 }
@@ -67,3 +61,11 @@ func f() return 1
 type T = uint
 type P = {x=float, y=float}
 type U := uint
+### nil is not a keyword and can be shadowed
+-- may become a warning/error later (pragma)
+uint nil = 1
+### initializer refers to the outer symbol of the same name
+-- the new 'a' is not visible in its own initializer, so the right 'a' is external
+var a = a
+### initializer refers to the outer symbol of the same name, with a type
+T t = t

@@ -21,6 +21,12 @@ void Symstore::pop(Frame& f)
     f = frames.back();
     frames.pop_back();
 
+    if(!frames.empty())
+    {
+        std::vector<unsigned>& up = frames.back().extrefs;
+        up.insert(up.end(), f.extrefs.begin(), f.extrefs.end());
+    }
+
     if(f.boundary != SCOPE_FUNCTION)
     {
         const size_t fsz = f.symids.size();
@@ -119,6 +125,8 @@ Symstore::Lookup Symstore::lookup(unsigned strid, const Lexer::Token& tok, Symbo
         missing.push_back(getuid(s));
         s->slot = -(int)missing.size();
     }
+    if(createExternal)
+        frames.back().extrefs.push_back(getuid(s));
     res.sym = s;
     return res;
 }
@@ -148,7 +156,11 @@ Symstore::Decl Symstore::decl(unsigned strid, const Lexer::Token& tok, SymbolRef
             break;
     }
 
-    s = newsym();
+    s = newsym(); // may reallocate allsyms; get other Sym pointers only after this
+    {
+        const std::vector<unsigned>& ext = frames.back().extrefs;
+        res.external = findinframe(ext.data(), ext.size(), strid);
+    }
     s->tok = tok;
     s->nameStrId = strid;
     s->slot = ff->localids.pick();

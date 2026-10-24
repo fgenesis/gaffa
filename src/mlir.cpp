@@ -561,9 +561,17 @@ dolist:
         case HLNODE_FUNCDECL:
         {
             const HLFuncDecl& decl = hl->u.funcdecl;
-            HLIdent *hname = decl.ident->as<HLIdent>();
-            dst->m.p[0] = hname->nameStrId;
-            dst->m.p[1] = hname->symid;
+            if(decl.namespac) // namespaced names are not symbols, just names
+            {
+                dst->m.p[0] = decl.ident->as<HLName>()->nameStrId;
+                dst->m.p[1] = 0;
+            }
+            else
+            {
+                const HLIdent *hname = decl.ident->as<HLIdent>();
+                dst->m.p[0] = hname->nameStrId;
+                dst->m.p[1] = hname->symid;
+            }
 
             MLCh s = _setupCh(dst, ML_NAMEDECL);
             assert(s.n == 2);

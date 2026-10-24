@@ -209,7 +209,7 @@ int main(int argc, char **argv)
         return 1;
 
 
-    Lexer lex(code);
+    Lexer lex(rt.gc, code);
     Parser pp(&lex, fn, rt.gc, rt.sp);
     HLIRBuilder hb(rt.gc);
     pp.hlir = &hb;

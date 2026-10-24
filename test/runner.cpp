@@ -25,6 +25,7 @@
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
+#  include <crtdbg.h>
 #else
 #  include <dirent.h>
 #endif
@@ -72,7 +73,7 @@ static Stage compile(const char *fn, const char *code, Stage upto)
     bool ok = rt.init(alloc);
     assert(ok);
 
-    Lexer lex(code);
+    Lexer lex(rt.gc, code);
     Parser pp(&lex, fn, rt.gc, rt.sp);
     HLIRBuilder hb(rt.gc);
     pp.hlir = &hb;
@@ -204,6 +205,19 @@ static std::vector<std::string> listTxt(const std::string& dir)
 
 int main()
 {
+    setvbuf(stdout, NULL, _IONBF, 0); // keep all output if a test crashes
+
+#ifdef _WIN32
+    // Asserts and crashes still end the run, but print to stderr instead of popping up a dialog
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    _set_error_mode(_OUT_TO_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+
     std::vector<std::string> failures;
     unsigned total = 0;
 

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "defs.h"
+#include "gaalloc.h"
+
 
 
 class Lexer
@@ -23,7 +25,6 @@ public:
         TOK_MINUS,  // -
         TOK_STAR,   // *
         TOK_SLASH,  // /
-        TOK_PERC,   // %
         TOK_SLASH2X,// //
         TOK_CASSIGN,// =
         TOK_MASSIGN,// :=
@@ -104,21 +105,31 @@ public:
         inline bool operator!=(const Token& o) const { return !(*this == o); }
     };
 
-    Lexer(const char *text);
+    Lexer(GC& gc, const char *text);
     Token next();
     bool done() const { return !*_p; }
     const char *getLineBegin() const { return _linebegin; }
 
     static const char *GetTokenText(TokenType tt);
     static bool IsKeyword(TokenType tt);
+    static bool IsReserved(TokenType tt); // keyword that is not implemented yet
 
     static OperatorId TokenToBinOp(TokenType tok);
     static OperatorId TokenToUnOp(TokenType tok);
 
+    struct UnescResult
+    {
+        char *s; // NULL if there was nothing to unescape
+        size_t len;
+        const char *err; // NULL on success
+    };
+
+    UnescResult unescape(const char *s, const char *end);
+
 private:
     const char *skipws();
     Token tok(TokenType tt, const char *where, const char *end);
-    Token errtok(const char *msg);
+    Token errtok(const char *msg, const char *skipto); // continue lexing at skipto
     Token ident(const char *where);
     Token atident(const char *where);
     Token litstr(const char *where, unsigned char term);
@@ -127,6 +138,8 @@ private:
     const char *_p;
     const char *_linebegin;
     unsigned _line;
+
+    BlockListAllocator _strs; // Temporary created strings; tokens point here, so elements must not move
 };
 
 

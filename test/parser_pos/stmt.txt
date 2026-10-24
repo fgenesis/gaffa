@@ -24,7 +24,7 @@ t:get().x = 1
 func f() return {}
 f().x = 1
 ### parenthesized assignment target
-uint a := 0
+uint a := 0;
 (a) = 1
 ### if / else chain
 bool a = true
@@ -91,3 +91,10 @@ export uint a = 1
 export func f() return 1
 ### export with explicit name
 export ("b") uint a = 1
+### sink as assignment targets
+func f() -> uint, uint, uint return 1, 2, 3
+var a := 0
+_, a, _ = f()
+### sink as the only assignment target
+func f() -> uint return 1
+_ = f()

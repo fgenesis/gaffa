@@ -69,9 +69,6 @@ uint? a = 1
 ### optional unwrapped with =>
 uint? a = 1
 if(a => v) { uint w = v }
-### unwrap binding combined with another condition
-uint? a = 1
-if(a => v && v > 0) { uint w = v }
 ### optional unwrapped with *
 uint? a = 1
 uint b = *a

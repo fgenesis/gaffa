@@ -90,8 +90,148 @@ static const Keyword Keywords[] =
 };
 
 
-Lexer::Lexer(const char* text)
-    : _p(text),  _linebegin(text), _line(1)
+static int hexval(unsigned char c)
+{
+    if(c >= '0' && c <= '9')
+        return c - '0';
+    if(c >= 'a' && c <= 'f')
+        return 10 + c - 'a';
+    if(c >= 'A' && c <= 'F')
+        return 10 + c - 'A';
+    return 99;
+}
+
+static size_t utf8encode(char *dst, unsigned cp)
+{
+    if(cp < 0x80)
+    {
+        dst[0] = (char)cp;
+        return 1;
+    }
+    if(cp < 0x800)
+    {
+        dst[0] = (char)(0xC0 | (cp >> 6));
+        dst[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if(cp < 0x10000)
+    {
+        dst[0] = (char)(0xE0 | (cp >> 12));
+        dst[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        dst[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    dst[0] = (char)(0xF0 | (cp >> 18));
+    dst[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    dst[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    dst[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+static inline Lexer::UnescResult unescErr(const char *s)
+{
+    Lexer::UnescResult ret = {};
+    ret.err = s;
+    return ret;
+}
+
+// Escapes: \n \t \r \0 \\ \" \' \a \b \f \v  \xHH  \u{H...} (UTF-8 encoded)
+// A backslash before a line break keeps the line break.
+Lexer::UnescResult Lexer::unescape(const char *s, const char *end)
+{
+    assert(s && s <= end);
+    bool doit = false;
+    for(const char *p = s; p < end; ++p)
+        if(*p == '\\')
+        {
+            doit = true;
+            break;
+        }
+    if(!doit)
+        return unescErr(NULL); // Nothing to unescape
+
+    char *dst = (char*)_strs.alloc(end - s + 1); // +1 for \0
+    if(!dst)
+        return unescErr("Out of memory");
+
+    char * const beg = dst;
+    for(const char *p = s; p < end; )
+    {
+        char c = *p++;
+        if(c != '\\')
+        {
+            *dst++ = c;
+            continue;
+        }
+        if(p >= end)
+            return unescErr("String ends with a lone backslash"); // the lexer doesn't produce this, but be safe
+        c = *p++;
+        switch(c)
+        {
+            case 'n':  *dst++ = '\n'; break;
+            case 't':  *dst++ = '\t'; break;
+            case 'r':  *dst++ = '\r'; break;
+            case '0':  *dst++ = '\0'; break;
+            case 'a':  *dst++ = '\a'; break;
+            case 'b':  *dst++ = '\b'; break;
+            case 'f':  *dst++ = '\f'; break;
+            case 'v':  *dst++ = '\v'; break;
+            case '\\': *dst++ = '\\'; break;
+            case '\"': *dst++ = '\"'; break;
+            case '\'': *dst++ = '\''; break;
+            case '\r': case '\n': // keep the line break, including \r\n
+                *dst++ = c;
+                if(p < end && (*p == '\r' || *p == '\n') && *p != c)
+                    *dst++ = *p++;
+                break;
+            case 'x':
+            {
+                if(end - p < 2 || hexval(p[0]) >= 16 || hexval(p[1]) >= 16)
+                    return unescErr("\\x needs exactly 2 hex digits");
+                *dst++ = (char)(hexval(p[0]) * 16 + hexval(p[1]));
+                p += 2;
+                break;
+            }
+            case 'u':
+            {
+                if(p >= end || *p != '{')
+                    return unescErr("\\u needs a code point in braces, eg. \\u{20AC}");
+                ++p;
+                unsigned cp = 0, ndig = 0;
+                for( ; p < end && *p != '}'; ++p, ++ndig)
+                {
+                    const int d = hexval(*p);
+                    if(d >= 16 || ndig >= 6)
+                    {
+                        ndig = 0; // Take the error path below
+                        break;
+                    }
+                    cp = cp * 16 + d;
+                }
+                if(p >= end || !ndig)
+                    return unescErr("Invalid code point in \\u{...}");
+                ++p; // '}'
+                // It's not up to the lexer to decide what is a valid unicode character.
+                //if(cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+                //    return "Code point in \\u{...} is not a valid Unicode scalar value";
+                dst += utf8encode(dst, cp);
+                break;
+            }
+            default:
+                return unescErr("Unknown escape sequence in string");
+        }
+    }
+    *dst++ = 0;
+
+    UnescResult ret;
+    ret.s = beg;
+    ret.len = dst - beg - 1; // Does not include the terminating \0
+    ret.err = NULL;
+    return ret;
+}
+
+Lexer::Lexer(GC& gc, const char* text)
+    : _p(text),  _linebegin(text), _line(1), _strs(gc)
 {
 }
 
@@ -154,8 +294,14 @@ static WsNoms eatstr(const char *p, char term)
             break;
         }
         if(c == '\\')
-            ++p;
-        else if(c == '\n')
+        {
+            if(!*p)
+                break;
+            if(*p != '\n') // an escaped newline is still counted in the next iteration
+                ++p;
+            continue;
+        }
+        if(c == '\n')
         {
             ++ret.nl;
             ret.pnl = p;
@@ -169,9 +315,13 @@ static WsNoms eatstr(const char *p, char term)
 static const char *eatnum(const char *p)
 {
     bool dot = false;
+    const bool hex = p[0] == '0' && (p[1] == 'x' || p[1] == 'X');
     for(char c; (c = *p); )
     {
-        if( (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+        // signed exponent: 1e-5, 2E+3
+        if(!hex && (c == 'e' || c == 'E') && (p[1] == '+' || p[1] == '-') && p[2] >= '0' && p[2] <= '9')
+            p += 2;
+        else if( (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_')
         {} // nothing to do
         else if(c == '.')
         {
@@ -221,8 +371,12 @@ isident:
     }
     else if((c >= 'A' && c <= 'Z') || c == '_') // ident
         goto isident;
-    else if(c == '@' && (p[1] == '\"' || p[1] == '\''))
-        return atident(p+1);
+    else if(c == '@')
+    {
+        if(p[1] == '\"' || p[1] == '\'')
+            return atident(p+1);
+        return errtok("Expected string literal after '@'", p+1);
+    }
     else if((c >= '0' && c <= '9') || (c == '.' && (p[1] >= '0' && p[1] <= '9'))) // numeric
         return litnum(p);
     else if(c == '\"' || c == '\'') // "string literal"
@@ -234,7 +388,10 @@ isident:
             if(unsigned len = match(p, &ShortTab[i].s[0]))
                 return tok(ShortTab[i].tt, p, p+len);
 
-    return errtok("Unrecognized token");
+    const char *skip = p + 1;
+    while((*skip & 0xC0) == 0x80) // skip the rest of a UTF-8 sequence
+        ++skip;
+    return errtok("Unrecognized token", skip);
 }
 
 const char* Lexer::GetTokenText(TokenType tt)
@@ -251,6 +408,8 @@ const char* Lexer::GetTokenText(TokenType tt)
         case TOK_LITNUM: return "number literal";
         case TOK_LITSTR: return "string literal";
         case TOK_SYNTHETIC: return "synthetic";
+        case TOK_E_EOF: return "end of file";
+        case TOK_SINK: return "_";
         default: ;
     }
     return NULL;
@@ -262,6 +421,24 @@ bool Lexer::IsKeyword(TokenType tt)
         if(Keywords[i].tt == tt)
             return true;
     return false;
+}
+
+bool Lexer::IsReserved(TokenType tt)
+{
+    switch(tt)
+    {
+        case TOK_CONST:
+        case TOK_LIKE:
+        case TOK_DO:
+        case TOK_TRY:
+        case TOK_CATCH:
+        case TOK_ORELSE:
+        case TOK_ITERATOR:
+        case TOK_PRAGMA:
+            return true;
+        default:
+            return false;
+    }
 }
 
 Lexer::Token Lexer::tok(TokenType tt, const char *where, const char *end)
@@ -278,7 +455,7 @@ Lexer::Token Lexer::tok(TokenType tt, const char *where, const char *end)
     return t;
 }
 
-Lexer::Token Lexer::errtok(const char *msg)
+Lexer::Token Lexer::errtok(const char *msg, const char *skipto)
 {
     Token t;
     t.tt = TOK_E_ERROR;
@@ -286,6 +463,8 @@ Lexer::Token Lexer::errtok(const char *msg)
     t.linebegin = _linebegin;
     t.line = _line;
     t.u.err = msg;
+    assert(skipto > _p);
+    _p = skipto;
     return t;
 }
 
@@ -306,10 +485,14 @@ Lexer::Token Lexer::ident(const char* where)
 }
 
 // @"name with spaces"
-// Parse a literal string but make it a freeform identifier
+// Parse a literal string but make it a freeform identifier.
+// The token's text is the decoded name, which is stored in the lexer and not part of the source.
 Lexer::Token Lexer::atident(const char* where)
 {
     Lexer::Token t = litstr(where + 1, *where);
+    if(t.tt != TOK_LITSTR)
+        return t;
+
     t.tt = TOK_IDENT;
     return t;
 }
@@ -319,7 +502,12 @@ Lexer::Token Lexer::litstr(const char* where, unsigned char term)
 {
     WsNoms s = eatstr(where, term);
     if(!s.p)
-        return errtok("Unterminated literal string");
+    {
+        const char *end = where;
+        while(*end)
+            ++end;
+        return errtok("Unterminated literal string", end);
+    }
 
     _line += s.nl;
     if(s.pnl)
@@ -327,6 +515,21 @@ Lexer::Token Lexer::litstr(const char* where, unsigned char term)
 
     Token t = tok(TOK_LITSTR, where, s.p);
     t.u.len--; // skip closing "
+
+    // Unescape if necessary
+    UnescResult ur = unescape(t.begin, t.begin + t.u.len);
+    if(ur.err)
+    {
+        t.tt = TOK_E_ERROR; // _p is already past the literal
+        t.u.err = ur.err;
+        return t;
+    }
+    else if(ur.s) // Something was unescaped, use that string instead
+    {
+        t.begin = ur.s;
+        t.u.len = ur.len;
+    }
+
     return t;
 }
 
@@ -345,11 +548,11 @@ OperatorId Lexer::TokenToBinOp(TokenType tok)
         case TOK_STAR: return OP_MUL;
         case TOK_SLASH: return OP_FDIV;
         case TOK_SLASH2X: return OP_IDIV;
-        case TOK_PERC: return OP_MOD;
+        case TOK_MOD: return OP_MOD;
         case TOK_SHL: return OP_SHL;
         case TOK_SHR: return OP_SHR;
-        case TOK_AND: return OP_BITAND;
-        case TOK_OR: return OP_BITOR;
+        case TOK_BITAND: return OP_BITAND;
+        case TOK_BITOR: return OP_BITOR;
         case TOK_HAT: return OP_XOR;
         case TOK_EQ: return OP_EQ;
         case TOK_NEQ: return OP_NEQ;
@@ -377,6 +580,7 @@ OperatorId Lexer::TokenToUnOp(TokenType tok)
         case TOK_TILDE: return OP_UBITNOT;
         case TOK_HASH: return OP_ULEN;
         case TOK_QQM: return OP_QQM;
+        case TOK_STAR: return OP_UNWRAP;
     }
 
     assert(false);

@@ -39,6 +39,13 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_FUNCTIONHDR:    return "functionhdr";
         case HLNODE_SINK:           return "sink";
         case HLNODE_EXPORT:         return "export";
+        case HLNODE_NS_INDEXASSIGN: return "nsindexassign";
+        case HLNODE_BREAK:          return "break";
+        case HLNODE_CONTINUE:       return "continue";
+        case HLNODE_UNWRAPBIND:     return "unwrapbind";
+        case HLNODE_ANDOR:          return "and/or";
+        case HLNODE_VALBLOCK:       return "valblock";
+        case HLNODE_VARARGS:        return "...";
     }
     return NULL;
 }

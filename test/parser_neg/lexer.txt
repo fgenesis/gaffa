@@ -1,8 +1,6 @@
 -- Lexer-level input that must be rejected, not silently turned into something else
 ### keyword as variable name
 uint for = 1
-### nil as variable name
-uint nil = 1
 ### keyword as function name
 func return() {}
 ### keyword as namespaced function name without quoting
@@ -26,3 +24,22 @@ float a = 1e
 float a = 1e+
 ### integer literal overflow
 uint a = 18446744073709551616
+### unknown escape sequence
+string s = "\q"
+### hex escape with one digit
+string s = "\x4"
+### hex escape with invalid digit
+string s = "\xZZ"
+### unicode escape without braces
+string s = "\u20AC"
+### empty unicode escape
+string s = "\u{}"
+### unicode escape with too many digits
+string s = "\u{0000041}"
+### unclosed unicode escape
+string s = "\u{41"
+### quoted identifier spelling an existing name
+uint Ax = 1
+uint @"A\x78" = 2
+### bad escape in quoted identifier
+uint @"\q" = 1

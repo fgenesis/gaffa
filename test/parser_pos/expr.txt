@@ -105,6 +105,10 @@ uint a = (func(uint x) return x)(1)
 ### unwrap binding in condition
 uint? o = 1
 if(o => v) { uint w = v }
-### unwrap binding combined with another condition
-uint? o = 1
-if(o => v && v > 0) { uint w = v }
+### Value block 1
+var x = ${ emit 1 }
+### Value block 2
+var t := 1000
+var x = 1 + ${ t = t + 100; emit 10+t }
+### Value block 3
+var x = ${ var a := 0; for(var i = ..100) a = a + i; emit a }

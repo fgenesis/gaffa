@@ -1,0 +1,20 @@
+-- String literals and escape sequences
+### simple escapes
+string s = "\n\t\r\0\\\"\'\a\b\f\v"
+### escapes in single quotes
+string s = '\'\"\n'
+### hex escapes
+string s = "\x41\x7a\xFF\x00"
+### unicode escapes
+string s = "\u{41}\u{20AC}\u{10FFFF}\u{0}"
+### backslash before a line break keeps the line break
+string s = "line one\
+line two"
+uint after = 1
+### string with comment marker and keywords inside
+string s = "-- if for while"
+### empty strings
+string a = ""
+string b = ''
+### empty quoted identifier is allowed
+uint @"" = 1

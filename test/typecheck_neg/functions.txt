@@ -60,3 +60,6 @@ type T := uint
 func f(T x) return x
 T = string
 var y = f("hi")
+### nil is not a type
+-- use '-> void' for no return values
+func f() -> nil {}

@@ -16,14 +16,13 @@ public:
     {
         // weakest binding
         PREC_NONE,
-        PREC_UNWRAP,      // =>
-        PREC_OR,          // or
+        PREC_SPECIAL,     // => ..  (only valid in if() / for(); elsewhere they're an error)
+        PREC_OR,          // or     (parse from here to stop before PREC_SPECIAL)
         PREC_AND,         // and
         PREC_LOGIC_OR,    // ||
         PREC_LOGIC_AND,   // &&
         PREC_EQUALITY,    // == !=
         PREC_COMPARISON,  // < > <= >=
-        PREC_RANGE,       // ..a  a..b  b..
         PREC_CONCAT,      // ++
         PREC_BIT_OR,      // |
         PREC_BIT_XOR,     // ^
@@ -31,8 +30,8 @@ public:
         PREC_BIT_SHIFT,   // << >>
         PREC_ADD,         // + -
         PREC_MUL,         // * /
-        PREC_UNARY,       // ! - # ??
-        PREC_CALL,        // . ()
+        PREC_UNARY,       // ! - # ?? *
+        PREC_CALL,        // () . [] :: :mth() T{}
         PREC_PRIMARY
         // strongest binding
     };
@@ -91,9 +90,11 @@ protected:
     HLNode *_funcreturns();
     HLNode *_methodname();
 
-    HLNode *_assignmentWithPrefix(HLNode *lhs); // = EXPR or := EXPR
-    HLNode *_restassign(HLNode *firstLhs, const Lexer::Token& lhsTok); // returns list
+    HLNode *_assignment(HLNode *firstLhs, const Lexer::Token& lhsTok); // a, b.c, d[e] = EXPRLIST
+    HLNode *_assignTarget();
     HLNode *_decllist(SymbolRefContext symref, bool allowVariadic);
+    void _finishDecl(HLNode *decls, bool mut, bool deferred);
+    void _checkValueCount(size_t ntargets, const HLNode *vals);
 
     HLNode *_fncall(HLNode *callee);
     HLNode *_methodcall(HLNode *obj);
@@ -107,19 +108,20 @@ protected:
 
     HLNode *fncall(Context ctx, const ParseRule *rule, HLNode *lhs);
     HLNode *mthcall(Context ctx, const ParseRule *rule, HLNode *lhs);
+    HLNode *dotindex(Context ctx, const ParseRule *rule, HLNode *lhs); // a.name
+    HLNode *sqindex(Context ctx, const ParseRule *rule, HLNode *lhs);  // a[expr]
+    HLNode *nsindex(Context ctx, const ParseRule *rule, HLNode *lhs);  // a::name
+    HLNode *structcons(Context ctx, const ParseRule *rule, HLNode *lhs); // T{...}
+    HLNode *andor(Context ctx, const ParseRule *rule, HLNode *lhs);
+    HLNode *badTypeMod(Context ctx, const ParseRule *rule, HLNode *lhs); // '?' or '...' not after a type name
+    HLNode *badUnwrap(Context ctx, const ParseRule *rule, HLNode *lhs);
+    HLNode *badRangeInfix(Context ctx, const ParseRule *rule, HLNode *lhs);
+    HLNode *badRange(Context ctx);
+    HLNode *badSink(Context ctx);
+    HLNode *varargs(Context ctx);
 
-
-    //HLNode *prefixexpr(Context ctx); // ident | (expr)
-
-    HLNode *primaryexpr(); // the start of any expr-as-statement
-    HLNode *suffixedexpr();
-    HLNode *_suffixed(HLNode *prefix);
     HLNode *_export();
 
-    // prefixexpr { .ident | [expr] | :ident paramlist | paramlist }
-
-    //HLNode *holder(Context ctx);
-    // functions
     HLNode *_paramlist(); // (a, b, c)
 
     // literal values
@@ -129,18 +131,14 @@ protected:
     HLNode *nameAsLitstr(const char *whatfor);
     HLNode *ident(const char *whatfor, IdentUsage usage, SymbolRefContext symref);
     HLNode *typeident(bool allowVariadic);
+    unsigned _typemods(bool allowVariadic);
     HLNode *_identInExpr(Context ctx);
     HLNode *tablecons(Context ctx);
     HLNode *arraycons(Context ctx);
     HLNode *_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage, SymbolRefContext symref);
 
-    HLNode *unaryRange(Context ctx);
-    HLNode *binaryRange(Context ctx, const ParseRule *rule, HLNode *lhs);
-    HLNode *postfixRange(Context ctx, const ParseRule *rule, HLNode* lhs);
-    HLNode *_rangeStep();
-
-    HLNode *iterdecls(); // for(var a,b = ...; var c = 0..)
-    HLNode *iterexprs(); // iterator(..., 0..)
+    HLNode *_iterdecl(); // var a,b = EXPR or RANGE
+    HLNode *_iterexpr(); // EXPR or RANGE
 
     HLNode *stmtlist(Lexer::TokenType endtok);
 
@@ -169,6 +167,20 @@ private:
     const char *symbolname(const Symstore::Sym *sym) const;
     void _beginFunction(ScopeType scope = SCOPE_FUNCTION);
     void _endFunction();
+    void _beginScope(ScopeType scope);
+    void _endScope();
+    void _checkClosedScope(const Symstore::Frame& f);
+    void _sync(Lexer::TokenType endtok);
+    HLNode *_errnode();
+
+    // What's allowed at the current position; reset when entering a function
+    struct FuncCtx
+    {
+        unsigned loops;     // break, continue
+        unsigned valblocks; // emit
+        bool variadic;      // '...'
+        bool infunc;        // false at file level
+    };
 
     Lexer::Token curtok;
     Lexer::Token prevtok;
@@ -177,6 +189,8 @@ private:
     const char *_fn;
     bool hadError;
     bool panic;
+    unsigned _nerrors;
+    FuncCtx _fctx;
     GC& gc;
 public:
     Symstore syms;

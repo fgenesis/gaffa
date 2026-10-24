@@ -21,11 +21,8 @@ func g(uint ...) return f(...)
 ### variadic return types
 func f() -> uint... return 1, 2, 3
 func g() -> uint, float... return 1
-### unknown return values
-func f() -> ? return 1
-func g() -> ... return 1
-### no return values
-func f() -> nil {}
+### any number of return values
+func f() -> ... return 1
 ### void return type
 func f() -> void {}
 ### recursion
@@ -81,3 +78,11 @@ var p = P{x=1.0}
 func f() return {x=1}
 ### closure called immediately as a statement
 (func() return 1)()
+### closure calls the outer symbol of its own variable name
+-- 'f' inside is not the closure being declared, but the external 'f'
+var f = func(uint n) return f(n)
+### namespaced redefinition is allowed
+-- namespaces are resolved later; Lua-style monkeypatching is fine
+type T = {x=float}
+func T.f(T a) {}
+func T:f() {}

@@ -146,7 +146,7 @@ sref Dedup::_finishset(HBlock& hb, HKey& k)
 MemBlock Dedup::get(sref ref) const
 {
     const unsigned char x = arr[ref].x;
-    assert(x); // if this fails, then the block was GC'd
+    assert(ref < 2 || x); // The first two blocks are NULL and empty. if this fails, then the block was GC'd
     if(x & LONG_BIT)
         return arr[ref].mb;
 

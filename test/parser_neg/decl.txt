@@ -20,11 +20,6 @@ uint a = 2
 ### use before declaration in the same scope
 uint b = a
 uint a = 1
-### self-referencing declaration at file scope
--- 'a' on the right is an external symbol, which then clashes with the local 'a'
-var a = a
-### self-referencing declaration with a type
-T t = t
 ### type name reused as variable name
 int int = 1
 ### variable used as its own type
@@ -64,3 +59,10 @@ func f(x) {}
 for(uint i = 0..3) i = 1
 ### assignment to loop variable from a closure
 for(uint i = 0..3) { var f = func() { i = 1 } }
+### redeclaring a local of the same function in a nested block
+-- shadowing within a function is an error (Symstore::decl checks up to the function boundary)
+uint x = 1
+{
+    var x = x
+    uint y = x
+}

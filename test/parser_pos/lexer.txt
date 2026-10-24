@@ -83,6 +83,12 @@ int a = +5 - -1
 ### less-than followed by a negative literal
 int x = +0
 bool b = x<-1
+### quoted identifier with escapes is the same name as the plain identifier
+uint @"\u{41}x" = 1
+uint y = Ax
+### quoted identifier with escaped characters
+uint @"tab\there" = 1
+uint @"quote\"inside" = 2
 ### comment at end of file without newline
 uint a = 1
 -- no newline after this

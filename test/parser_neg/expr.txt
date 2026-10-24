@@ -54,3 +54,19 @@ var a = (x)#1
 ### two commas in call arguments
 func f(uint a, uint b) return a
 var x = f(1,,2)
+### unwrap binding combined with another condition
+-- '=>' is not an operator; it only forms the whole if() condition
+uint? o = 1
+if(o => v && v > 0) { uint w = v }
+### unwrap binding outside of a condition
+uint? a = 1
+var b = a => v
+### '?' after something that is not a type name
+var x: Table(uint, uint)? = nil
+### '?' after a parenthesized type
+type T = (uint)?
+### '...' after a call
+func f() return uint
+type T = f()...
+### '?' after a type name with '...'
+type T = uint...?

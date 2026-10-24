@@ -35,6 +35,7 @@ enum SymbolRefContext
     SYMREF_KNOWN_VALUE = 0x40,  // Symbol has a valid value known at compile time
     SYMREF_DEFERRED    = 0x80,  // Symbol was declared deferred, allow re-declaration
     SYMREF_FUNCARG     = 0x100, // Symbol is part if a function parameter list (for diagnostics only)
+    SYMREF_DEFERRED_ASSIGNED = 0x200, // Assigned to while deferred; the real declaration must be mutable
 
     SYMREF_NOFLAGS     = 0x00
 };
@@ -92,6 +93,7 @@ public:
     {
         ScopeType boundary;
         std::vector<unsigned> symids;
+        std::vector<unsigned> extrefs; // external symbols referenced in this scope or (already closed) inner scopes
         // FIXME: This should be in the next lowering stage
         SlotDistrib localids; // only used when boundary == SCOPE_FUNCTION
     };
@@ -105,6 +107,7 @@ public:
     {
         Sym *sym;
         Sym *clashing;
+        const Sym *external; // name was already used as an external symbol in this scope
     };
 
     Symstore();

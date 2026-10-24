@@ -28,3 +28,6 @@ type SI = union(int, string)
 ### Union flattening
 type SI = int | string
 type T = float | SI
+### optional() for type expressions that are not a plain name
+type T = optional(Table(uint, uint))
+var x: optional(Table(uint, uint)) = nil

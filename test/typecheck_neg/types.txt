@@ -56,6 +56,3 @@ uint b = a[0]
 ### field access on a number
 uint a = 1
 uint b = a.x
-### unwrap binding outside of a condition
-uint? a = 1
-var b = a => v

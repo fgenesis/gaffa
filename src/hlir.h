@@ -67,6 +67,12 @@ enum HLNodeType
     HLNODE_EXPORT,
     HLNODE_NS_INDEX,
     HLNODE_NS_INDEXASSIGN,
+    HLNODE_BREAK,
+    HLNODE_CONTINUE,
+    HLNODE_UNWRAPBIND,
+    HLNODE_ANDOR,
+    HLNODE_VALBLOCK,
+    HLNODE_VARARGS,
 };
 
 enum HLTypeFlags
@@ -122,9 +128,47 @@ struct HLTernary : HLNodeBase
 struct HLConditional : HLNodeBase
 {
     enum { EnumType = HLNODE_CONDITIONAL, Children = 3 };
-    HLNode *condition;
+    HLNode *condition; // expr or HLUnwrapBind
     HLNode *ifblock;
     HLNode *elseblock;
+};
+
+// if(val => ident): ident is only visible in the if-block
+struct HLUnwrapBind : HLNodeBase
+{
+    enum { EnumType = HLNODE_UNWRAPBIND, Children = 2 };
+    HLNode *val;
+    HLNode *ident;
+};
+
+// a..b..step, any part may be NULL. Only in for() and iterator().
+struct HLRange : HLNodeBase
+{
+    enum { EnumType = HLNODE_RANGE, Children = 3 };
+    HLNode *begin;
+    HLNode *end;
+    HLNode *step;
+};
+
+// Lua-style 'and', 'or'; node->tok tells which
+struct HLAndOr : HLNodeBase
+{
+    enum { EnumType = HLNODE_ANDOR, Children = 2, DefaultValType = PRIMTYPE_AUTO };
+    HLNode *a;
+    HLNode *b;
+};
+
+// $stmt
+struct HLValBlock : HLNodeBase
+{
+    enum { EnumType = HLNODE_VALBLOCK, Children = 1, DefaultValType = PRIMTYPE_AUTO };
+    HLNode *body;
+};
+
+// '...' used as expression
+struct HLVarargs : HLNodeBase
+{
+    enum { EnumType = HLNODE_VARARGS, Children = 0, DefaultValType = PRIMTYPE_AUTO };
 };
 
 struct HLForLoop : HLNodeBase
@@ -188,10 +232,14 @@ struct HLReturnEmit : HLNodeBase
     HLNode *what;
 };
 
-struct HLBranchAlways : HLNodeBase
+struct HLBreak : HLNodeBase
 {
-    enum { EnumType = HLNODE_NONE, Children = 1 };
-    HLNode *target;
+    enum { EnumType = HLNODE_BREAK, Children = 0 };
+};
+
+struct HLContinue : HLNodeBase
+{
+    enum { EnumType = HLNODE_CONTINUE, Children = 0 };
 };
 
 struct HLFnCall : HLNodeBase
@@ -323,7 +371,10 @@ struct HLNode
         HLForLoop forloop;
         HLWhileLoop whileloop;
         HLReturnEmit retn;
-        HLBranchAlways branch;
+        HLUnwrapBind unwrapbind;
+        HLRange range;
+        HLAndOr andor;
+        HLValBlock valblock;
         HLFnCall fncall;
         HLMthCall mthcall;
         HLCallAdj calladj;
@@ -430,8 +481,13 @@ public:
     inline HLNode *funcdecl()      { return allocT<HLFuncDecl>();      }
     inline HLNode *vardef()        { return allocT<HLVarDef>();        }
     inline HLNode *retn()          { return allocT<HLReturnEmit>();    }
-    inline HLNode *continu()       { return allocT<HLBranchAlways>();  }
-    inline HLNode *brk()           { return allocT<HLBranchAlways>();  } // FIXME: ???
+    inline HLNode *continu()       { return allocT<HLContinue>();      }
+    inline HLNode *brk()           { return allocT<HLBreak>();         }
+    inline HLNode *unwrapbind()    { return allocT<HLUnwrapBind>();    }
+    inline HLNode *range()         { return allocT<HLRange>();         }
+    inline HLNode *andor()         { return allocT<HLAndOr>();         }
+    inline HLNode *valblock()      { return allocT<HLValBlock>();      }
+    inline HLNode *varargs()       { return allocT<HLVarargs>();       }
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
     inline HLNode *mthcall()       { return allocT<HLMthCall>();       }
     inline HLNode *calladj()       { return allocT<HLCallAdj>();       }
