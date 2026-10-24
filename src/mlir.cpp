@@ -1356,7 +1356,6 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
                 break;
 
             case MLVar::CONSTVAL:
-            case MLVar::NAMEDECL:
                 assert(false && "constval during decl, should not be folded yet");
                 break;
 
@@ -1630,6 +1629,8 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 
                     // TODO: exporting
                 }
+                break;
+#if 0
                 case 1:
                     // Regsiter in namespace
                     if(!ns->isconst())
@@ -1639,7 +1640,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                         return;
                     }
 
-                    if(val->isconst())
+                    if(val.isconst())
                     {
                         // Known at compile time -> register now
                     }
@@ -1647,6 +1648,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                     {
                         // Need to do it at runtime
                     }
+#endif
                 default:
                     assert(false);
             }

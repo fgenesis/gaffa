@@ -98,7 +98,9 @@ struct RTReg
         df->info.flags = FuncInfo::LFunc | extraflags;
         df->info.nupvals = 0;
         df->u.lfunc = lfunc;
-        df->dbg = NULL;
+        df->dbg.lineend = -1;
+        df->dbg.linestart = -1;
+        df->dbg.name = 0;
         df->dtype = types.func;
 
         if(ns)

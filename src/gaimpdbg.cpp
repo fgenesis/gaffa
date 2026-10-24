@@ -185,7 +185,8 @@ static bool dump(const Runtime& rt, const HLNode *n, unsigned level)
                 case PRIMTYPE_FUNC:
                 {
                     const DFunc *df = v.asFunc();
-                    printf("function %s in line %d", df->dbg && df->dbg->name ? rt.sp.lookup(df->dbg->name).s : "?", df->dbg ? df->dbg->linestart : -1);
+                    const DebugInfo& d = df->dbg;
+                    printf("function %s in line %d", d.name ? rt.sp.lookup(d.name).s : "?", d.linestart);
                 }
                 break;
 

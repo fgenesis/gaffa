@@ -151,7 +151,9 @@ static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, OperatorId 
     df->info.flags = FuncInfo::LFunc | FuncInfo::Pure;
     df->info.nupvals = 0;
     df->u.lfunc = lfunc;
-    df->dbg = NULL;
+    df->dbg.linestart = 0;
+    df->dbg.lineend = 0;
+    df->dbg.name = 0; // TODO: C function name
     df->dtype = rt.tr.lookupDesc(PRIMTYPE_FUNC)->h.dtype;
     df->opdef = def;
 
