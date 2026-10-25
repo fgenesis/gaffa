@@ -6,6 +6,7 @@
 #include "gavm.h"
 #include "runtime.h"
 #include "lex.h"
+#include "rtops.h"
 #include <assert.h>
 #include <limits>
 
@@ -184,14 +185,6 @@ static void reg_type_func(RTReg& r)
 
 
 
-static int op_uint_plus(VM *, Val *v) // TEMP
-{
-    assert(v[0].type == PRIMTYPE_UINT);
-    assert(v[1].type == PRIMTYPE_UINT);
-    v[0].u.ui += v[1].u.ui;
-    return 1;
-}
-
 static void reg_type_void(RTReg& r)
 {
     const TDesc *d  = r.tr.mklistDesc(NULL, 0);
@@ -211,8 +204,6 @@ static void reg_type_uint(RTReg& r)
     r.types.uint = d;
     ClassReg xuint = r.regclass("uint", d);
     _reg_numeric<uint>(xuint);
-
-    xuint.op(OP_ADD, op_uint_plus, PRIMTYPE_UINT, 2);
 }
 
 
@@ -407,5 +398,12 @@ void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
     reg_type_any(r);
     reg_constants(r);
     reg_test(r);
+
+    OpReg opr = { syms, gc, sp, tr };
+    reg_bool_ops(opr);
+    reg_uint_ops(opr);
+    reg_sint_ops(opr);
+    reg_float_ops(opr);
+    reg_string_ops(opr);
 }
 

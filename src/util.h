@@ -112,28 +112,91 @@ static __forceinline __declspec(noreturn) void unreachable() { __assume(false); 
 static inline void unreachable() { assert(false && "unreachable"); }
 #endif
 
-// return true on overflow
+template<typename T>
+struct IntLimits
+{
+    enum { Signed = T(-1) < T(0) };
+    static FORCEINLINE T Max() { return Signed ? T(T((T(1) << (sizeof(T) * 8 - 2)) - 1) * 2 + 1) : T(~T(0)); }
+    static FORCEINLINE T Min() { return Signed ? T(T(0) - Max() - 1) : T(0); }
+};
+
+// The *_check_overflow() functions return true on overflow; *res is not meaningful then.
+// Signed overflow is UB, so the fallbacks check before doing the operation.
+
 template<typename T>
 inline bool add_check_overflow(T* res, T a, T b)
 {
 #if __has_builtin(__builtin_add_overflow)
     return __builtin_add_overflow(a, b, res);
 #else
-    return ((*res = a + b)) < a;
+    if(IntLimits<T>::Signed)
+    {
+        if(b > 0 ? a > IntLimits<T>::Max() - b : a < IntLimits<T>::Min() - b)
+            return true;
+        *res = a + b;
+        return false;
+    }
+    *res = T(a + b);
+    return *res < a;
 #endif
 }
 
-// return true on overflow
+template<typename T>
+inline bool sub_check_overflow(T* res, T a, T b)
+{
+#if __has_builtin(__builtin_sub_overflow)
+    return __builtin_sub_overflow(a, b, res);
+#else
+    if(IntLimits<T>::Signed)
+    {
+        if(b < 0 ? a > IntLimits<T>::Max() + b : a < IntLimits<T>::Min() + b)
+            return true;
+        *res = a - b;
+        return false;
+    }
+    *res = T(a - b);
+    return b > a;
+#endif
+}
+
 template<typename T>
 inline bool mul_check_overflow(T* res, T a, T b)
 {
 #if __has_builtin(__builtin_mul_overflow)
     return __builtin_mul_overflow(a, b, res);
 #else
+    if(IntLimits<T>::Signed)
+    {
+        const T lo = IntLimits<T>::Min(), hi = IntLimits<T>::Max();
+        if(a > 0 ? (b > 0 ? a > hi / b : b < lo / a)
+                 : (b > 0 ? a < lo / b : (a && b < hi / a)))
+            return true;
+        *res = a * b;
+        return false;
+    }
     T tmp = a * b;
     *res = tmp;
     return a && tmp / a != b;
 #endif
+}
+
+template<typename T>
+inline bool neg_check_overflow(T* res, T a)
+{
+    if(IntLimits<T>::Signed ? a == IntLimits<T>::Min() : a != 0)
+        return true;
+    *res = T(T(0) - a);
+    return false;
+}
+
+// b must not be 0
+template<typename T>
+inline bool div_check_overflow(T* res, T a, T b)
+{
+    if(IntLimits<T>::Signed && a == IntLimits<T>::Min() && b == T(T(0) - 1))
+        return true;
+    *res = a / b;
+    return false;
 }
 
 struct MaybeNum

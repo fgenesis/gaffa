@@ -43,3 +43,5 @@ uint Ax = 1
 uint @"A\x78" = 2
 ### bad escape in quoted identifier
 uint @"\q" = 1
+### positive signed literal overflowing int
+int a = +9223372036854775808

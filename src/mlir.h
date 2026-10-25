@@ -59,7 +59,10 @@ enum MLCmd
     _ML_UPVAL = _ML_MAX,// expr (1, func's upvals idx)
     _ML_LOCAL,          // expr (1, func's locals idx)
     _ML_FUNCIDX,        // expr (1, func idx)  // function + mgmt infos. Recursion breaker.
-    _ML_EMPTY,          // expr (0) placeholder, eg. the type of 'var x'; exprtype is PRIMTYPE_AUTO
+    _ML_EMPTY,          // expr (0) placeholder, eg. the type of 'var x'; exprtype is PRIMTYPE_AUTO.
+                        // Serialized as an empty list. Unambiguous: a type list is never empty where an empty type can appear
+                        // (a decl has >= 1 target; params always have a type). Internally needed because a list
+                        // of 1 is the child itself, so a single empty type would make the whole list empty.
 
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode

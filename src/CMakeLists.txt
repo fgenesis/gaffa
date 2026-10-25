@@ -58,6 +58,8 @@ set(src
     runtime.h
     rtops.cpp
     rtops.h
+    valconv.cpp
+    valconv.h
     #rt_uint.cpp
     #rt_uint.h
     gacoro.cpp

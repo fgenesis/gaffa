@@ -41,3 +41,5 @@ uint? r = ??(1 // 0)
 uint? r = ??(1 + 1)
 ### modulo
 uint a = 7 % 3
+### equality converts constants at fold time
+bool b = 5 == +5

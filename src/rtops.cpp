@@ -1,4 +1,6 @@
 #include <cmath>
+#include <limits.h>
+#include <string.h>
 
 #include "rtops.h"
 #include "gavm.h"
@@ -48,7 +50,7 @@ template<> struct TDef<bool> : TFuncTypes<bool>
     static const PrimType Prim = PRIMTYPE_BOOL;
     typedef bool Type;
     FORCEINLINE static uint& Get(ValU& v) { return v.u.ui; }
-    FORCEINLINE static uint& Set(ValU& v, bool x) { v.u.ui = x; }
+    FORCEINLINE static void Set(ValU& v, bool x) { v.u.ui = x; }
 };
 
 template<> struct TDef<widereal> : TFuncTypes<widereal> // Dummy
@@ -91,7 +93,21 @@ template<typename T> static FORCEINLINE int Mul(T& a, T b) { a *= b; return 1; }
 template<typename T> static FORCEINLINE int Div(T& a, T b) { if(!b) return RTE_DIV_BY_ZERO; a /= b; return 1; }
 template<typename T> static FORCEINLINE int Mod(T& a, T b) { if(!b) return RTE_DIV_BY_ZERO; a %= b; return 1; }
 template<typename T> static FORCEINLINE int UPos(T& a) { a = +a; return 1; }
-template<typename T> static FORCEINLINE int UNeg(T& a) { a = -a; return 1; } // TODO: overflow check
+template<typename T> static FORCEINLINE int UNeg(T& a) { a = -a; return 1; }
+
+// Integer overflow checks
+template<> FORCEINLINE int Add<uint>(uint& a, uint b) { return add_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Sub<uint>(uint& a, uint b) { return sub_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Mul<uint>(uint& a, uint b) { return mul_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Add<sint>(sint& a, sint b) { return add_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Sub<sint>(sint& a, sint b) { return sub_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Mul<sint>(sint& a, sint b) { return mul_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Div<sint>(sint& a, sint b) { if(!b) return RTE_DIV_BY_ZERO; return div_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Mod<sint>(sint& a, sint b) { if(!b) return RTE_DIV_BY_ZERO; a = b == -1 ? 0 : a % b; return 1; } // MIN % -1 is UB in C, but 0
+template<> FORCEINLINE int UNeg<sint>(sint& a) { return neg_check_overflow(&a, a) ? RTE_OVERFLOW : 1; }
+// Unary + and - on uint result in an int; a holds the int's bits afterwards
+template<> FORCEINLINE int UPos<uint>(uint& a) { return a > (uint)IntLimits<sint>::Max() ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int UNeg<uint>(uint& a) { if(a > (uint)IntLimits<sint>::Max() + 1) return RTE_OVERFLOW; a = 0 - a; return 1; }
 
 // integer variant of wrapping mod returns T(-1) aka all bits set
 //template<typename T> static FORCEINLINE int WrapDiv(real& a, real b) { a = b ? a / b : T(-1); return 1; }
@@ -135,16 +151,16 @@ template<> struct IsCommutative<OP_BITOR> : CompileTrue {};
 template<> struct IsCommutative<OP_XOR> : CompileTrue {};
 
 
-static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, OperatorId op, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
+static void _Register(OpReg& r, const OpDef *def, OperatorId op, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
 {
-    const Type tp = rt.tr.mklistDesc(params, nparams)->id();
-    const Type tret = rt.tr.mklistDesc(rets, nrets)->id();
-    const Type tf = rt.tr.mkfuncDesc(tp, tret)->id();
+    const Type tp = r.tr.mklistDesc(params, nparams)->id();
+    const Type tret = r.tr.mklistDesc(rets, nrets)->id();
+    const Type tf = r.tr.mkfuncDesc(tp, tret)->id();
     const char *opname = Lexer::GetOperatorName(op);
     assert(opname);
-    const sref sname = rt.sp.put(opname).id;
+    const sref sname = r.sp.put(opname).id;
 
-    DFunc * const df = DFunc::GCNew(rt.gc);
+    DFunc * const df = DFunc::GCNew(r.gc);
     df->info.paramtype = tp;
     df->info.rettype = tret;
     df->info.functype = tf;
@@ -156,12 +172,12 @@ static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, OperatorId 
     df->dbg.linestart = 0;
     df->dbg.lineend = 0;
     df->dbg.name = 0; // TODO: C function name
-    df->dtype = rt.tr.lookupDesc(PRIMTYPE_FUNC)->h.dtype;
+    df->dtype = r.tr.lookupDesc(PRIMTYPE_FUNC)->h.dtype;
     df->opdef = def;
 
     // The assumtion is that the first parameter's type is also the namespace
     // ie. makes sense in the case of uint.+(uint, uint)
-    syms.addToNamespace(rt.gc, params[0], sname, Val(df));
+    r.syms.addToNamespace(r.gc, params[0], sname, Val(df));
 }
 
 // Some common crap moved out of the way and generalized
@@ -200,7 +216,7 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
         Val *d = LOCAL(imm->a);
         Val *a = LOCAL(imm->b);
         int e = Doit(d, d, a);
-        if(e < 0);
+        if(e < 0)
             FAIL(e);
         NEXT();
     }
@@ -221,9 +237,10 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
     static NOINLINE int Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
-        vm->state = F(x, LoadChecked(v[1]));
+        const int e = F(x, LoadChecked(v[1]));
+        if(e < 0)
+            return e;
         Store(v[0], x);
-        assert(vm->state || v[0].type == TDef<RT>::Prim);
         return 1;
     }
 
@@ -240,7 +257,7 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
         return writeInst(dst, op_Op, imm);
     }
 
-    static void Register(SymTable& syms, Runtime& rt)
+    static void Register(OpReg& r)
     {
         static const OpDef opdef =
         {
@@ -249,7 +266,7 @@ struct WrappedBinOp : WrappedBase<RT, IT, ST>
 
         const Type params[] = { TDef<ST>::Prim, TDef<ST>::Prim };
         const Type rets[] = { TDef<RT>::Prim };
-        _Register(syms, rt, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
+        _Register(r, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
     }
 };
 
@@ -287,9 +304,10 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
     static int Func(VM *vm, Val *v)
     {
         IT x = LoadChecked(v[0]);
-        vm->state = F(x);
+        const int e = F(x);
+        if(e < 0)
+            return e;
         Store(v[0], x);
-        assert(vm->state || v[0].type == TDef<RT>::Prim);
         return 1;
     }
 
@@ -310,7 +328,7 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
         return writeInst(dst, op_Op, imm);
     }
 
-    static void Register(SymTable& syms, Runtime& rt)
+    static void Register(OpReg& r)
     {
         static const OpDef opdef =
         {
@@ -318,7 +336,7 @@ struct WrappedUnOp : WrappedBase<RT, IT, ST>
         };
         const Type params[] = { TDef<ST>::Prim };
         const Type rets[] = { TDef<RT>::Prim };
-        _Register(syms, rt, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
+        _Register(r, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
     }
 };
 
@@ -353,7 +371,7 @@ struct WrappedBinComp : WrappedBase<bool, bool, T>
         return writeInst(dst, op_Op, imm);
     }
 
-    static void Register(SymTable& syms, Runtime& rt)
+    static void Register(OpReg& r)
     {
         static const OpDef opdef =
         {
@@ -363,10 +381,55 @@ struct WrappedBinComp : WrappedBase<bool, bool, T>
         const Type params[] = { TDef<T>::Prim, TDef<T>::Prim };
         const Type rets[] = { PRIMTYPE_BOOL };
         // FIXME: These don't ever fail
-        _Register(syms, rt, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
+        _Register(r, &opdef, opid, Func, params, Countof(params), rets, Countof(rets));
     }
 };
 
+
+// a <=> b: int < 0, 0 or > 0
+template<typename T>
+struct WrappedCmp
+{
+    static FORCEINLINE int Doit(Val *dst, Val *a, Val *b)
+    {
+        assert(a->type == TDef<T>::Prim && b->type == TDef<T>::Prim);
+        *dst = Val((sint)ValCmp<T>(TDef<T>::Get(*a), TDef<T>::Get(*b)));
+        return 1;
+    }
+
+    static VMFUNC_MTH_IMM(Op, Imm_3xu32)
+    {
+        Val *d = LOCAL(imm->a);
+        Val *a = LOCAL(imm->b);
+        Val *b = LOCAL(imm->c);
+        Doit(d, a, b);
+        NEXT();
+    }
+
+    // Fallback function for compile-time evaluation
+    static NOINLINE int Func(VM *vm, Val *v)
+    {
+        return Doit(&v[0], &v[0], &v[1]);
+    }
+
+    static size_t GenOp(void *dst, const u32 *argslots)
+    {
+        Imm_3xu32 imm { argslots[0], argslots[1], argslots[2] };
+        return writeInst(dst, op_Op, imm);
+    }
+
+    static void Register(OpReg& r)
+    {
+        static const OpDef opdef =
+        {
+            GenOp, sizeof(Imm_3xu32)
+        };
+
+        const Type params[] = { TDef<T>::Prim, TDef<T>::Prim };
+        const Type rets[] = { PRIMTYPE_SINT };
+        _Register(r, &opdef, OP_CMP, Func, params, Countof(params), rets, Countof(rets));
+    }
+};
 
 template<typename T> struct MakeSigned {};
 template<> struct MakeSigned<uint> { typedef sint Type; };
@@ -383,9 +446,9 @@ struct Equality
 {
     typedef WrappedBinComp<T, C_Eq, OP_EQ> _Eq;
 
-    static void Register(SymTable& syms, Runtime& rt)
+    static void Register(OpReg& r)
     {
-        _Eq::Register(syms, rt);
+        _Eq::Register(r);
     }
 };
 
@@ -401,19 +464,19 @@ struct Arithmetic
     typedef WrappedBinOp<T, T, T, Div, OP_IDIV> _Div;
     typedef WrappedBinOp<T, T, T, Mod, OP_MOD> _Mod;
     // Unary + or minus always converts to signed
-    typedef WrappedUnOp<S, S, T, UPos<S>, OP_UPLUS> _UPlus;
-    typedef WrappedUnOp<S, S, T, UNeg<S>, OP_UNEG> _UNeg;
+    typedef WrappedUnOp<S, T, T, UPos<T>, OP_UPLUS> _UPlus;
+    typedef WrappedUnOp<S, T, T, UNeg<T>, OP_UNEG> _UNeg;
 
-    static void Register(SymTable& syms, Runtime& rt)
+    static void Register(OpReg& r)
     {
-        _Add::Register(syms, rt);
-        _Sub::Register(syms, rt);
-        _Mul::Register(syms, rt);
-        _FDiv::Register(syms, rt);
-        _Div::Register(syms, rt);
-        _Mod::Register(syms, rt);
-        _UPlus::Register(syms, rt);
-        _UNeg::Register(syms, rt);
+        _Add::Register(r);
+        _Sub::Register(r);
+        _Mul::Register(r);
+        _FDiv::Register(r);
+        _Div::Register(r);
+        _Mod::Register(r);
+        _UPlus::Register(r);
+        _UNeg::Register(r);
     }
 };
 
@@ -423,10 +486,14 @@ struct Logical
 
 };
 
+// < <= > >= are derived from <=> during folding and codegen, they can't be registered
 template<typename T>
 struct Orderable
 {
-
+    static void Register(OpReg& r)
+    {
+        WrappedCmp<T>::Register(r);
+    }
 };
 
 template<typename T>
@@ -440,42 +507,73 @@ struct Bitwise
     typedef WrappedUnOp<T, T, T, UCpl<T>, OP_UBITNOT> _UCpl;
 
 
-    static void Register(SymTable& syms, Runtime& rt)
+    static void Register(OpReg& r)
     {
-        _BAnd::Register(syms, rt);
-        _BOr::Register(syms, rt);
-        _BXor::Register(syms, rt);
-        _Shl::Register(syms, rt);
-        _Shr::Register(syms, rt);
-        _UCpl::Register(syms, rt);
+        _BAnd::Register(r);
+        _BOr::Register(r);
+        _BXor::Register(r);
+        _Shl::Register(r);
+        _Shr::Register(r);
+        _UCpl::Register(r);
     }
 };
 
 template<typename T>
-static void reg_intT(SymTable& syms, Runtime& rt)
+static void reg_intT(OpReg& r)
 {
-    Equality<T>::Register(syms, rt);
-    Arithmetic<T>::Register(syms, rt);
-    Bitwise<T>::Register(syms, rt);
+    Equality<T>::Register(r);
+    Orderable<T>::Register(r);
+    Arithmetic<T>::Register(r);
+    Bitwise<T>::Register(r);
 }
 
-void reg_float_ops(SymTable& syms, Runtime& rt)
+void reg_float_ops(OpReg& r)
 {
-    Equality<real>::Register(syms, rt);
-    Arithmetic<real>::Register(syms, rt);
+    Equality<real>::Register(r);
+    Orderable<real>::Register(r);
+    Arithmetic<real>::Register(r);
 }
 
-void reg_bool_ops(SymTable& syms, Runtime& rt)
+void reg_bool_ops(OpReg& r)
 {
-    Equality<bool>::Register(syms, rt);
+    Equality<bool>::Register(r);
 }
 
-void reg_uint_ops(SymTable& syms, Runtime& rt)
+// Strings are interned, so == compares ids. <=> compares bytes, shorter first if one is a prefix of the other.
+static int str_eq(VM *vm, Val *v)
 {
-    reg_intT<uint>(syms, rt);
+    assert(v[0].type == PRIMTYPE_STRING && v[1].type == PRIMTYPE_STRING);
+    v[0] = Val(v[0].u.str == v[1].u.str);
+    return 1;
 }
 
-void reg_sint_ops(SymTable& syms, Runtime& rt)
+static int str_cmp(VM *vm, Val *v)
 {
-    reg_intT<sint>(syms, rt);
+    assert(v[0].type == PRIMTYPE_STRING && v[1].type == PRIMTYPE_STRING);
+    const Strp a = vm->rt->sp.lookup(v[0].u.str);
+    const Strp b = vm->rt->sp.lookup(v[1].u.str);
+    int c = memcmp(a.s, b.s, a.len < b.len ? a.len : b.len);
+    if(!c)
+        c = ValCmp(a.len, b.len);
+    v[0] = Val((sint)Sign(c));
+    return 1;
+}
+
+void reg_string_ops(OpReg& r)
+{
+    const Type params[] = { PRIMTYPE_STRING, PRIMTYPE_STRING };
+    const Type rbool[] = { PRIMTYPE_BOOL };
+    const Type rsint[] = { PRIMTYPE_SINT };
+    _Register(r, NULL, OP_EQ, str_eq, params, Countof(params), rbool, Countof(rbool));
+    _Register(r, NULL, OP_CMP, str_cmp, params, Countof(params), rsint, Countof(rsint));
+}
+
+void reg_uint_ops(OpReg& r)
+{
+    reg_intT<uint>(r);
+}
+
+void reg_sint_ops(OpReg& r)
+{
+    reg_intT<sint>(r);
 }

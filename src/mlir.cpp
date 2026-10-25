@@ -7,6 +7,8 @@
 #include "hashfunc.h"
 
 #include <sstream>
+#include "valconv.h"
+#include "gavm.h"
 
 /* TODO:
 - When constant folding calls, [], {}, or anything that created an object for which isMutableRefType() is true,
@@ -213,6 +215,10 @@ static void mlirDumpNode(MLDumper& dump, const MLNode *node, size_t idx)
         case _ML_VAL:
             dump.tree.write(ML_CONST);
             dump.tree.write(dump.vals.put(node->val));
+            return;
+
+        case _ML_EMPTY: // "nothing" is an empty list
+            dump.tree.write(0);
             return;
 
         case ML_LIST:
@@ -1348,7 +1354,9 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
     else
     {
         // TODO: Make it so that the function can return a warning or an error to display and handle here
-        call->setError(ft.sp(), "Function folding failed with an error");
+        std::ostringstream os;
+        os << "Constant folding failed: " << vmerrstr(status);
+        call->setError(ft.sp(), os.str().c_str());
     }
 
     argspace.dealloc(ft.gc());
@@ -1362,12 +1370,22 @@ static Type singleOrList(MLFoldTracker& ft, Type list)
     return tl.n == 1 ? tl.ptr[0] : list;
 }
 
+static void collectTypes(MLNode *ch, size_t n, std::vector<Type>& ts)
+{
+    for(size_t i = 0; i < n; ++i)
+    {
+        if(ch[i].m.cmd == ML_LIST) // a call folded into several values
+            collectTypes(ch[i].firstChild(), ch[i].numchildren(), ts);
+        else
+            ts.push_back(ch[i].type());
+    }
+}
+
 // Type list of all values of an expression list
 static Type typeListOf(MLFoldTracker& ft, const MLSub& exprs)
 {
-    std::vector<Type> ts(exprs.n);
-    for(size_t i = 0; i < exprs.n; ++i)
-        ts[i] = exprs.ch[i].type();
+    std::vector<Type> ts;
+    collectTypes(exprs.ch, exprs.n, ts);
     return ft.tr().mklistDesc(ts.data(), ts.size())->id();
 }
 
@@ -1404,6 +1422,25 @@ static Type funcType(MLFoldTracker& ft, MLNode *func, Type rets)
     return ft.tr().mkfuncDesc(params, rets)->id();
 }
 
+// One value of a flattened value list
+struct ValueSlot
+{
+    MLNode *expr; // the expression that produces this value
+    Type t;
+    bool single;  // expr produces only this value
+};
+
+static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl);
+
+// Like fitValue(), but without converting or reporting anything
+static bool canFit(const ValueSlot& vs, Type t)
+{
+    if(vs.t == t || (t == PRIMTYPE_ANY && vs.t != PRIMTYPE_NIL))
+        return true;
+    Val tmp;
+    return vs.single && vs.expr->isconst() && convertImplicit(&tmp, vs.expr->asVal(), t);
+}
+
 static bool hasErrorChild(MLNode *node)
 {
     const size_t n = node->numchildren();
@@ -1412,6 +1449,80 @@ static bool hasErrorChild(MLNode *node)
         if(ch[i].m.cmd == _ML_ERROR || (!mlirIsStmt((MLCmd)ch[i].m.cmd) && ch[i].type() == PRIMTYPE_AUTO))
             return true;
     return false;
+}
+
+// How an operator's result is derived from the result of the operator function that is called
+enum OpResult
+{
+    OPRES_DIRECT, // the function's result as is
+    OPRES_NOT,    // !result (bool)
+    OPRES_EQ0,    // result (int, from <=>) compared to 0
+    OPRES_NE0,
+    OPRES_LT0,
+    OPRES_LE0,
+    OPRES_GT0,
+    OPRES_GE0,
+};
+
+// Operators that may be derived from other operator functions. The rows of an operator are tried in order;
+// the first function that exists for the operands is used. Operators that aren't listed only use their own function.
+struct OpLowering
+{
+    OperatorId op;
+    const char *spelling; // for errors
+    OperatorId use;       // operator function to call
+    OpResult res;
+};
+static const OpLowering OpLowerings[] =
+{
+    { OP_EQ,  "==", OP_EQ,  OPRES_DIRECT },
+    { OP_EQ,  "==", OP_CMP, OPRES_EQ0 },
+    { OP_NEQ, "!=", OP_EQ,  OPRES_NOT },
+    { OP_NEQ, "!=", OP_CMP, OPRES_NE0 },
+    { OP_LT,  "<",  OP_CMP, OPRES_LT0 },
+    { OP_LTE, "<=", OP_CMP, OPRES_LE0 },
+    { OP_GT,  ">",  OP_CMP, OPRES_GT0 },
+    { OP_GTE, ">=", OP_CMP, OPRES_GE0 },
+};
+
+static bool applyOpResult(OpResult res, const Val& v)
+{
+    switch(res)
+    {
+        case OPRES_NOT: return !v.u.ui;
+        case OPRES_EQ0: return v.u.si == 0;
+        case OPRES_NE0: return v.u.si != 0;
+        case OPRES_LT0: return v.u.si < 0;
+        case OPRES_LE0: return v.u.si <= 0;
+        case OPRES_GT0: return v.u.si > 0;
+        case OPRES_GE0: return v.u.si >= 0;
+        case OPRES_DIRECT: ;
+    }
+    assert(false);
+    return false;
+}
+
+// Operator function from the lhs type's namespace. Widening: if the rhs doesn't fit it, but the lhs is
+// a constant that fits the rhs type, use the rhs type's function instead (1 + 0.1 is float.+).
+// *nonfunc is set if the namespace has something else than a function under that name.
+static const DFunc *lookupOperator(MLFoldTracker& ft, MLNode *L, size_t arity, sref name, bool *nonfunc)
+{
+    const Type ns = L->type();
+    const Val *opr = ft.env.lookupInNamespace(ns, name);
+    *nonfunc = opr && !opr->asFunc();
+    const DFunc *func = opr ? opr->asFunc() : NULL;
+    if(func && arity == 2 && L[1].type() != ns)
+    {
+        const ValueSlot lv = { &L[0], ns, true };
+        const ValueSlot rv = { &L[1], L[1].type(), true };
+        FuncTypes fty;
+        if(ft.tr().lookupFunc(&fty, func->info.functype) && fty.params.n == 2
+            && !canFit(rv, fty.params.ptr[1]) && canFit(lv, rv.t))
+            if(const Val *o2 = ft.env.lookupInNamespace(rv.t, name))
+                if(const DFunc *f2 = o2->asFunc())
+                    func = f2;
+    }
+    return func;
 }
 
 static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
@@ -1439,38 +1550,97 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         return true;
     }
 
-    // Operator is unary or binary operator that resolves to a function
+    // Candidate operator functions: the rows from the table, or the operator's own function
+    const OpLowering own = { opid, Lexer::GetOperatorName(opid), opid, OPRES_DIRECT };
+    const OpLowering *rows = &own;
+    size_t nrows = 1;
+    for(size_t i = 0; i < Countof(OpLowerings); ++i)
+        if(OpLowerings[i].op == opid)
+        {
+            if(rows == &own)
+            {
+                rows = &OpLowerings[i];
+                nrows = 0;
+            }
+            assert(rows + nrows == &OpLowerings[i]); // the rows of an operator must be adjacent
+            ++nrows;
+        }
 
-    const char *opname = Lexer::GetOperatorName(opid);
-    if(!opname)
+    if(!rows[0].spelling)
     {
-        node->setError(ft.sp(), "Operator not implemented yet (needs lowering to <=> or ==)");
+        node->setError(ft.sp(), "Operator not implemented yet");
         return false;
     }
-    Str name = ft.putstr(opname);
 
-
-    const Val *opr = ft.env.lookupInNamespace(ns, name.id);
-    if(!opr)
+    const OpLowering *use = NULL;
+    const DFunc *func = NULL;
+    for(size_t i = 0; i < nrows && !func; ++i)
     {
-        std::ostringstream os;
-        os << "type has no operator '" << opname << "'";
-        node->setError(ft.sp(), os.str().c_str());
-        return false;
+        const char *fname = Lexer::GetOperatorName(rows[i].use);
+        assert(fname);
+        bool nonfunc;
+        func = lookupOperator(ft, L, arity, ft.putstr(fname).id, &nonfunc);
+        if(nonfunc)
+        {
+            std::ostringstream os;
+            os << "type's '" << fname << "' is not a function";
+            node->setError(ft.sp(), os.str().c_str());
+            return false;
+        }
+        use = &rows[i];
     }
-    const DFunc *func = opr->asFunc();
     if(!func)
     {
         std::ostringstream os;
-        os << "type's '" << opname << "' is not a function";
+        os << "type has no operator '" << rows[0].spelling << "'";
+        if(nrows > 1 || rows[0].use != opid)
+        {
+            os << " (needs";
+            for(size_t i = 0; i < nrows; ++i)
+                os << (i ? " or '" : " '") << Lexer::GetOperatorName(rows[i].use) << "'";
+            os << ")";
+        }
         node->setError(ft.sp(), os.str().c_str());
         return false;
     }
 
-    node->x.exprtype = singleOrList(ft, func->info.rettype);
+    const Type rett = singleOrList(ft, func->info.rettype);
+    if(use->res == OPRES_DIRECT)
+        node->x.exprtype = rett;
+    else
+    {
+        const Type need = use->res == OPRES_NOT ? PRIMTYPE_BOOL : PRIMTYPE_SINT;
+        if(rett != need)
+        {
+            std::ostringstream os;
+            os << "Operator '" << Lexer::GetOperatorName(use->use) << "' must return " << (need == PRIMTYPE_BOOL ? "bool" : "int")
+                << " to be used for '" << use->spelling << "'";
+            node->setError(ft.sp(), os.str().c_str());
+            return false;
+        }
+        node->x.exprtype = PRIMTYPE_BOOL;
+    }
+
+    // The lhs picked the function, so the operands must fit its params. Constants are converted here;
+    // the runtime doesn't convert implicitly.
+    FuncTypes fty;
+    if(ft.tr().lookupFunc(&fty, func->info.functype) && fty.params.n == arity)
+    {
+        bool ok = true;
+        for(size_t i = 0; i < arity; ++i)
+        {
+            const ValueSlot vs = { &L[i], L[i].type(), true };
+            ok = fitValue(ft, vs, fty.params.ptr[i], "Operand", node) && ok;
+        }
+        if(!ok)
+            return false;
+    }
 
     // TODO: is there an operator that results in more than 1 return value?
-    return tryFoldCall(node, *func, L, arity, 1, ft) > 0;
+    const int status = tryFoldCall(node, *func, L, arity, 1, ft);
+    if(status > 0 && use->res != OPRES_DIRECT && node->isconst())
+        node->setVal(Val(applyOpResult(use->res, node->asVal())));
+    return status > 0;
 }
 
 static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
@@ -1529,18 +1699,23 @@ static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
     }
 }
 
+static std::string constantStr(const Val& v)
+{
+    std::ostringstream os;
+    switch(v.type)
+    {
+        case PRIMTYPE_UINT: os << v.u.ui; break;
+        case PRIMTYPE_SINT: os << v.u.si; break;
+        case PRIMTYPE_FLOAT: os << v.u.f; break;
+        default: os << "value";
+    }
+    return os.str();
+}
+
 static bool isSink(const MLNode *node)
 {
     return node->m.cmd == ML_SINK || node->m.cmd == ML_WSINK;
 }
-
-// One value of a flattened value list
-struct ValueSlot
-{
-    MLNode *expr; // the expression that produces this value
-    Type t;
-    bool single;  // expr produces only this value
-};
 
 // Flatten exprs into one slot per value. A variadic tail is not included; returns false on error.
 static bool flattenValues(MLFoldTracker& ft, MLNode *ch, size_t n, std::vector<ValueSlot>& slots)
@@ -1618,6 +1793,34 @@ static bool balanceValues(MLFoldTracker& ft, const MLNode *where, size_t nfixed,
     return true;
 }
 
+// Check that a value fits type t. Constants are converted implicitly if no data is lost.
+// decl is where t comes from, for errors.
+static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl)
+{
+    if(vs.t == t)
+        return true;
+    if(t == PRIMTYPE_ANY && vs.t != PRIMTYPE_NIL) // any holds any value, except nil
+        return true;
+    if(vs.single && vs.expr->isconst())
+    {
+        const Val v = vs.expr->asVal();
+        Val conv;
+        if(convertImplicit(&conv, v, t))
+        {
+            vs.expr->setVal(conv);
+            return true;
+        }
+        if(isNumericType(v.type) && isNumericType(t))
+        {
+            std::ostringstream os;
+            os << what << ": constant " << constantStr(v) << " doesn't fit into '" << GetPrimTypeName(t) << "' without data loss";
+            ft.error(vs.expr, os.str().c_str());
+            return false;
+        }
+    }
+    return ft.checktype(vs.t, t, what, vs.expr, decl);
+}
+
 // Type of a sink's type expression; PRIMTYPE_AUTO if untyped or not a type
 static Type sinkType(MLFoldTracker& ft, MLNode *sink)
 {
@@ -1635,7 +1838,7 @@ static void checkSinkValue(MLFoldTracker& ft, MLNode *sink, const ValueSlot& vs,
 {
     const Type t = sinkType(ft, sink);
     if(t != PRIMTYPE_AUTO)
-        ft.checktype(vs.t, t, "Value", vs.expr, stmt);
+        fitValue(ft, vs, t, "Value", stmt);
 }
 
 // Count fixed targets and check for a trailing '___'
@@ -1717,13 +1920,16 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         }
 
         MLVar *v = &ft.mlir.vars[varidx++];
+        const Type declt = v->u.local.type; // from the declared type, if any
+        if(declt != PRIMTYPE_AUTO && !fitValue(ft, vs, declt, "Value", &declroot))
+            continue;
         // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
         if(!v->isMutable() && vs.single && vs.expr->isconst())
         {
             v->kind = MLVar::CONSTVAL;
-            v->u.val = vs.expr->asVal();
+            v->u.val = vs.expr->asVal(); // converted to the declared type
         }
-        else
+        else if(declt == PRIMTYPE_AUTO)
             assignVarType(v, vs.t, ft);
     }
     if(wide)
@@ -1731,6 +1937,21 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
             checkSinkValue(ft, &targets.ch[nfixed], slots[i], &declroot);
 
     // DO NOT ELIMINATE DECLS, even if all vars became constants: post-folding needs them
+}
+
+static void fitReturnValues(MLFoldTracker& ft, MLNode *ret, MLSub vals, Type declrets, const MLNode *func)
+{
+    const TypeIdList tl = ft.tr().aslist(declrets);
+    if(tl.n && (tl.ptr[tl.n - 1] & TYPEBIT_VARIADIC)) // TODO: variadic returns
+    {
+        ft.checktype(typeListOf(ft, vals), declrets, "Return value", ret, func);
+        return;
+    }
+    std::vector<ValueSlot> slots;
+    if(!balanceValues(ft, ret, tl.n, false, vals, slots))
+        return;
+    for(size_t i = 0; i < tl.n; ++i)
+        fitValue(ft, slots[i], tl.ptr[i], "Return value", func);
 }
 
 static void doAssign(MLFoldTracker& ft, MLNode *node)
@@ -1758,7 +1979,7 @@ static void doAssign(MLFoldTracker& ft, MLNode *node)
             {
                 const MLVar& v = ft.mlir.vars[dst->m.p[0]];
                 assert(v.isMutable()); // the parser checks this
-                ft.checktype(vs.t, dst->type(), "Assigned value", vs.expr, v.decl ? &ft.mlir.nodes[v.decl] : dst);
+                fitValue(ft, vs, dst->type(), "Assigned value", v.decl ? &ft.mlir.nodes[v.decl] : dst);
             }
             break;
 
@@ -1806,10 +2027,13 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
             NumValuesResult nv = numResultValuesOfList(vals.ch, vals.n, ft);
             if(nv.verdict == NumValuesResult::ERROR)
                 break;
-            const Type t = typeListOf(ft, vals);
             if(ff.declrets != PRIMTYPE_AUTO)
-                ft.checktype(t, ff.declrets, "Return value", node, &ft.mlir.nodes[ff.nodeidx]);
-            else if(ff.deducedrets == PRIMTYPE_AUTO)
+            {
+                fitReturnValues(ft, node, vals, ff.declrets, &ft.mlir.nodes[ff.nodeidx]);
+                break;
+            }
+            const Type t = typeListOf(ft, vals);
+            if(ff.deducedrets == PRIMTYPE_AUTO)
                 ff.deducedrets = t;
             else if(ff.deducedrets != t)
             {
@@ -2052,8 +2276,24 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
                 return;
             }
 
+            // Arguments must fit the parameter types; a variadic param takes the rest
+            std::vector<ValueSlot> argslots;
+            if(!flattenValues(ft, args.ch, args.n, argslots))
+            {
+                node->x.exprtype = PRIMTYPE_AUTO;
+                return;
+            }
+            bool argsok = true;
+            for(size_t i = 0; i < argslots.size(); ++i) // too many args were reported above
+            {
+                const Type pt = i < minargs ? fty.params.ptr[i] : (fty.params.ptr[fty.params.n - 1] & TYPEBASE_MASK);
+                argsok = fitValue(ft, argslots[i], pt, "Argument", funcexpr) && argsok;
+            }
+
             const TDesc *td = ft.tr().lookupFunc(NULL, df ? df->info.functype : funcexpr->type());
             node->x.exprtype = singleOrList(ft, td->types()[2]);
+            if(!argsok)
+                return;
 
             if(df)
                 tryFoldCall(node, *df, args.ch, args.n, -1, ft);

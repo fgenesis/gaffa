@@ -7,8 +7,6 @@ int a = 1.5
 float a = 16777217
 ### unsigned literal too large for int
 int a = 9223372036854775808
-### positive signed literal overflowing int
-int a = +9223372036854775808
 ### string to number
 uint a = "5"
 ### number to string

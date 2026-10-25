@@ -1,6 +1,39 @@
+### basic cases
 int a = 1
 int b = -1
 float c = 1
 float d = +1
 float e = -1
 uint f = +1
+### uint
+uint a = +1 - 1
+### uint 2
+int a = 5 - 4
+### float
+int a = 1.0
+uint b = 1000.0
+### float->int
+int a = 1 + 1.0
+### float->int 2
+float a = 1.0
+int b = 1 + 1.0
+### division yields float, not uint, but the float can be casted without data loss
+uint a = 4 / 2
+### multi
+uint a, int b, float c = 1, 1, 1
+### in expr
+float a = 1 + 0.1
+### in expr 2
+float a = 0.1 + 1
+### folded
+int a = 1 + 2
+float b = a + 0.1
+### folded
+int a = 1 + 2
+float b = a
+uint c = b -- no mantissa, no loss of data
+### folded explicit
+int a = 1 + 2
+float b = a + 0.1
+int c = int(b) -- this can be eval'd at fold time
+uint d = c  -- this requires c to be a known constant

@@ -1,1 +1,6 @@
-int h = 0.0
+### uint underflow (during folding)
+int a = 2 - 10
+### uint underflow (during folding+assignment)
+uint a = 2 - 10
+### uint underflow
+uint a = +1 - +5

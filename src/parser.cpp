@@ -2022,7 +2022,7 @@ HLNode *Parser::emitConstant(const Lexer::Token& tok, const Val& v)
     if(v.type == PRIMTYPE_NORETURN)
         errorAt(tok, (const char*)v.u.p);
 
-    HLNode *node = ensure(hlir->constantValue());
+    HLNode *node = ensure(hlir->constantValue(), tok);
     if(node)
         node->u.constant.val = v;
     return node;

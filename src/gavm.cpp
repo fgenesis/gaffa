@@ -854,7 +854,7 @@ struct Testcode
     Inst halt;
 };
 
-static const char *vmerrstr(int rte)
+const char *vmerrstr(int rte)
 {
     switch(rte)
     {

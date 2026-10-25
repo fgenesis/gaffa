@@ -53,6 +53,8 @@ enum RTError
     RTE_INCOMPATIBLE_TYPE  = RTE_FIRST_ERROR - 9,
 };
 
+const char *vmerrstr(int rte);
+
 static FORCEINLINE bool RTIsError(int e)
 {
     return e <= RTE_FIRST_ERROR;

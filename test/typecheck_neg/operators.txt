@@ -9,12 +9,10 @@ int a = +9223372036854775807 + +1
 uint a = 1 // 0
 ### float NaN
 float a = 0.0 / 0.0
-### division yields float, not uint
-uint a = 4 / 2
 ### mixed int and uint operands
 func f(uint u, int i) return u + i
 ### equality requires identical types
-bool b = 5 == +5
+func f(int a, uint b) return a == b
 ### comparison chain
 bool b = 1 < 2 < 3
 ### logic operators require bool
