@@ -150,6 +150,7 @@ size_t GetOperatorArity(OperatorId op)
         case OP_UNOT:
         case OP_UBITNOT:
         case OP_ULEN:
+        case OP_UNEGWRAP:
         case OP_QQM:
         case OP_UNWRAP:
             return 1;

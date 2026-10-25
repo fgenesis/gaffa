@@ -43,3 +43,18 @@ uint? r = ??(1 + 1)
 uint a = 7 % 3
 ### equality converts constants at fold time
 bool b = 5 == +5
+### wrapping add and sub on uint
+uint a = 18446744073709551615 +% 1
+uint b = 0 -% 1
+uint c = (18446744073709551615 +% 2) - 1
+### wrapping signed add and mul
+int a = +9223372036854775807 +% +1
+int b = +9223372036854775807 *% +2
+### wrapping negation
+int a = -%(-9223372036854775808)
+int b = -%5
+### shifts within range
+uint a = 1 << 63
+int b = +1 << +62
+int c = -1 << +63
+int d = -8 >> +100

@@ -21,8 +21,11 @@ static const ShortEntry ShortTab[] =
     { "}",  Lexer::TOK_RCUR,   },
     { "->", Lexer::TOK_RARROW, },
     { "++", Lexer::TOK_CONCAT, },
+    { "+%", Lexer::TOK_PLUSWRAP },
     { "+",  Lexer::TOK_PLUS,   },
+    { "-%", Lexer::TOK_MINUSWRAP },
     { "-",  Lexer::TOK_MINUS,  },
+    { "*%", Lexer::TOK_STARWRAP },
     { "*",  Lexer::TOK_STAR,   },
     { "//", Lexer::TOK_SLASH2X },
     { "/",  Lexer::TOK_SLASH,  },
@@ -554,6 +557,9 @@ OperatorId Lexer::TokenToBinOp(TokenType tok)
         case TOK_PLUS: return OP_ADD;
         case TOK_MINUS: return OP_SUB;
         case TOK_STAR: return OP_MUL;
+        case TOK_PLUSWRAP: return OP_ADDWRAP;
+        case TOK_MINUSWRAP: return OP_SUBWRAP;
+        case TOK_STARWRAP: return OP_MULWRAP;
         case TOK_SLASH: return OP_FDIV;
         case TOK_SLASH2X: return OP_IDIV;
         case TOK_MOD: return OP_MOD;
@@ -594,6 +600,7 @@ static const OpSpelling OpSpellings[] =
     { OP_UNOT,        true,  { Lexer::TOK_EXCL } },
     { OP_UBITNOT,     true,  { Lexer::TOK_TILDE } },
     { OP_ULEN,        true,  { Lexer::TOK_HASH } },
+    { OP_UNEGWRAP,    true,  { Lexer::TOK_MINUSWRAP } },
     { OP_ADD,         false, { Lexer::TOK_PLUS } },
     { OP_SUB,         false, { Lexer::TOK_MINUS } },
     { OP_MUL,         false, { Lexer::TOK_STAR } },
@@ -605,6 +612,9 @@ static const OpSpelling OpSpellings[] =
     { OP_BITAND,      false, { Lexer::TOK_BITAND } },
     { OP_BITOR,       false, { Lexer::TOK_BITOR } },
     { OP_XOR,         false, { Lexer::TOK_HAT } },
+    { OP_ADDWRAP,     false, { Lexer::TOK_PLUSWRAP } },
+    { OP_SUBWRAP,     false, { Lexer::TOK_MINUSWRAP } },
+    { OP_MULWRAP,     false, { Lexer::TOK_STARWRAP } },
     { OP_EQ,          false, { Lexer::TOK_EQ } },
     { OP_CMP,         false, { Lexer::TOK_CMP } },
     { OP_CONCAT,      false, { Lexer::TOK_CONCAT } },
@@ -616,7 +626,7 @@ static const OpSpelling OpSpellings[] =
 
 struct OpNames
 {
-    char names[_OP_MAX_FUNC][8];
+    char names[_OP_MAX_FUNC][12];
 
     OpNames()
     {
@@ -671,6 +681,7 @@ OperatorId Lexer::TokenToUnOp(TokenType tok)
         case TOK_EXCL: return OP_UNOT;
         case TOK_TILDE: return OP_UBITNOT;
         case TOK_HASH: return OP_ULEN;
+        case TOK_MINUSWRAP: return OP_UNEGWRAP;
         case TOK_QQM: return OP_QQM;
         case TOK_STAR: return OP_UNWRAP;
     }

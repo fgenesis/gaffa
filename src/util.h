@@ -189,6 +189,24 @@ inline bool neg_check_overflow(T* res, T a)
     return false;
 }
 
+// a << b without losing bits (or changing the sign); b must not be negative
+template<typename T>
+inline bool shl_check_overflow(T* res, T a, T b)
+{
+    const T bits = T(sizeof(T) * 8);
+    if(b >= bits - T(IntLimits<T>::Signed)) // 1 << b doesn't fit T
+    {
+        if(IntLimits<T>::Signed && b == bits - 1) // a * 2^(b-1) * 2
+        {
+            T tmp;
+            return mul_check_overflow(&tmp, a, T(T(1) << (b - 1))) || mul_check_overflow(res, tmp, T(2));
+        }
+        *res = 0;
+        return a != 0;
+    }
+    return mul_check_overflow(res, a, T(T(1) << b));
+}
+
 // b must not be 0
 template<typename T>
 inline bool div_check_overflow(T* res, T a, T b)

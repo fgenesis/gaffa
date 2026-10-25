@@ -271,6 +271,7 @@ enum OperatorId
     OP_UNOT,
     OP_UBITNOT,
     OP_ULEN,
+    OP_UNEGWRAP, // -%
 
     // binary
     OP_ADD,
@@ -284,6 +285,9 @@ enum OperatorId
     OP_BITAND,
     OP_BITOR,
     OP_XOR,
+    OP_ADDWRAP, // +%
+    OP_SUBWRAP, // -%
+    OP_MULWRAP, // *%
 
     OP_EQ,
     OP_CMP,

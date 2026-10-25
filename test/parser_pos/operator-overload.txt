@@ -69,3 +69,9 @@ T::["prefx-"] = func(T a) -> T { return a }
 var f = T::@"[ ]"
 ### any key can be used in a method call
 func f(T t) { t:["<==>"]() }
+### wrapping operators
+func int.+%(int a, int b) -> int { return a }
+func int.-%(int a, int b) -> int { return a }
+func int.*%(int a, int b) -> int { return a }
+func int.prefix-%(int a) -> int { return a }
+func f(int a, int b) return -%a +% b *% a -% b

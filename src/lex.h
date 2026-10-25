@@ -24,6 +24,9 @@ public:
         TOK_PLUS,   // +
         TOK_MINUS,  // -
         TOK_STAR,   // *
+        TOK_PLUSWRAP, // +%
+        TOK_MINUSWRAP,// -%
+        TOK_STARWRAP, // *%
         TOK_SLASH,  // /
         TOK_SLASH2X,// //
         TOK_CASSIGN,// =

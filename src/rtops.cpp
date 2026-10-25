@@ -7,6 +7,7 @@
 #include "symtable.h"
 #include "runtime.h"
 #include "lex.h"
+#include "array.h"
 
 template<typename T>
 struct TFuncTypes
@@ -109,6 +110,19 @@ template<> FORCEINLINE int UNeg<sint>(sint& a) { return neg_check_overflow(&a, a
 template<> FORCEINLINE int UPos<uint>(uint& a) { return a > (uint)IntLimits<sint>::Max() ? RTE_OVERFLOW : 1; }
 template<> FORCEINLINE int UNeg<uint>(uint& a) { if(a > (uint)IntLimits<sint>::Max() + 1) return RTE_OVERFLOW; a = 0 - a; return 1; }
 
+// Wrapping arithmetic (+% -% *% and prefix -%). Done in unsigned, so wrapping signed ints is well-defined.
+template<typename T> struct MakeUnsigned {};
+template<> struct MakeUnsigned<uint> { typedef uint Type; };
+template<> struct MakeUnsigned<sint> { typedef uint Type; };
+static FORCEINLINE uint FromUnsigned(uint u, uint) { return u; }
+static FORCEINLINE sint FromUnsigned(uint u, sint) { return u <= (uint)IntLimits<sint>::Max() ? (sint)u : -(sint)~u - 1; }
+template<typename T> static FORCEINLINE int AddWrap(T& a, T b) { typedef typename MakeUnsigned<T>::Type U; a = FromUnsigned(U(a) + U(b), a); return 1; }
+template<typename T> static FORCEINLINE int SubWrap(T& a, T b) { typedef typename MakeUnsigned<T>::Type U; a = FromUnsigned(U(a) - U(b), a); return 1; }
+template<typename T> static FORCEINLINE int MulWrap(T& a, T b) { typedef typename MakeUnsigned<T>::Type U; a = FromUnsigned(U(a) * U(b), a); return 1; }
+template<typename T> static FORCEINLINE int UNegWrap(T& a) { typedef typename MakeUnsigned<T>::Type U; a = FromUnsigned(U(0) - U(a), a); return 1; } // uint: a holds the int's bits afterwards
+
+template<typename T> static FORCEINLINE int UNot(T& a) { a = !a; return 1; }
+
 // integer variant of wrapping mod returns T(-1) aka all bits set
 //template<typename T> static FORCEINLINE int WrapDiv(real& a, real b) { a = b ? a / b : T(-1); return 1; }
 //template<typename T> static FORCEINLINE int WrapWMod(real& a, real b) { a = b ? a % b : T(-1); return 1; }
@@ -123,6 +137,9 @@ struct Bit
 // shif-left overflow is an error
 template<typename T> static FORCEINLINE int Shl(T& a, T b) { a = b <= Bit<T>::ShMask ? a << b : 0; return 1; } // TODO: check overflow
 template<typename T> static FORCEINLINE int Shr(T& a, T b) { a = b <= Bit<T>::ShMask ? a >> b : 0; return 1; }
+template<> FORCEINLINE int Shl<uint>(uint& a, uint b) { return shl_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Shl<sint>(sint& a, sint b) { if(b < 0) return RTE_OVERFLOW; return shl_check_overflow(&a, a, b) ? RTE_OVERFLOW : 1; }
+template<> FORCEINLINE int Shr<sint>(sint& a, sint b) { if(b < 0) return RTE_OVERFLOW; a = b <= Bit<sint>::ShMask ? a >> b : (a < 0 ? -1 : 0); return 1; } // arithmetic shift
 
 // rotation is always modulo bitsize
 template<typename T> static FORCEINLINE int Rol(T& a, T b) { b &= Bit<T>::ShMask; a = (a << b) | (a >> (Bit<T>::Bits-b)); return 1; }
@@ -149,6 +166,8 @@ template<> struct IsCommutative<OP_MUL> : CompileTrue {};
 template<> struct IsCommutative<OP_BITAND> : CompileTrue {};
 template<> struct IsCommutative<OP_BITOR> : CompileTrue {};
 template<> struct IsCommutative<OP_XOR> : CompileTrue {};
+template<> struct IsCommutative<OP_ADDWRAP> : CompileTrue {};
+template<> struct IsCommutative<OP_MULWRAP> : CompileTrue {};
 
 
 static void _Register(OpReg& r, const OpDef *def, OperatorId op, LeafFunc lfunc, const Type *params, size_t nparams, const Type *rets, size_t nrets)
@@ -480,10 +499,34 @@ struct Arithmetic
     }
 };
 
+// Integers only
+template<typename T>
+struct WrappingArithmetic
+{
+    typedef typename MakeSigned<T>::Type S;
+    typedef WrappedBinOp<T, T, T, AddWrap<T>, OP_ADDWRAP> _AddWrap;
+    typedef WrappedBinOp<T, T, T, SubWrap<T>, OP_SUBWRAP> _SubWrap;
+    typedef WrappedBinOp<T, T, T, MulWrap<T>, OP_MULWRAP> _MulWrap;
+    typedef WrappedUnOp<S, T, T, UNegWrap<T>, OP_UNEGWRAP> _UNegWrap; // like unary -, converts to signed
+
+    static void Register(OpReg& r)
+    {
+        _AddWrap::Register(r);
+        _SubWrap::Register(r);
+        _MulWrap::Register(r);
+        _UNegWrap::Register(r);
+    }
+};
+
 template<typename T>
 struct Logical
 {
+    typedef WrappedUnOp<T, T, T, UNot<T>, OP_UNOT> _UNot;
 
+    static void Register(OpReg& r)
+    {
+        _UNot::Register(r);
+    }
 };
 
 // < <= > >= are derived from <=> during folding and codegen, they can't be registered
@@ -524,6 +567,7 @@ static void reg_intT(OpReg& r)
     Equality<T>::Register(r);
     Orderable<T>::Register(r);
     Arithmetic<T>::Register(r);
+    WrappingArithmetic<T>::Register(r);
     Bitwise<T>::Register(r);
 }
 
@@ -537,6 +581,7 @@ void reg_float_ops(OpReg& r)
 void reg_bool_ops(OpReg& r)
 {
     Equality<bool>::Register(r);
+    Logical<bool>::Register(r);
 }
 
 // Strings are interned, so == compares ids. <=> compares bytes, shorter first if one is a prefix of the other.
@@ -559,13 +604,44 @@ static int str_cmp(VM *vm, Val *v)
     return 1;
 }
 
+static int str_len(VM *vm, Val *v)
+{
+    assert(v[0].type == PRIMTYPE_STRING);
+    v[0] = Val((uint)vm->rt->sp.lookup(v[0].u.str).len);
+    return 1;
+}
+
+static int str_concat(VM *vm, Val *v)
+{
+    assert(v[0].type == PRIMTYPE_STRING && v[1].type == PRIMTYPE_STRING);
+    StringPool& sp = vm->rt->sp;
+    const Strp a = sp.lookup(v[0].u.str);
+    const Strp b = sp.lookup(v[1].u.str);
+    if(!b.len)
+        return 1;
+    PodArray<char> buf;
+    char *p = buf.alloc_n(vm->rt->gc, a.len + b.len);
+    if(!p)
+        return RTE_ALLOC_FAIL;
+    memcpy(p, a.s, a.len);
+    memcpy(p + a.len, b.s, b.len);
+    const Str s = sp.put(p, a.len + b.len);
+    buf.dealloc(vm->rt->gc);
+    v[0] = Val(s);
+    return 1;
+}
+
 void reg_string_ops(OpReg& r)
 {
-    const Type params[] = { PRIMTYPE_STRING, PRIMTYPE_STRING };
+    const Type str1[] = { PRIMTYPE_STRING };
+    const Type str2[] = { PRIMTYPE_STRING, PRIMTYPE_STRING };
     const Type rbool[] = { PRIMTYPE_BOOL };
     const Type rsint[] = { PRIMTYPE_SINT };
-    _Register(r, NULL, OP_EQ, str_eq, params, Countof(params), rbool, Countof(rbool));
-    _Register(r, NULL, OP_CMP, str_cmp, params, Countof(params), rsint, Countof(rsint));
+    const Type ruint[] = { PRIMTYPE_UINT };
+    _Register(r, NULL, OP_EQ, str_eq, str2, Countof(str2), rbool, Countof(rbool));
+    _Register(r, NULL, OP_CMP, str_cmp, str2, Countof(str2), rsint, Countof(rsint));
+    _Register(r, NULL, OP_ULEN, str_len, str1, Countof(str1), ruint, Countof(ruint));
+    _Register(r, NULL, OP_CONCAT, str_concat, str2, Countof(str2), str1, Countof(str1));
 }
 
 void reg_uint_ops(OpReg& r)

@@ -41,3 +41,13 @@ func int:+(int a, int b) -> int { return a }
 func T:[]=(uint k) {}
 ### variadic operator
 func int.+(int...) -> int { return 0 }
+### wrapped value doesn't fit the target
+int a = 0 -% 1
+### wrapping operators on float
+float f = 1.0 +% 2.0
+### shift overflow
+uint a = 3 << 63
+### signed shift overflow
+int a = +1 << +63
+### negative shift amount
+int a = +1 << -1

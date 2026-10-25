@@ -1550,6 +1550,28 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         return true;
     }
 
+    // && and || aren't functions: bool only, and the rhs is only evaluated if needed
+    if(opid == OP_LOGAND || opid == OP_LOGOR)
+    {
+        for(size_t i = 0; i < 2; ++i)
+            if(L[i].type() != PRIMTYPE_BOOL)
+            {
+                node->setError(ft.sp(), opid == OP_LOGAND ? "'&&' needs bool operands" : "'||' needs bool operands");
+                return false;
+            }
+        node->x.exprtype = PRIMTYPE_BOOL;
+        if(!L[0].isconst())
+            return false;
+        const bool a = !!L[0].asVal().u.ui;
+        if(opid == OP_LOGAND ? !a : a) // result is known from the lhs
+            node->setVal(Val(a));
+        else if(L[1].isconst()) // result is the rhs
+            node->setVal(L[1].asVal());
+        else
+            return false;
+        return true;
+    }
+
     // Candidate operator functions: the rows from the table, or the operator's own function
     const OpLowering own = { opid, Lexer::GetOperatorName(opid), opid, OPRES_DIRECT };
     const OpLowering *rows = &own;
