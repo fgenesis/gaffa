@@ -72,8 +72,10 @@ struct MLDumper
 // statements have no associated type
 static bool mlirIsStmt(MLCmd cmd)
 {
-    if(cmd < _ML_OP_MAX)
+    if(cmd == ML_LIST)
         return true;
+    if(cmd < _ML_OP_MAX)
+        return false;
 
     switch(cmd)
     {
@@ -125,6 +127,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case _ML_VAL:
         case _ML_FUNCIDX:
         case _ML_ERROR:
+        case _ML_EMPTY:
             return 0;
 
         case ML_RETURN:
@@ -387,7 +390,7 @@ size_t MLIR::indexOf(const MLNode* node) const
 
 size_t MLIR::indexOf(const MLVar* v) const
 {
-    size_t offs = vars.data() - v;
+    size_t offs = v - vars.data();
     assert(offs < vars.size());
     return offs;
 }
@@ -443,6 +446,10 @@ void MLNode::invalidate()
     m.cmd = _ML_DEAD;
 }
 
+// This is put on any external symToVarRemap[] so that referencing an external symbol accentidally
+// even though a local is intended it WILL cause an assert to fail
+enum { EXTERNAL_BIT = 1 << 31 };
+
 // does not reallocate nodes[]
 void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
 {
@@ -457,7 +464,8 @@ void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
         dst->makedummy();
 }
 
-sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const StringPool& sp)
+// Returns the var index of the first declared var. The vars are consecutive.
+u32 MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const StringPool& sp)
 {
     if(!decllist || !decllist->numchildren())
     {
@@ -470,7 +478,8 @@ sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, cons
     assert(s.n);
     MLNode *ch = &nodes[s.chIdx];
 
-    const HLIdent *firstIdent = dch[0]->as<HLVarDef>()->ident->as<HLIdent>();
+    const u32 firstvar = symToVarRemap[dch[0]->as<HLVarDef>()->ident->as<HLIdent>()->symid];
+    assert(!(firstvar & EXTERNAL_BIT));
 
     printf("MLIR::_decllist size %u\n", (unsigned)s.n);
     for(size_t i = 0; i < s.n; ++i)
@@ -480,13 +489,35 @@ sref MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, cons
         const char *name = sp.lookup(id->nameStrId).s;
         printf("ML decl %u '%s', symid %u, strid %u\n", (unsigned)i, name, id->symid, id->nameStrId);
 
-        // Symbols are declared in a row -> symbol IDs are given consecutively
-        assert(id->symid == firstIdent->symid + i);
+        // Symbols are declared in a row. Their symids may have externals in between
+        // (eg. type names first used in the list), but those don't get vars.
+        assert(symToVarRemap[id->symid] == firstvar + i);
 
-        _cons(q, &ch[i], vd->type);
+        if(vd->type)
+            _cons(q, &ch[i], vd->type);
+        else
+        {
+            ch[i].m.cmd = _ML_EMPTY; // type deduced from the value
+            ch[i].m.chOffs = 0;
+            ch[i].x.exprtype = PRIMTYPE_AUTO;
+        }
     }
 
-    return firstIdent->symid;
+    return firstvar;
+}
+
+// Unnamed variadic params ('uint ...') and '_' have no var
+static bool allDeclsNamed(const HLNode *decllist)
+{
+    const size_t n = decllist ? decllist->numchildren() : 0;
+    const HLNode * const *dch = n ? decllist->children() : NULL;
+    for(size_t i = 0; i < n; ++i)
+    {
+        const HLNode *id = dch[i]->as<HLVarDef>()->ident;
+        if(!id || id->type != HLNODE_IDENT)
+            return false;
+    }
+    return true;
 }
 
 MLIR::MLCh MLIR::_setupChDefault(Queue<Cons>& q, MLNode* node, const HLNode* hl, MLCmd cmd)
@@ -515,7 +546,7 @@ void MLIR::_opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl)
 }
 
 // Don't call this recursively, call _cons() instead
-void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, const StringPool& sp)
+void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, StringPool& sp)
 {
     const HLNodeType hltype = (HLNodeType)hl->type;
 
@@ -544,13 +575,19 @@ dolist:
 
         case HLNODE_VARDECLASSIGN:
         {
+            if(!allDeclsNamed(hl->u.vardecllist.decllist))
+            {
+                dst->setError(sp, "'_' in declarations not implemented yet in MLIR");
+                return;
+            }
             MLCh s = _setupCh(dst, ML_DECL);
             assert(s.n == 2);
 
             const HLNode *decls = hl->u.vardecllist.decllist;
             MLNode *ch = &nodes[s.chIdx];
-            dst->m.p[0] = _decllist(q, ch, decls, sp); // may reallocate hlch
-            dst->m.cmd = _ML_UDECL; // Must be remapped later
+            const size_t idx = indexOf(dst);
+            const u32 firstvar = _decllist(q, ch, decls, sp); // may reallocate nodes[]
+            nodes[idx].m.p[0] = firstvar;
 
             // Continue expanding RHS expressions
             const HLNode *vals = hl->u.vardecllist.vallist;
@@ -586,12 +623,19 @@ dolist:
         {
             const HLFunction& f = hl->u.func;
             const HLFunctionHdr *fh = f.hdr->as<HLFunctionHdr>();
+            if(!allDeclsNamed(fh->paramlist))
+            {
+                dst->setError(sp, "Variadic parameters not implemented yet in MLIR");
+                return;
+            }
 
             MLCh s = _setupCh(dst, ML_FUNC);
             assert(s.n == 3);
             MLNode *ch = &nodes[s.chIdx];
 
-            dst->m.p[0] = _decllist(q, ch, fh->paramlist, sp);
+            const size_t idx = indexOf(dst);
+            const u32 firstvar = _decllist(q, ch, fh->paramlist, sp); // may reallocate nodes[]
+            nodes[idx].m.p[0] = firstvar;
 
             _cons(q, &ch[1], fh->rettypes);
             _cons(q, &ch[2], f.body);
@@ -650,15 +694,17 @@ dolist:
             ch = &nodes[ls.chIdx]; // This now points to the list elements
 
             // Key+value goes first...
+            MLNode *kv = ch;
             for(size_t i = 0; i < nch; i += 2)
                 if(const HLNode *hk = hlch[i])
                 {
                     assert(hlch[i+1]);
                     if(hk->type == HLNODE_NAME) // Ensure that names are really just literal strings, ie. {k=v} becomes {["k"]=v}
-                        ch[i].setVal(Val(_Str(hl->u.name.nameStrId)));
+                        kv[0].setVal(Val(_Str(hk->u.name.nameStrId)));
                     else
-                        _cons(q, &ch[i], hlch[i]);
-                    _cons(q, &ch[i+1], hlch[i+1]);
+                        _cons(q, &kv[0], hk);
+                    _cons(q, &kv[1], hlch[i+1]);
+                    kv += 2;
                 }
 
             // ... afterwards just values
@@ -699,19 +745,22 @@ dolist:
 
 
         case HLNODE_FUNCTIONHDR: // handled as part of HLNODE_FUNCTION
-            ; // not reached
+            assert(false);
+            break;
 
-        // not adding a default label here to keep compiler warnings. Let the assert below catch it.
+        // not adding a default label here to keep compiler warnings
     }
 
-    assert(false);
-    unreachable();
+    char buf[64];
+    snprintf(buf, sizeof(buf), "HLIR node type %u not implemented yet in MLIR", hltype);
+    dst->setError(sp, buf);
 }
 
 void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options options)
 {
+    _setupVars(syms, sp);
+
     Queue<Cons> q;
-    nodes.reserve(gc, 128); // HACK FIXME
     PodArray<size_t> unresolved; // index of each node to fix
     unresolved.reserve(gc, syms.knownSize());
 
@@ -723,7 +772,11 @@ void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options
         if(!(options & STRIP_DEBUGINFO))
         {
             if(infos.size() < nodes.size())
-                infos.alloc_n(gc, nodes.size() - infos.size());
+            {
+                const size_t n = nodes.size() - infos.size();
+                MLInfo *ni = infos.alloc_n(gc, n);
+                memset(ni, 0, n * sizeof(MLInfo)); // not all nodes come from a HLNode
+            }
 
             MLInfo &info = infos[r.mlidx];
             info.line = r.hl->line;
@@ -733,7 +786,6 @@ void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options
         switch((MLCmd)nodes[r.mlidx].m.cmd)
         {
             case _ML_UVAR:
-            case _ML_UDECL:
                 unresolved.push_back(gc, r.mlidx);
                 break;
 
@@ -747,21 +799,16 @@ void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options
 
     q.dealloc(gc);
 
-    _resolveVars(unresolved.data(), unresolved.size(), syms, sp);
+    _resolveVars(unresolved.data(), unresolved.size(), syms);
 
     unresolved.dealloc(gc);
 }
 
-// This is put on any external symToVarRemap[] so that referencing an external symbol accentidally
-// even though a local is intended it WILL cause an assert to fail
-enum { EXTERNAL_BIT = 1 << 31 };
-
 // Note: This could be split up into a function that does the vars and a postproc step
 // instead of pushing into unresolved vec (above). Would remove an allocation.
-void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, StringPool& sp)
+void MLIR::_setupVars(Symstore& syms, StringPool& sp)
 {
     const size_t nsyms = syms.knownSize();
-    printf("Resolve %u occurences referencing %u symbols ...\n", (unsigned)N, (unsigned)nsyms);
     vars.reserve(gc, nsyms); // Need at least this many; maybe some more for upvalues
 
     symToVarRemap.resize(gc, nsyms);
@@ -800,7 +847,11 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
                 symToVarRemap[symid], sp.lookup(v->name).s, v->kind, (unsigned)symid);
         }
     }
+}
 
+void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms)
+{
+    printf("Resolve %u occurences\n", (unsigned)N);
     for(size_t i = 0; i < N; ++i)
     {
         MLNode *node = &nodes[unresolved[i]];
@@ -820,12 +871,6 @@ void MLIR::_resolveVars(const size_t *unresolved, size_t N, Symstore& syms, Stri
                 node->m.p[0] = idx & ~EXTERNAL_BIT;
                 break;
             }
-
-            case _ML_UDECL:
-                // Unresolved decl still refers the symid; refer to var idx instead
-                node->m.cmd = ML_DECL;
-                node->m.p[0] = symToVarRemap[node->m.p[0]];
-                break;
 
             default:
                 unreachable();
@@ -903,10 +948,26 @@ struct MLFoldTracker
     // -----
 
     std::string filename;
-    std::vector<std::string> errors;
     std::vector<u32> typesrc; // x = typesrc[y] -> Which other node x did get node y its type from
     std::vector<u32> funcStack; // indices in MLIR::funcs[], so that [i-1] encloses [i]
     std::vector<DFunc*> funcProtos; // DFunc objects that need to be built early for reasons and have yet to be integrated
+
+    enum { NONE = u32(-1) };
+
+    // Functions currently being folded, innermost last
+    struct FoldFunc
+    {
+        u32 nodeidx;
+        u32 varidx;   // var that a named function declaration assigns to, or NONE
+        Type declrets; // type list; PRIMTYPE_AUTO if not declared
+        Type deducedrets; // type list; PRIMTYPE_AUTO until the first return
+    };
+    std::vector<FoldFunc> foldFuncs;
+
+    // Per var: index in MLIR::funcs[] of the function that has it as a local, and its slot there
+    std::vector<u32> varOwner;
+    std::vector<u32> varSlot;
+    u32 nextFunc; // next function index while splitting
 
     void error(const MLNode *where, const char *msg);
     void warn(const MLNode *where, const char *msg);
@@ -1044,6 +1105,9 @@ static NumValuesResult numResultValuesOfList(MLNode *ch, size_t nch, MLFoldTrack
 static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
 {
     MLCmd cmd = (MLCmd)node->m.cmd;
+    if(cmd == ML_LIST)
+        return numResultValuesOfList(node->firstChild(), node->numchildren(), ft);
+
     // Statements don't return anything
     if(mlirIsStmt(cmd))
     {
@@ -1054,20 +1118,28 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
 
     switch(cmd)
     {
-        case ML_LIST:
-            return numResultValuesOfList(node->firstChild(), node->numchildren(), ft);
+        case _ML_ERROR:
+        {
+            NumValuesResult ret = { NumValuesResult::ERROR, 0 };
+            return ret;
+        }
 
         case OP_CALL:
         {
-            assert(false); // TODO -- ideally we have a folded function at this point that already has its types deduced
+            NumValuesResult ret = { NumValuesResult::ERROR, 0 };
+            const Type t = node->x.exprtype;
+            if(t == PRIMTYPE_AUTO) // call couldn't be typed; already reported
+                return ret;
+            TypeIdList tl = ft.tr().aslist(t);
+            ret.verdict = NumValuesResult::EXACT_NUMBER;
+            ret.n = tl.n;
+            if(tl.n && (tl.ptr[tl.n - 1] & TYPEBIT_VARIADIC))
+            {
+                ret.verdict = NumValuesResult::MIN_NUMBER;
+                ret.n = tl.n - 1;
+            }
+            return ret;
         }
-        break;
-
-        case ML_MTHCALL:
-        {
-            assert(false); // TODO
-        }
-        break;
 
 
         case ML_CALLADJ:
@@ -1157,9 +1229,7 @@ static void preFoldVars(MLVar *vars, size_t N, MLFoldTracker& ft)
 // < 0: error or not folded
 static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t argc, int maxresults, MLFoldTracker& ft)
 {
-    assert(argc >= func.info.nargs);
-
-    if(!func.isPure())
+    if(!func.isPure() || argc < func.info.nargs)
         return -1;
 
     // Need all args to be constant
@@ -1167,7 +1237,7 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
     // TODO: At some point handle special cases like x*0, x*1, 0+x, etc
     // -> Extra DFunc funcptr that exists only for functions supporting this feature (C-side-only!)
     for(size_t i = 0; i < argc; ++i)
-        if(!args->isconst())
+        if(!args[i].isconst())
             return -2;
 
     size_t spaceneeded = std::max<size_t>(func.info.nrets, argc);
@@ -1233,8 +1303,73 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
     return status;
 }
 
+// A single value has its own type, more than one are a type list
+static Type singleOrList(MLFoldTracker& ft, Type list)
+{
+    TypeIdList tl = ft.tr().aslist(list);
+    return tl.n == 1 ? tl.ptr[0] : list;
+}
+
+// Type list of all values of an expression list
+static Type typeListOf(MLFoldTracker& ft, const MLSub& exprs)
+{
+    std::vector<Type> ts(exprs.n);
+    for(size_t i = 0; i < exprs.n; ++i)
+        ts[i] = exprs.ch[i].type();
+    return ft.tr().mklistDesc(ts.data(), ts.size())->id();
+}
+
+// Type list from a list of type expressions; PRIMTYPE_AUTO if empty or not all are known types
+static Type typeListFromTypeExprs(MLFoldTracker& ft, MLNode *typeexprs)
+{
+    MLSub s = typeexprs->aslist();
+    if(!s.n)
+        return PRIMTYPE_AUTO;
+    std::vector<Type> ts(s.n);
+    for(size_t i = 0; i < s.n; ++i)
+    {
+        MLNode *te = &s.ch[i];
+        if(!te->isconst() || te->val.type != PRIMTYPE_TYPE)
+        {
+            if(te->m.cmd != _ML_ERROR)
+                te->setError(ft.sp(), "Expected a type");
+            return PRIMTYPE_AUTO;
+        }
+        ts[i] = te->asVal().asDType()->tid;
+    }
+    return ft.tr().mklistDesc(ts.data(), ts.size())->id();
+}
+
+// func(params) -> rets, with param types taken from the function's locals
+static Type funcType(MLFoldTracker& ft, MLNode *func, Type rets)
+{
+    const size_t firstvar = func->m.p[0];
+    const size_t nargs = func->firstChild()->aslist().n;
+    std::vector<Type> ts(nargs);
+    for(size_t i = 0; i < nargs; ++i)
+        ts[i] = ft.mlir.vars[firstvar + i].u.local.type;
+    Type params = ft.tr().mklistDesc(ts.data(), ts.size())->id();
+    return ft.tr().mkfuncDesc(params, rets)->id();
+}
+
+static bool hasErrorChild(MLNode *node)
+{
+    const size_t n = node->numchildren();
+    MLNode *ch = n ? node->firstChild() : NULL;
+    for(size_t i = 0; i < n; ++i)
+        if(ch[i].m.cmd == _ML_ERROR || (!mlirIsStmt((MLCmd)ch[i].m.cmd) && ch[i].type() == PRIMTYPE_AUTO))
+            return true;
+    return false;
+}
+
 static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
 {
+    if(hasErrorChild(node)) // already reported
+    {
+        node->x.exprtype = PRIMTYPE_AUTO;
+        return false;
+    }
+
     MLNode *L = node->firstChild();
 
     OperatorId opid = (OperatorId)node->m.cmd;
@@ -1280,6 +1415,8 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         return false;
     }
 
+    node->x.exprtype = singleOrList(ft, func->info.rettype);
+
     // TODO: is there an operator that results in more than 1 return value?
     return tryFoldCall(node, *func, L, arity, 1, ft) > 0;
 }
@@ -1293,6 +1430,18 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
     {
         case ML_CONST:
             assert(false && "This should have been taken care of during loading");
+            break;
+
+        case ML_FUNC:
+        {
+            MLFoldTracker::FoldFunc ff = { (u32)ft.mlir.indexOf(node), MLFoldTracker::NONE, PRIMTYPE_AUTO, PRIMTYPE_AUTO };
+            if(parent->m.cmd == ML_NAMEDECL && node == parent->firstChild() + 1 && !parent->firstChild()->aslist().n)
+                ff.varidx = ft.mlir.symToVarRemap[parent->m.p[1]];
+            ft.foldFuncs.push_back(ff);
+        }
+        break;
+
+        default: ;
     }
 
     return res;
@@ -1343,6 +1492,8 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         MLNode *te = &typeexprs.ch[i];
         MLVar *v = &ft.mlir.vars[localid + i];
         v->decl = declidx;
+        if(te->m.cmd == _ML_EMPTY)
+            continue;
         switch(v->kind)
         {
             case MLVar::CVAR:
@@ -1387,8 +1538,7 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
 
         switch(nv.verdict)
         {
-            case NumValuesResult::ERROR:
-                assert(false);
+            case NumValuesResult::ERROR: // already reported
                 return;
 
             case NumValuesResult::EXACT_NUMBER:
@@ -1427,19 +1577,21 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
     }
 
     size_t idx = localid;
+    const size_t endidx = localid + N;
 
     // Assign type based on value if automatic, or report type clash
     size_t numconstval = 0;
-    for(size_t i = 0; i < exprs.n; ++i)
+    for(size_t i = 0; i < exprs.n && idx < endidx; ++i)
     {
         MLNode *e = &exprs.ch[i];
         NumValuesResult eres = numResultValues(e, ft);
         Type t = e->type();
-        assert(eres.n >= 1);
+        if(eres.n == 0)
+            continue;
         if(eres.n > 1)
         {
             TypeIdList tl = ft.tr().aslist(t);
-            for(size_t k = 0; k < tl.n; ++k)
+            for(size_t k = 0; k < tl.n && idx < endidx; ++k)
             {
                 Type tt = tl.ptr[k];
                 MLVar *v = &ft.mlir.vars[idx++];
@@ -1469,25 +1621,53 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
     // ^ DO NOT ELIMINATE DECLS!! post-folding needs it
 }
 
-static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
+static void foldNode(MLNode *node, MLFoldTracker& ft)
 {
-    MLFoldTracker& ft = *(MLFoldTracker*)ud;
     const MLCmd cmd = (MLCmd)node->m.cmd;
-
-    if(parent && parent->m.cmd == ML_FUNC && node == parent->firstChild())
-    {
-        // Special case: Just finished the parameter list of a function.
-        // Add those to the list of known locals before handling the rest of the function.
-        const size_t localid = parent->m.p[0];
-        doDecl(ft, localid, *parent, *node, NULL);
-    }
 
     switch(cmd)
     {
         case _ML_VAL: // Constants can't be folded further
         case ML_LIST: // all good, took care of the list recursively already before returning here
-        case ML_FUNC:
+        case _ML_ERROR: // reported later
+        case _ML_EMPTY:
             return;
+
+        case ML_FUNC:
+        {
+            const MLFoldTracker::FoldFunc ff = ft.foldFuncs.back();
+            ft.foldFuncs.pop_back();
+            assert(ff.nodeidx == ft.mlir.indexOf(node));
+            Type rets = ff.declrets;
+            if(rets == PRIMTYPE_AUTO)
+                rets = ff.deducedrets;
+            if(rets == PRIMTYPE_AUTO) // no return
+                rets = ft.tr().mklistDesc(NULL, 0)->id();
+            node->x.exprtype = funcType(ft, node, rets);
+            return;
+        }
+
+        case ML_RETURN:
+        {
+            if(ft.foldFuncs.empty()) // file-level return
+                break;
+            MLFoldTracker::FoldFunc& ff = ft.foldFuncs.back();
+            MLSub vals = node->firstChild()->aslist();
+            NumValuesResult nv = numResultValuesOfList(vals.ch, vals.n, ft);
+            if(nv.verdict == NumValuesResult::ERROR)
+                break;
+            const Type t = typeListOf(ft, vals);
+            if(ff.declrets != PRIMTYPE_AUTO)
+                ft.checktype(t, ff.declrets, "Return value", node, &ft.mlir.nodes[ff.nodeidx]);
+            else if(ff.deducedrets == PRIMTYPE_AUTO)
+                ff.deducedrets = t;
+            else if(ff.deducedrets != t)
+            {
+                node->setError(ft.sp(), "Returned values have a different type than an earlier return in the same function");
+                return;
+            }
+        }
+        break;
 
         case ML_EXT:
         {
@@ -1611,32 +1791,21 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                     assert(v->name == nameid);
                     v->kind = MLVar::CVAR;
                     v->decl = ft.mlir.indexOf(node);
-                    Val val;
 
-                    // FIXME: folding a function does NOT immediately return it as an object
                     switch(valnode->m.cmd)
                     {
                         case ML_FUNC:
-                        {
-                            DFunc *df = DFunc::GCNew(ft.gc());
-                            df->u.mlproto.nodeidx = ft.mlir.indexOf(valnode);
-                            df->dbg.name = nameid;
-                            // df->dbg.linestart =  // TODO
-                            // df->dbg.lineend =  // TODO
-                            val = Val(df);
-                        }
-                        break;
-                        case _ML_FUNCIDX:
+                            v->u.local.type = valnode->type();
+                            break;
+                        case _ML_VAL:
+                            v->u.val = valnode->asVal();
+                            break;
+                        case _ML_ERROR:
+                            break;
                         default:
                             assert(false);
                             break;
-                        case _ML_VAL:
-                            val = valnode->asVal();
-                            break;
-
                     }
-
-                    v->u.val = val;
 
                     //ft.env.addSymbol(ft.gc(), nameid, val);
 
@@ -1663,7 +1832,8 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                     }
 #endif
                 default:
-                    assert(false);
+                    node->setError(ft.sp(), "Namespaced function declarations not implemented yet");
+                    return;
             }
         }
         break;
@@ -1673,7 +1843,8 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         {
             MLNode *ch = node->firstChild();
             const size_t localid = node->m.p[0];
-            doDecl(ft, localid, *node, ch[0], &ch[1]);
+            const bool deferred = !ch[1].aslist().n; // x = defer; declared again later
+            doDecl(ft, localid, *node, ch[0], deferred ? NULL : &ch[1]);
         }
         break;
 
@@ -1689,13 +1860,51 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
         {
             MLNode *funcexpr = node->firstChild();
             assert(funcexpr->m.cmd != ML_LIST);
-            if(funcexpr->isconst())
-                if(const DFunc *df = ft.getCallable(funcexpr->asVal().asAnyObj()))
-                    tryFoldCall(node, *df, funcexpr + 1, node->numchildren() - 1, -1, ft);
-            return;
+            if(hasErrorChild(node)) // already reported
+            {
+                node->x.exprtype = PRIMTYPE_AUTO;
+                return;
+            }
+            const DFunc *df = funcexpr->isconst() ? ft.getCallable(funcexpr->asVal().asAnyObj()) : NULL;
+            FuncTypes fty;
+            if(!ft.tr().lookupFunc(&fty, df ? df->info.functype : funcexpr->type()))
+            {
+                node->setError(ft.sp(), "Attempt to call something that is not a function");
+                return;
+            }
 
+            MLSub args = funcexpr[1].aslist();
+            NumValuesResult nv = numResultValuesOfList(args.ch, args.n, ft);
+            if(nv.verdict == NumValuesResult::ERROR)
+            {
+                node->x.exprtype = PRIMTYPE_AUTO;
+                return;
+            }
+            const bool variadic = fty.params.n && (fty.params.ptr[fty.params.n - 1] & TYPEBIT_VARIADIC);
+            const size_t minargs = fty.params.n - variadic;
+            if(nv.n < minargs && nv.verdict == NumValuesResult::EXACT_NUMBER)
+            {
+                std::ostringstream os;
+                os << "Function takes " << (variadic ? "at least " : "") << minargs << " arguments, got " << nv.n;
+                node->setError(ft.sp(), os.str().c_str());
+                return;
+            }
+            if(nv.n > fty.params.n && !variadic)
+            {
+                std::ostringstream os;
+                os << "Function takes " << fty.params.n << " arguments, got " << nv.n
+                    << (nv.verdict == NumValuesResult::MIN_NUMBER ? " or more" : "");
+                node->setError(ft.sp(), os.str().c_str());
+                return;
+            }
+
+            const TDesc *td = ft.tr().lookupFunc(NULL, df ? df->info.functype : funcexpr->type());
+            node->x.exprtype = singleOrList(ft, td->types()[2]);
+
+            if(df)
+                tryFoldCall(node, *df, args.ch, args.n, -1, ft);
+            return;
         }
-        break;
 
         case ML_WHILE:
         {
@@ -1715,7 +1924,7 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
                 MLNode *taken = cond->asVal().isTruthy() ? ifbr : elsebr;
                 node->m.cmd = ML_LIST;
                 node->list.len = 1;
-                node->m.chOffs = ft.mlir.indexOf(taken);
+                node->m.chOffs = taken - node;
             }
         }
         break;
@@ -1740,13 +1949,53 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 
     }
 
-    assert(mlirIsStmt((MLCmd)node->m.cmd));
-
-    // If expr, Should have early-returned. If not, type analysis failed.
-    // If stmt, that has no type.
-    node->x.exprtype = PRIMTYPE_NOTYPE;
+    // If expr, should have early-returned. If not, it's not handled yet.
+    if(!mlirIsStmt((MLCmd)node->m.cmd))
+    {
+        node->setError(ft.sp(), "Not implemented yet in MLIR folding");
+        return;
+    }
+    // stmts have no type. Don't write x.exprtype, a stmt may use both params.
 }
 
+static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
+{
+    MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    foldNode(node, ft);
+
+    if(parent && parent->m.cmd == ML_FUNC && node == parent->firstChild())
+    {
+        // Special case: Just finished the parameter list of a function.
+        // Add those to the list of known locals before handling the rest of the function.
+        const size_t localid = parent->m.p[0];
+        doDecl(ft, localid, *parent, *node, NULL);
+    }
+    else if(parent && parent->m.cmd == ML_FUNC && node == parent->firstChild() + 1)
+    {
+        // Just finished the declared return types. Known before the body, so the body can recurse.
+        MLFoldTracker::FoldFunc& ff = ft.foldFuncs.back();
+        assert(ff.nodeidx == ft.mlir.indexOf(parent));
+        ff.declrets = typeListFromTypeExprs(ft, node);
+        if(ff.declrets != PRIMTYPE_AUTO && ff.varidx != MLFoldTracker::NONE)
+            ft.mlir.vars[ff.varidx].u.local.type = funcType(ft, parent, ff.declrets);
+    }
+}
+
+static void addLocal(MLFoldTracker& ft, u32 varidx)
+{
+    const u32 funcidx = ft.funcStack.back();
+    MLFunc& f = ft.mlir.funcs[funcidx];
+    if(ft.varOwner[varidx] != MLFoldTracker::NONE) // deferred declaration, then the real one
+    {
+        assert(ft.varOwner[varidx] == funcidx);
+        return;
+    }
+    ft.varOwner[varidx] = funcidx;
+    ft.varSlot[varidx] = (u32)f.locals.size();
+    f.locals.push_back(ft.gc(), varidx); // TODO: alloc fail
+}
+
+// Pass 1 of splitting: report errors, create MLFuncs and assign local slots
 static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud)
 {
     // Precondition: The tree has been completely folded (foldPre, foldPost already ran)
@@ -1766,19 +2015,19 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
 
             MLFunc *mf = GA_PLACEMENT_NEW(ft.mlir.funcs.alloc_n(ft.gc(), 1)) MLFunc; // TODO: alloc fail
             mf->myidx = ft.mlir.indexOf(node);
+            if(parent->m.cmd == ML_NAMEDECL)
+                mf->name = parent->m.p[0];
 
             // Any function on top of the stack encloses the function created now
             mf->enclosingFuncIdxPlus1 = ft.funcStack.back() + 1;
 
             ft.funcStack.push_back(ft.mlir.funcs.size() - 1);
 
-            // Add func params as locals
-            u32 firstvar = node->m.p[0];
-            MLNode *argtypes = node->firstChild();
-            const size_t nlocals = argtypes->aslist().n;
-            u32 *plocals = mf->locals.alloc_n(ft.gc(), nlocals);
-            for(size_t i = 0; i < nlocals; ++i)
-                plocals[i] = firstvar + i;
+            // Func params are the first locals
+            const u32 firstvar = node->m.p[0];
+            const size_t nargs = node->firstChild()->aslist().n;
+            for(size_t i = 0; i < nargs; ++i)
+                addLocal(ft, firstvar + i);
         }
         break;
 
@@ -1786,15 +2035,20 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
 
         case ML_DECL:
         {
-            u32 firstvar = node->m.p[0];
-            MLFunc& mf = ft.mlir.funcs[ft.funcStack.back()];
-            MLNode *typeexprs = node->firstChild();
-            const size_t nvars = typeexprs->aslist().n;
-            u32 *plocals = mf.locals.alloc_n(ft.gc(), nvars);
+            const u32 firstvar = node->m.p[0];
+            const size_t nvars = node->firstChild()->aslist().n;
             for(size_t i = 0; i < nvars; ++i)
-                plocals[i] = firstvar + i;
+                addLocal(ft, firstvar + i);
         }
         break;
+
+        case ML_NAMEDECL:
+            if(!node->firstChild()->aslist().n) // not namespaced
+            {
+                const u32 varidx = ft.mlir.symToVarRemap[node->m.p[1]];
+                addLocal(ft, varidx);
+            }
+            break;
 
         default:
             break; // Nothing to do
@@ -1803,93 +2057,102 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
     return res;
 }
 
-static tsize addUpvalueReference(MLIR& mlir, MLFunc& f, u32 varidx)
+static void foldPostErrorCheck(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
-    // Nothing to do if upvalue is already known as such
-    for(tsize i = 0; i < f.upvals.size(); ++i)
-        if(f.upvals[i].varidx == varidx)
-            return i;
+    MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    if(node->m.cmd == ML_FUNC)
+    {
+        assert(ft.mlir.funcs[ft.funcStack.back()].myidx == ft.mlir.indexOf(node));
+        ft.funcStack.pop_back();
+    }
+}
 
-    MLVar &v = mlir.vars[varidx];
-    assert(v.decl);
+// Returns the slot in funcs[funcidx].upvals
+static u32 addUpvalueReference(MLFoldTracker& ft, u32 funcidx, u32 varidx)
+{
+    MLIR& mlir = ft.mlir;
+    {
+        const MLFunc& f = mlir.funcs[funcidx];
+        // Nothing to do if upvalue is already known as such
+        for(tsize i = 0; i < f.upvals.size(); ++i)
+            if(f.upvals[i].varidx == varidx)
+                return i;
+        assert(f.enclosingFuncIdxPlus1); // the root function can't have upvalues
+    }
 
-    MLFunc *enclosing = f.enclosingFuncIdxPlus1 ? &mlir.funcs[f.enclosingFuncIdxPlus1 - 1] : NULL;
+    const u32 enclosing = mlir.funcs[funcidx].enclosingFuncIdxPlus1 - 1;
 
     MLUpvalRef ur;
     ur.varidx = varidx;
-    ur.transient = enclosing && v.decl < enclosing->myidx; // Var declared before enclosing function? It's a transient upvalue.
+    ur.transient = ft.varOwner[varidx] != enclosing;
+    ur.slot = ur.transient
+        ? addUpvalueReference(ft, enclosing, varidx) // The enclosing function must reference it as an upvalue, too
+        : ft.varSlot[varidx];
 
-    if(!ur.transient)
-    {
-        // It's a local. Find the slot.
-        for(size_t i = 0; i < f.locals.size(); ++i)
-            if(f.locals[i] == varidx)
-            {
-                ur.slot = i;
-                goto add;
-            }
-        assert(false); // local not found??
-        ur.transient = true;
-    }
-
-    // The enclosing functions needs to reference this upvalue so we can get it later
-    ur.slot = addUpvalueReference(mlir, *enclosing, varidx);
-
-add:
+    MLFunc& f = mlir.funcs[funcidx];
     f.upvals.push_back(mlir.gc, ur); // TODO: alloc fail
     return f.upvals.size() - 1;
 }
 
-static void checkVarReference(MLIR& mlir, MLFunc& f, MLNode *node)
+static void checkVarReference(MLFoldTracker& ft, u32 funcidx, MLNode *node)
 {
-    u32 varidx = mlir.symToVarRemap[node->m.p[0]];
-    MLVar &v = mlir.vars[varidx];
-    assert(v.decl);
+    const u32 varidx = node->m.p[0];
+    const u32 owner = ft.varOwner[varidx];
+    assert(owner != MLFoldTracker::NONE); // referenced but never declared?
 
-    if(v.decl < f.myidx) // Var declared before current function? It's an upvalue.
+    if(owner == funcidx)
     {
-        u32 slot = addUpvalueReference(mlir, f, varidx);
-        node->m.cmd = _ML_UPVAL;
-        node->m.p[0] = slot;
-        return;
+        node->m.cmd = _ML_LOCAL;
+        node->m.p[0] = ft.varSlot[varidx];
     }
+    else
+    {
+        node->m.cmd = _ML_UPVAL;
+        node->m.p[0] = addUpvalueReference(ft, funcidx, varidx);
+    }
+}
 
-    for(size_t i = 0; i < f.locals.size(); ++i)
-        if(f.locals[i] == varidx)
-        {
-            node->m.cmd = _ML_LOCAL;
-            node->m.p[0] = i;
-            return;
-        }
-
-    assert(false); // local not found??
+// Pass 2 of splitting. Functions are visited in the same order as in pass 1.
+static MLPreVisitResult foldPreSplitFunctions(MLNode *node, MLNode *parent, void *ud)
+{
+    MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    MLPreVisitResult res = { VISIT_CONTINUE, 0 };
+    if(node->m.cmd == ML_FUNC)
+    {
+        const u32 funcidx = ft.nextFunc++;
+        assert(ft.mlir.funcs[funcidx].myidx == ft.mlir.indexOf(node));
+        ft.funcStack.push_back(funcidx);
+    }
+    return res;
 }
 
 static void foldPostSplitFunctions(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
-    MLCmd cmd = (MLCmd)node->m.cmd;
+    const MLCmd cmd = (MLCmd)node->m.cmd;
+    if(cmd != ML_LIST)
+        node->m.nch = mlirNumChildren(cmd); // Annotate for the LLIR stage
+
     switch(cmd)
     {
         case ML_FUNC:
         {
-            // Ensure this is really the correct function and everything is linked up properly
-            assert(ft.mlir.funcs[ft.funcStack.back()].myidx == ft.mlir.indexOf(node));
+            const u32 funcidx = ft.funcStack.back();
+            MLFunc& f = ft.mlir.funcs[funcidx];
+            assert(f.myidx == ft.mlir.indexOf(node));
+            f.node = *node;
             node->m.cmd = _ML_FUNCIDX;
-            node->m.p[0] = ft.funcStack.back();
+            node->m.p[0] = funcidx;
             ft.funcStack.pop_back();
         }
         break;
 
         case ML_VAR: // At this point a variable reference becomes a local or an upvalue reference
-        {
-            MLFunc& f = ft.mlir.funcs[ft.funcStack.back()];
-            checkVarReference(ft.mlir, f, node);
-        }
-        break;
-    }
+            checkVarReference(ft, ft.funcStack.back(), node);
+            break;
 
-    node->m.nch = mlirNumChildren(cmd); // Annotate for the LLIR stage
+        default: ;
+    }
 }
 
 static void debugPrintVar(MLFoldTracker& ft, size_t gidx, const char *t, u32 idx)
@@ -1923,18 +2186,32 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
 
     // This does constant folding & propagation
     visit(foldPre, foldPost, &ft);
-    assert(ft.funcStack.empty());
+    assert(ft.foldFuncs.empty());
 
     // Create the root function that encompasses the entire file scope
     MLFunc *mf = GA_PLACEMENT_NEW(ft.mlir.funcs.alloc_n(ft.gc(), 1)) MLFunc; // TODO: alloc fail
     mf->myidx = 0;
     mf->enclosingFuncIdxPlus1 = 0;
-    ft.funcStack.push_back(funcs.size() - 1);
-    // Break the tree into individual functions and do some finalization.
-    visit(foldPreErrorCheck, foldPostSplitFunctions, &ft);
-    // TODO: make func return localenv
+    ft.varOwner.assign(vars.size(), MLFoldTracker::NONE);
+    ft.varSlot.assign(vars.size(), MLFoldTracker::NONE);
+
+    // Report errors and assign local slots per function
+    ft.funcStack.push_back(0);
+    visit(foldPreErrorCheck, foldPostErrorCheck, &ft);
     ft.funcStack.pop_back();
     assert(ft.funcStack.empty());
+
+    // Break the tree into individual functions. Only if the tree is sound.
+    if(ft.ok)
+    {
+        ft.nextFunc = 1;
+        ft.funcStack.push_back(0);
+        visit(foldPreSplitFunctions, foldPostSplitFunctions, &ft);
+        // TODO: make func return localenv
+        ft.funcStack.pop_back();
+        assert(ft.funcStack.empty());
+        assert(ft.nextFunc == funcs.size());
+    }
 
     printf("Local symtol table: %u entries\n", localenv->size());
 
@@ -1943,5 +2220,5 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
     for(size_t i = 0; i < N; ++i)
         debugPrintFuncInfo(ft, funcs[i]);
 
-    return ft.errors.empty();
+    return ft.ok;
 }

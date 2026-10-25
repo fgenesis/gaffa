@@ -31,7 +31,7 @@ enum MLCmd
     ML_VAR,             // expr (1, var idx)
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (2, name, symid) [2, namespace, value]
-    ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- num of vars = #typeexprs; varidx = start of locals
+    ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- num of vars = #typeexprs; varidx = start of locals; no exprs: deferred
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
     ML_WHILE,           // stmt (0) [2, cond, block]
@@ -57,12 +57,11 @@ enum MLCmd
     _ML_UPVAL = _ML_MAX,// expr (1, func's upvals idx)
     _ML_LOCAL,          // expr (1, func's locals idx)
     _ML_FUNCIDX,        // expr (1, func idx)  // function + mgmt infos. Recursion breaker.
-    _ML_EMPTY,
+    _ML_EMPTY,          // expr (0) placeholder, eg. the type of 'var x'; exprtype is PRIMTYPE_AUTO
 
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
     _ML_UVAR, // Unresolved identifier // special; replaced before type analysis
-    _ML_UDECL, // Unremapped decl node
     _ML_ERROR, // Error. If encountered after folding, the tree isn't sound and no code can be generated.
 };
 
@@ -145,7 +144,7 @@ union MLNode
     void makedummy();
 };
 
-union MLInfo
+struct MLInfo
 {
     u32 line, column;
 };
@@ -279,9 +278,10 @@ private:
         size_t n;
     };
 
-    void _resolveVars(const size_t *unresolved, size_t n, Symstore& syms, StringPool& sp);
+    void _setupVars(Symstore& syms, StringPool& sp);
+    void _resolveVars(const size_t *unresolved, size_t n, Symstore& syms);
 
-    void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, const StringPool& sp); // may reallocate dst
+    void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, StringPool& sp); // may reallocate dst
     void _cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl);
 
     MLNode *_add(size_t n); // add a couple nodes to the end as one block; points to first node.
@@ -289,6 +289,6 @@ private:
     MLCh _setupList(MLNode *& node, size_t n); // makes node a list, returns ptr to start of list elems. may reallocate and invalidate note.
     MLCh _setupChDefault(Queue<Cons>& q, MLNode *node, const HLNode *hl, MLCmd cmd);
 
-    sref _decllist(Queue<Cons>& q, MLNode *& dst, const HLNode *decllist, const StringPool& sp);
+    u32 _decllist(Queue<Cons>& q, MLNode *& dst, const HLNode *decllist, const StringPool& sp);
     void _opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl);
 };

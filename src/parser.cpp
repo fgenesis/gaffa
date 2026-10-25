@@ -753,10 +753,24 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 
     _beginFunction();
 
+    // Lua-style: ns:mth(...) -> ns.mth(ns self, ...)
+    // Declared before the other params so that the params' symbols stay in order
+    HLNode *self = NULL;
+    if(hasns == 2)
+    {
+        self = ensure(hlir->vardef(), sep); // Whatev; use the ':' as anchoring point in case there are errors to report
+        Lexer::Token selftok = sep;
+        selftok.begin = "self";
+        selftok.u.len = 4;
+        selftok.tt = Lexer::TOK_IDENT;
+        self->u.vardef.ident = _ident(selftok, "implicit 'self' in method def", IDENT_USAGE_DECL, SYMREF_VISIBLE);
+        self->u.vardef.type = ns;
+    }
+
     HLNode *params = _funcparams(); // This returns NULL if there are no parameters
     _fctx.variadic = params && (params->flags & HLFLAG_VARIADIC);
 
-    if(hasns == 2) // Lua-style: ns:mth(...) -> ns.mth(ns self, ...)
+    if(self)
     {
         if(!params)
             params = ensure(hlir->list());
@@ -765,17 +779,8 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
         HLList *list = &params->u.list;
         const size_t n = list->used;
         list->add(NULL, gc);
-        for(size_t i = 0; i < n; ++i)
-            list->list[i+1] = list->list[i];
-
-        // Inject a 'ns self' parameter
-        HLNode *self = ensure(hlir->vardef(), sep); // Whatev; use the ':' as anchoring point in case there are errors to report
-        Lexer::Token selftok = sep;
-        selftok.begin = "self";
-        selftok.u.len = 4;
-        selftok.tt = Lexer::TOK_IDENT;
-        self->u.vardef.ident = _ident(selftok, "implicit 'self' in method def", IDENT_USAGE_DECL, SYMREF_VISIBLE);
-        self->u.vardef.type = ns;
+        for(size_t i = n; i > 0; --i)
+            list->list[i] = list->list[i-1];
         list->list[0] = self;
     }
 
@@ -1682,8 +1687,8 @@ HLNode * Parser::binary(Context ctx, const Parser::ParseRule *rule, HLNode *lhs)
     if(node)
     {
         node->tok = rule->tok;
-        node->u.binary.a = rhs;
-        node->u.binary.b = lhs;
+        node->u.binary.a = lhs;
+        node->u.binary.b = rhs;
         node->u.binary.opid = Lexer::TokenToBinOp(rule->tok);
     }
     return node;

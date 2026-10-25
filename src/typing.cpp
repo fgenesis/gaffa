@@ -236,7 +236,7 @@ DType *TypeRegistry::lookup(Type t)
 const TDesc *TypeRegistry::lookupFunc(FuncTypes *ft, Type t) const
 {
     const TDesc *td = lookupDesc(t);
-    if(td->kind != TKIND_SUBTYPED)
+    if(!td || td->kind != TKIND_SUBTYPED)
         return NULL;
     const Type *ts = td->types();
     if(td->n != 3 || ts[0] != PRIMTYPE_FUNC)

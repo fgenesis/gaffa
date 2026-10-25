@@ -33,3 +33,13 @@ bool b = true + false
 uint n = #5
 ### negated uint returned as uint
 func f(uint u) -> uint return -u
+### infix operator with one parameter
+func int.-(int a) -> int { return a }
+### prefix operator with two parameters
+func int.prefix-(int a, int b) -> int { return a }
+### method operator counts self
+func int:+(int a, int b) -> int { return a }
+### set-index with too few parameters
+func T:[]=(uint k) {}
+### variadic operator
+func int.+(int...) -> int { return 0 }

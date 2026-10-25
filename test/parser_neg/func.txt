@@ -45,16 +45,6 @@ func int.!(int a) -> bool { return true }
 func int.prefix*(int a) -> int { return a }
 ### prefix name with a space
 func int.prefix -(int a) -> int { return a }
-### infix operator with one parameter
-func int.-(int a) -> int { return a }
-### prefix operator with two parameters
-func int.prefix-(int a, int b) -> int { return a }
-### method operator counts self
-func int:+(int a, int b) -> int { return a }
-### set-index with too few parameters
-func T:[]=(uint k) {}
-### variadic operator
-func int.+(int...) -> int { return 0 }
 ### string literal as function name
 func T."x"() {}
 ### operator name with a space inside

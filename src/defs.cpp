@@ -127,7 +127,7 @@ void* valcpy(void* dst, const void* src, tsize bytes)
 
 void ValU::_init(PrimType tyid)
 {
-    assert(tyid < PRIMTYPE_ANY);
+    assert(tyid < PRIMTYPE_ANY || tyid == PRIMTYPE_NOTYPE);
     static_assert(sizeof(_AnyValU) == sizeof(((_AnyValU*)NULL)->opaque), "opaque member must fill the entire struct");
     u.opaque = 0;
     type = tyid;
@@ -151,6 +151,7 @@ size_t GetOperatorArity(OperatorId op)
         case OP_UBITNOT:
         case OP_ULEN:
         case OP_QQM:
+        case OP_UNWRAP:
             return 1;
         default: ;
     }

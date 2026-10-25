@@ -200,6 +200,11 @@ static void reg_type_void(RTReg& r)
     ClassReg xvoid = r.regclass("void", r.types.voidt);
 }
 
+static void reg_type_bool(RTReg& r)
+{
+    r.regclass("bool", r.tr.mkprim(PRIMTYPE_BOOL));
+}
+
 static void reg_type_uint(RTReg& r)
 {
     DType *d = r.tr.mkprim(PRIMTYPE_UINT);
@@ -389,7 +394,9 @@ void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
     RTReg r = { gc, sp, tr, syms };
     reg_type_type(r);
     reg_types_special(r);
+    reg_type_void(r);
     reg_type_func(r);
+    reg_type_bool(r);
     reg_type_sint(r);
     reg_type_uint(r);
     reg_type_float(r);
