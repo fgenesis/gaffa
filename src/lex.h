@@ -51,7 +51,8 @@ public:
         TOK_TILDE,  // ~
         TOK_SHL,    // <<
         TOK_SHR,    // >>
-        TOK_SINK,   // _
+        TOK_SINK,   // _   (exactly one value)
+        TOK_WSINK,  // ___ (any number of values)
         TOK_HASH,   // #
         TOK_BITAND, // &
         TOK_BITOR,  // |

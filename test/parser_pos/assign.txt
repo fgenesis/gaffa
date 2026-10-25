@@ -1,0 +1,24 @@
+### assign to sink
+_ = 1
+### decl sink (does not introduce a variable)
+var _ = 1
+### decl sink 2
+uint _ = 1
+### multi-decl
+uint _ = 1
+float _ = 1.0
+string _ = ""
+### multi-assign sink
+_, _, _ = 1, 2, 3
+### multi-assign sink 1 (passes parser, fails typecheck, mismatched count)
+_, _, _ = 1
+### multi-assign sink 2 (passes parser, fails typecheck, mismatched count)
+_ = 1, 2, 3
+### wide sink 1
+___ = 1
+### wide sink 2
+uint ___ = 1
+### wide sink multi
+___ = 1, 2, 3
+### wide sink mixed multi
+var _, a, ___ = 1, 2, 3, 4, 5

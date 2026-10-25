@@ -1,0 +1,28 @@
+### assign with sink
+uint a, _, c = 1, 2, 3
+### assign any number of return values
+func f() { return 1, 2, 3 }
+uint a, b, c = f()
+### assign & ignore one
+func f() { return 1 }
+var _ = f()
+### assign & ignore many
+func f() { return 1, 2, 3 }
+var _, _, _ = f()
+### assign & ignore any
+func f() { return 1, 2, 3 }
+var ___ = f()
+### assign some, ignore rest
+func f() { return 1, 2, 3 }
+var a, b, ___ = f()
+### assign some, ignore rest, mixed
+func f() { return 1, 2, 3, 4, 5, 6 }
+var a, _, b, ___ = f()
+### assign to sink, single
+_ = 1
+### assign to sink, multi
+_, _, _ = 1, 2, 3
+### assign to wide sink
+___ = 1, 2, 3, 4, 5
+### assign to sink, wide sink takes none
+_, ___ = 1

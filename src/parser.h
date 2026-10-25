@@ -92,9 +92,9 @@ protected:
 
     HLNode *_assignment(HLNode *firstLhs, const Lexer::Token& lhsTok); // a, b.c, d[e] = EXPRLIST
     HLNode *_assignTarget();
+    HLNode *_sink(const Lexer::Token& tok);
     HLNode *_decllist(SymbolRefContext symref, bool allowVariadic);
     void _finishDecl(HLNode *decls, bool mut, bool deferred);
-    void _checkValueCount(size_t ntargets, const HLNode *vals);
 
     HLNode *_fncall(HLNode *callee);
     HLNode *_methodcall(HLNode *obj);

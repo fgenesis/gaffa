@@ -31,7 +31,7 @@ enum MLCmd
     ML_VAR,             // expr (1, var idx)
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (2, name, symid) [2, namespace, value]
-    ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- num of vars = #typeexprs; varidx = start of locals; no exprs: deferred
+    ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- typeexprs: one per target, ML_SINK/ML_WSINK for sinks; the other targets are consecutive vars starting at varidx; no exprs: deferred
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
     ML_WHILE,           // stmt (0) [2, cond, block]
@@ -47,6 +47,8 @@ enum MLCmd
     ML_NEW_TABLE,       // expr (1) (numkv) [1, exprlist] // {a=1, b=2, 3, 4} -> [a, 1, b, 2, 3, 4], numkv=2
     ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL or ML_VAR following
     ML_CALLADJ,         // expr (0) [2, numexpr. callexpr]
+    ML_SINK,            // target (0) [1, typeexpr] -- '_' in a decl or assignment, takes exactly 1 value; typeexpr is _ML_EMPTY if untyped
+    ML_WSINK,           // target (0) [1, typeexpr] -- '___', takes the remaining values (0 or more); always the last target
     //ML_VALBLOCK,
 
     _ML_MAX,
@@ -291,4 +293,5 @@ private:
 
     u32 _decllist(Queue<Cons>& q, MLNode *& dst, const HLNode *decllist, const StringPool& sp);
     void _opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl);
+    void _sink(Queue<Cons>& q, MLNode *& dst, const HLNode *sink, const HLNode *type);
 };

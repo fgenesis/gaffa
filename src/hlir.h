@@ -286,6 +286,7 @@ struct HLName : HLNodeBase
     sref nameStrId;
 };
 
+// node->tok is TOK_SINK ('_', exactly one value) or TOK_WSINK ('___', any number of values)
 struct HLSink : HLNodeBase
 {
     enum { EnumType = HLNODE_SINK, Children = 0 };

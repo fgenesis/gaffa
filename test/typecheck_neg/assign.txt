@@ -1,0 +1,8 @@
+### too few values for assignment
+int a, b, c = 1, 2
+### assign to sink, wrong number
+_ = 1, 2
+### multi-assign sink 1 (passes parser, fails typecheck, mismatched count)
+_, _, _ = 1
+### multi-assign sink 2 (passes parser, fails typecheck, mismatched count)
+_ = 1, 2, 3

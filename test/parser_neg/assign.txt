@@ -1,0 +1,16 @@
+### decl without assign
+int a
+### assign without decl
+a = 1
+### assign to const local
+uint i = 0
+i = 1
+### assign to const upval
+uint x = 0
+func test() x = 1
+### wide sink isn't last
+var ___, a = 1, 2, 3
+### wide sink isn't last in an assignment
+___, _ = 1, 2
+### wide sink in the middle of a declaration
+var a, ___, b = 1,2,3,4

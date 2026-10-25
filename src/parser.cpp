@@ -296,6 +296,7 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_LITSTR, &Parser::litstr,   NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_IDENT,  &Parser::_identInExpr,NULL,         NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_SINK,   &Parser::badSink,     NULL,        NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_WSINK,  &Parser::badSink,     NULL,        NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_FUNC,   &Parser::closurecons,NULL,          NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
 
@@ -988,17 +989,34 @@ HLNode* Parser::_funcreturns()
 
 // a, b.c, d[e] = EXPRLIST
 // The first target was already parsed.
+static bool isWideSink(const HLNode *node)
+{
+    return node && node->type == HLNODE_SINK && node->tok == Lexer::TOK_WSINK;
+}
+
 HLNode* Parser::_assignment(HLNode* firstLhs, const Lexer::Token& lhsTok)
 {
     HLNode *lhs = ensure(hlir->list());
     _checkAssignTarget(firstLhs, lhsTok);
     lhs->u.list.add(firstLhs, gc);
+    bool wide = isWideSink(firstLhs);
+    Lexer::Token widetok = lhsTok;
     while(tryeat(Lexer::TOK_COMMA))
     {
+        if(wide)
+        {
+            errorAt(widetok, "'___' must be the last assignment target", "It takes all remaining values");
+            wide = false;
+        }
         const Lexer::Token tok = curtok;
         HLNode *n = _assignTarget();
         _checkAssignTarget(n, tok);
         lhs->u.list.add(n, gc);
+        if(isWideSink(n))
+        {
+            wide = true;
+            widetok = tok;
+        }
     }
 
     if(tryeat(Lexer::TOK_MASSIGN))
@@ -1009,35 +1027,25 @@ HLNode* Parser::_assignment(HLNode* firstLhs, const Lexer::Token& lhsTok)
     HLNode *node = ensure(hlir->assignment());
     node->u.assignment.dstlist = lhs;
     node->u.assignment.vallist = _exprlist();
-    _checkValueCount(lhs->u.list.used, node->u.assignment.vallist);
     return node;
 }
 
-// '_' is only valid as a whole assignment target, so it doesn't go through the expression parser
+// '_' and '___' are only valid as a whole assignment target, so they don't go through the expression parser
 HLNode* Parser::_assignTarget()
 {
-    if(!tryeat(Lexer::TOK_SINK))
+    if(!(tryeat(Lexer::TOK_SINK) || tryeat(Lexer::TOK_WSINK)))
         return expr();
     if(!(match(Lexer::TOK_COMMA) || match(Lexer::TOK_CASSIGN) || match(Lexer::TOK_MASSIGN)))
-    {
-        errorAt(prevtok, "'_' can't be used as a value", "It can only be assigned or declared");
-        return _errnode();
-    }
-    return ensure(hlir->sink(), prevtok);
+        return badSink(CTX_DEFAULT);
+    return _sink(prevtok);
 }
 
-// Only the last value may expand to several values (a call or '...'); every other value is exactly one
-void Parser::_checkValueCount(size_t ntargets, const HLNode *vals)
+HLNode* Parser::_sink(const Lexer::Token& tok)
 {
-    const size_t nv = vals->u.list.used;
-    if(!nv)
-        return;
-    const HLNode *last = vals->u.list.list[nv - 1];
-    const bool expands = last->iscall() || last->type == HLNODE_VARARGS || last->type == HLNODE_CALLADJ;
-    if(nv > ntargets)
-        error("Too many values on the right side");
-    else if(nv < ntargets && !expands)
-        error("Too few values on the right side");
+    HLNode *node = ensure(hlir->sink(), tok);
+    if(node)
+        node->tok = tok.tt;
+    return node;
 }
 
 // Check that any symbol directly assigned to is mutable and a local or upvalue.
@@ -1151,9 +1159,17 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
     HLNode *lasttype = NULL;
     bool varctx = false;
     bool variadic = false;
+    bool wide = false;
+    Lexer::Token widetok;
 
     do
     {
+        if(wide)
+        {
+            errorAt(widetok, "'___' must be the last name in a declaration", "It takes all remaining values");
+            wide = false;
+        }
+
         // Precond:
         // - We've either just entered, or looped around after a ','
         // - curtok is 'var', ident, or '...'
@@ -1187,7 +1203,9 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
             bool istype = lookahead.tt == Lexer::TOK_QM
                        || lookahead.tt == Lexer::TOK_TRIDOT
             // C-style decl, two identifiers in a row ('int x') --  First is the type, second one the variable.
-                       || lookahead.tt == Lexer::TOK_IDENT;
+                       || lookahead.tt == Lexer::TOK_IDENT
+                       || lookahead.tt == Lexer::TOK_SINK
+                       || lookahead.tt == Lexer::TOK_WSINK;
 
             if(istype)
             {
@@ -1214,8 +1232,16 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
 
         HLNode * const def = hlir->vardef();
         node->u.list.add(def, gc);
+        const Lexer::Token nametok = curtok;
         def->u.vardef.ident = ident("variable", IDENT_USAGE_DECL, symref); // var name
         def->u.vardef.type = lasttype; // NULL for 'var', or the C-style type
+        if(isWideSink(def->u.vardef.ident))
+        {
+            if(allowVariadic)
+                errorAt(nametok, "'___' can't be a parameter name", "Use '...' for variadic parameters");
+            wide = true;
+            widetok = nametok;
+        }
 
         assert(varctx == !lasttype);
 
@@ -1328,7 +1354,8 @@ HLNode* Parser::trydecl()
     if(match(Lexer::TOK_IDENT))
     {
         lookAhead();
-        if(lookahead.tt == Lexer::TOK_IDENT || lookahead.tt == Lexer::TOK_QM || lookahead.tt == Lexer::TOK_TRIDOT)
+        if(lookahead.tt == Lexer::TOK_IDENT || lookahead.tt == Lexer::TOK_SINK || lookahead.tt == Lexer::TOK_WSINK
+            || lookahead.tt == Lexer::TOK_QM || lookahead.tt == Lexer::TOK_TRIDOT)
             return decl();
     }
     else if(match(Lexer::TOK_VAR) || match(Lexer::TOK_FUNC))
@@ -1363,7 +1390,6 @@ HLNode* Parser::decl()
     else
     {
         node->u.vardecllist.vallist = _exprlist();
-        _checkValueCount(decls->u.list.used, node->u.vardecllist.vallist);
     }
 
     _finishDecl(decls, mut, deferred);
@@ -1509,7 +1535,8 @@ HLNode* Parser::badRange(Context ctx)
 
 HLNode* Parser::badSink(Context ctx)
 {
-    error("'_' can't be used as a value", "It can only be assigned or declared");
+    error(prevtok.tt == Lexer::TOK_WSINK ? "'___' can't be used as a value" : "'_' can't be used as a value",
+        "It can only be assigned or declared");
     return _errnode();
 }
 
@@ -1912,8 +1939,8 @@ HLNode* Parser::arraycons(Context ctx)
 HLNode* Parser::_ident(const Lexer::Token& tok, const char *whatfor, IdentUsage usage, SymbolRefContext symref)
 {
     // Note: The caller advances past tok
-    if(tok.tt == Lexer::TOK_SINK)
-        return ensure(hlir->sink(), tok);
+    if(tok.tt == Lexer::TOK_SINK || tok.tt == Lexer::TOK_WSINK)
+        return _sink(tok);
 
     if(!_checkname(tok, whatfor))
         return _errnode();
@@ -1952,7 +1979,7 @@ static bool canStartStatement(Lexer::TokenType tt)
 {
     switch(tt)
     {
-        case Lexer::TOK_IDENT: case Lexer::TOK_SINK: case Lexer::TOK_LPAREN: case Lexer::TOK_LCUR:
+        case Lexer::TOK_IDENT: case Lexer::TOK_SINK: case Lexer::TOK_WSINK: case Lexer::TOK_LPAREN: case Lexer::TOK_LCUR:
         case Lexer::TOK_DOLLAR: case Lexer::TOK_VAR: case Lexer::TOK_FUNC: case Lexer::TOK_IF:
         case Lexer::TOK_FOR: case Lexer::TOK_WHILE: case Lexer::TOK_RETURN: case Lexer::TOK_EMIT:
         case Lexer::TOK_BREAK: case Lexer::TOK_CONTINUE: case Lexer::TOK_EXPORT:

@@ -65,7 +65,13 @@ uint later = defer
 func f() return later
 uint later = 5
 ### deeply nested blocks with locals
-{ uint a = 1 { uint b = a { uint c = b { uint d = c { uint e = d } } } } }
+{ uint a = 1; { uint b = a; { uint c = b; { uint d = c; { uint e = d } } } } }
+### deeply nested blocks with locals (newlines)
+{ uint a = 1
+  { uint b = a
+    { uint c = b
+      { uint d = c
+        { uint e = d } } } } }
 ### chain of functions
 func f1() return 1
 func f2() return f1() + 1

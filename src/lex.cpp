@@ -413,6 +413,7 @@ const char* Lexer::GetTokenText(TokenType tt)
         case TOK_SYNTHETIC: return "synthetic";
         case TOK_E_EOF: return "end of file";
         case TOK_SINK: return "_";
+        case TOK_WSINK: return "___";
         default: ;
     }
     return NULL;
@@ -483,7 +484,11 @@ const char* Lexer::skipws()
 Lexer::Token Lexer::ident(const char* where)
 {
     const char *end = eatident(where);
-    TokenType tt = *where == '_' && where + 1 == end ? TOK_SINK : TOK_IDENT;
+    TokenType tt = TOK_IDENT;
+    if(end - where == 1 && where[0] == '_')
+        tt = TOK_SINK;
+    else if(end - where == 3 && where[0] == '_' && where[1] == '_' && where[2] == '_')
+        tt = TOK_WSINK;
     return tok(tt, where, end);
 }
 

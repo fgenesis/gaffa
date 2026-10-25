@@ -88,6 +88,8 @@ static bool mlirIsStmt(MLCmd cmd)
     case ML_RETURN:
     case ML_EMIT:
     case ML_EXPORT:
+    case ML_SINK:  // not a stmt, but has no value either
+    case ML_WSINK:
         return true;
     default: ;
     }
@@ -136,6 +138,8 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_NEW_ARRAY:
         case ML_NEW_TABLE:
         case ML_EXPORT:
+        case ML_SINK:
+        case ML_WSINK:
             return 1;
 
         case ML_NAMEDECL:
@@ -464,7 +468,26 @@ void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
         dst->makedummy();
 }
 
-// Returns the var index of the first declared var. The vars are consecutive.
+static void makeEmpty(MLNode *node)
+{
+    node->m.cmd = _ML_EMPTY;
+    node->m.chOffs = 0;
+    node->x.exprtype = PRIMTYPE_AUTO;
+}
+
+// '_' or '___' with an optional type
+void MLIR::_sink(Queue<Cons>& q, MLNode *& dst, const HLNode *sink, const HLNode *type)
+{
+    assert(sink->type == HLNODE_SINK);
+    MLCh s = _setupCh(dst, sink->tok == Lexer::TOK_WSINK ? ML_WSINK : ML_SINK);
+    MLNode *te = &nodes[s.chIdx];
+    if(type)
+        _cons(q, te, type);
+    else
+        makeEmpty(te);
+}
+
+// Returns the var index of the first declared var. The vars are consecutive; sinks have no var.
 u32 MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const StringPool& sp)
 {
     if(!decllist || !decllist->numchildren())
@@ -473,41 +496,50 @@ u32 MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const
         return 0;
     }
     const HLNode * const *dch = decllist->children();
+    const size_t dstidx = indexOf(dst);
 
     MLCh s = _setupList(dst, decllist->numchildren());
     assert(s.n);
-    MLNode *ch = &nodes[s.chIdx];
 
-    const u32 firstvar = symToVarRemap[dch[0]->as<HLVarDef>()->ident->as<HLIdent>()->symid];
-    assert(!(firstvar & EXTERNAL_BIT));
+    u32 firstvar = 0;
+    u32 nvars = 0;
 
     printf("MLIR::_decllist size %u\n", (unsigned)s.n);
     for(size_t i = 0; i < s.n; ++i)
     {
         const HLVarDef *vd = dch[i]->as<HLVarDef>();
+        MLNode *ch = &nodes[s.chIdx + i]; // _sink() may reallocate
+        if(vd->ident->type == HLNODE_SINK)
+        {
+            _sink(q, ch, vd->ident, vd->type);
+            continue;
+        }
+
         const HLIdent *id = vd->ident->as<HLIdent>();
         const char *name = sp.lookup(id->nameStrId).s;
         printf("ML decl %u '%s', symid %u, strid %u\n", (unsigned)i, name, id->symid, id->nameStrId);
 
         // Symbols are declared in a row. Their symids may have externals in between
         // (eg. type names first used in the list), but those don't get vars.
-        assert(symToVarRemap[id->symid] == firstvar + i);
+        const u32 varidx = symToVarRemap[id->symid];
+        assert(!(varidx & EXTERNAL_BIT));
+        if(!nvars)
+            firstvar = varidx;
+        assert(varidx == firstvar + nvars);
+        ++nvars;
 
         if(vd->type)
-            _cons(q, &ch[i], vd->type);
+            _cons(q, ch, vd->type);
         else
-        {
-            ch[i].m.cmd = _ML_EMPTY; // type deduced from the value
-            ch[i].m.chOffs = 0;
-            ch[i].x.exprtype = PRIMTYPE_AUTO;
-        }
+            makeEmpty(ch); // type deduced from the value
     }
 
+    dst = &nodes[dstidx];
     return firstvar;
 }
 
 // Unnamed variadic params ('uint ...') and '_' have no var
-static bool allDeclsNamed(const HLNode *decllist)
+static bool allParamsNamed(const HLNode *decllist)
 {
     const size_t n = decllist ? decllist->numchildren() : 0;
     const HLNode * const *dch = n ? decllist->children() : NULL;
@@ -575,11 +607,6 @@ dolist:
 
         case HLNODE_VARDECLASSIGN:
         {
-            if(!allDeclsNamed(hl->u.vardecllist.decllist))
-            {
-                dst->setError(sp, "'_' in declarations not implemented yet in MLIR");
-                return;
-            }
             MLCh s = _setupCh(dst, ML_DECL);
             assert(s.n == 2);
 
@@ -623,9 +650,9 @@ dolist:
         {
             const HLFunction& f = hl->u.func;
             const HLFunctionHdr *fh = f.hdr->as<HLFunctionHdr>();
-            if(!allDeclsNamed(fh->paramlist))
+            if(!allParamsNamed(fh->paramlist))
             {
-                dst->setError(sp, "Variadic parameters not implemented yet in MLIR");
+                dst->setError(sp, "Variadic and '_' parameters not implemented yet in MLIR");
                 return;
             }
 
@@ -719,8 +746,24 @@ dolist:
         }
 
         case HLNODE_ASSIGNMENT:
-        case HLNODE_INDEXASSIGN:
+        {
+            const HLNode *dsts = hl->u.assignment.dstlist;
+            const size_t n = dsts->numchildren();
+            for(size_t i = 0; i < n; ++i)
+            {
+                const HLNodeType t = (HLNodeType)dsts->children()[i]->type;
+                if(t != HLNODE_IDENT && t != HLNODE_SINK)
+                {
+                    dst->setError(sp, "Assigning to fields, indexes and namespaces is not implemented yet in MLIR");
+                    return;
+                }
+            }
             _setupChDefault(q, dst, hl, ML_ASSIGN);
+            return;
+        }
+
+        case HLNODE_SINK: // assignment target
+            _sink(q, dst, hl, NULL);
             return;
 
         case HLNODE_CALL:
@@ -953,6 +996,15 @@ struct MLFoldTracker
     std::vector<DFunc*> funcProtos; // DFunc objects that need to be built early for reasons and have yet to be integrated
 
     enum { NONE = u32(-1) };
+
+    // How the number of values must match the targets in declarations and assignments.
+    // Folding runs in source order, so this can be switched at any point (eg. by a pragma).
+    enum AssignMode
+    {
+        ASSIGN_EXACT,       // default: as many values as targets, unless a trailing '___' takes the rest
+        ASSIGN_DROP_EXCESS, // Lua-like: at least as many values as targets; the rest is dropped
+    };
+    AssignMode assignMode;
 
     // Functions currently being folded, innermost last
     struct FoldFunc
@@ -1477,20 +1529,137 @@ static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
     }
 }
 
+static bool isSink(const MLNode *node)
+{
+    return node->m.cmd == ML_SINK || node->m.cmd == ML_WSINK;
+}
+
+// One value of a flattened value list
+struct ValueSlot
+{
+    MLNode *expr; // the expression that produces this value
+    Type t;
+    bool single;  // expr produces only this value
+};
+
+// Flatten exprs into one slot per value. A variadic tail is not included; returns false on error.
+static bool flattenValues(MLFoldTracker& ft, MLNode *ch, size_t n, std::vector<ValueSlot>& slots)
+{
+    for(size_t i = 0; i < n; ++i)
+    {
+        MLNode *e = &ch[i];
+        if(e->m.cmd == ML_LIST) // a call folded into several values
+        {
+            if(!flattenValues(ft, e->firstChild(), e->numchildren(), slots))
+                return false;
+            continue;
+        }
+        const NumValuesResult nv = numResultValues(e, ft);
+        if(nv.verdict == NumValuesResult::ERROR)
+            return false;
+        if(nv.n == 1 && nv.verdict == NumValuesResult::EXACT_NUMBER)
+        {
+            ValueSlot vs = { e, e->type(), true };
+            slots.push_back(vs);
+        }
+        else if(nv.n)
+        {
+            TypeIdList tl = ft.tr().aslist(e->type());
+            assert(tl.n >= nv.n);
+            for(size_t k = 0; k < nv.n; ++k)
+            {
+                ValueSlot vs = { e, tl.ptr[k], false };
+                slots.push_back(vs);
+            }
+        }
+    }
+    return true;
+}
+
+// Check that the values fit the targets: nfixed targets take exactly 1 value each, a trailing '___' (wide) takes the rest.
+// On success, slots holds one entry per value (without a variadic tail).
+static bool balanceValues(MLFoldTracker& ft, const MLNode *where, size_t nfixed, bool wide, MLSub exprs, std::vector<ValueSlot>& slots)
+{
+    const NumValuesResult nv = numResultValuesOfList(exprs.ch, exprs.n, ft); // also checks that only the last one is variadic
+    if(nv.verdict == NumValuesResult::ERROR)
+        return false;
+    if(!flattenValues(ft, exprs.ch, exprs.n, slots))
+        return false;
+    const bool variadic = nv.verdict == NumValuesResult::MIN_NUMBER;
+    const size_t n = slots.size();
+
+    if(n < nfixed)
+    {
+        std::ostringstream os;
+        os << "Getting " << n << (variadic ? " or more" : "") << " values, but " << nfixed << " are needed";
+        if(variadic)
+            os << " (use #N to set the number of values)";
+        ft.error(where, os.str().c_str());
+        return false;
+    }
+
+    if(wide || ft.assignMode == MLFoldTracker::ASSIGN_DROP_EXCESS)
+        return true;
+
+    if(variadic)
+    {
+        std::ostringstream os;
+        os << "Getting " << n << " or more values, but " << nfixed << " are assigned (use ___ to ignore the rest, or #N to set the number of values)";
+        ft.error(where, os.str().c_str());
+        return false;
+    }
+    if(n > nfixed)
+    {
+        std::ostringstream os;
+        os << "Getting " << n << " values, but only " << nfixed << " are assigned (use ___ to ignore the rest)";
+        ft.error(where, os.str().c_str());
+        return false;
+    }
+    return true;
+}
+
+// Type of a sink's type expression; PRIMTYPE_AUTO if untyped or not a type
+static Type sinkType(MLFoldTracker& ft, MLNode *sink)
+{
+    MLNode *te = sink->firstChild();
+    if(te->m.cmd == _ML_EMPTY || te->m.cmd == _ML_ERROR)
+        return PRIMTYPE_AUTO;
+    if(te->isconst() && te->val.type == PRIMTYPE_TYPE)
+        return te->asVal().asDType()->tid;
+    te->setError(ft.sp(), "Expected a type");
+    return PRIMTYPE_AUTO;
+}
+
+// stmt is the decl or assignment, for error locations (sinks have no debug info)
+static void checkSinkValue(MLFoldTracker& ft, MLNode *sink, const ValueSlot& vs, const MLNode *stmt)
+{
+    const Type t = sinkType(ft, sink);
+    if(t != PRIMTYPE_AUTO)
+        ft.checktype(vs.t, t, "Value", vs.expr, stmt);
+}
+
+// Count fixed targets and check for a trailing '___'
+static size_t countTargets(const MLSub& targets, bool *wide)
+{
+    *wide = targets.n && targets.ch[targets.n - 1].m.cmd == ML_WSINK;
+    return targets.n - *wide;
+}
+
 // exprlist is optional, it must be present for ML_DECL nodes,
-// but is not needed for function parameters
+// but is not needed for function parameters and deferred decls
 static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typelist, MLNode *exprlist)
 {
-    MLSub typeexprs = typelist.aslist();
-
-    const size_t N = typeexprs.n;
+    MLSub targets = typelist.aslist();
     const size_t declidx = ft.mlir.indexOf(&declroot);
 
-    // Assign types first
-    for(size_t i = 0; i < N; ++i)
+    // Assign declared types first
+    size_t varidx = localid;
+    for(size_t i = 0; i < targets.n; ++i)
     {
-        MLNode *te = &typeexprs.ch[i];
-        MLVar *v = &ft.mlir.vars[localid + i];
+        MLNode *te = &targets.ch[i];
+        if(isSink(te))
+            continue;
+        MLVar *v = &ft.mlir.vars[varidx++];
         v->decl = declidx;
         if(te->m.cmd == _ML_EMPTY)
             continue;
@@ -1526,99 +1695,80 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         }
     }
 
-    MLSub exprs = {};
-    if(exprlist)
-    {
-        exprs = exprlist->aslist();
+    if(!exprlist)
+        return;
 
-        // Check amount
-        // Any expression can return a number of results, which needs to be known to know
-        // how many variables to typecheck per expr.
-        NumValuesResult nv = numResultValuesOfList(exprs.ch, exprs.n, ft);
-
-        switch(nv.verdict)
-        {
-            case NumValuesResult::ERROR: // already reported
-                return;
-
-            case NumValuesResult::EXACT_NUMBER:
-                if(nv.n < N)
-                {
-                    std::ostringstream os;
-                    os << "Getting " << nv.n << " values, but " << N << " are needed";
-                    exprlist->setError(ft.sp(), os.str().c_str());
-                    return;
-                }
-                else if(nv.n > N)
-                {
-                    std::ostringstream os;
-                    os << "Getting " << nv.n << " values, but only " << N << " are assigned (" << (nv.n - N) << " are dropped)";
-                    ft.warn(exprlist, os.str().c_str());
-                }
-                break;
-
-            case NumValuesResult::MIN_NUMBER:
-                if(nv.n < N)
-                {
-                    // TODO: allow this when the tail ones are optionals?
-                    std::ostringstream os;
-                    os << "Getting " << nv.n << " or more values, but " << N << " are needed";
-                    exprlist->setError(ft.sp(), os.str().c_str());
-                    return;
-                }
-                else if(nv.n > N)
-                {
-                    std::ostringstream os;
-                    os << "Getting " << nv.n << " or more values, but only " << N << " are assigned (" << (nv.n - N) << " are always dropped)";
-                    ft.warn(exprlist, os.str().c_str());
-                }
-                break;
-        }
-    }
-
-    size_t idx = localid;
-    const size_t endidx = localid + N;
+    bool wide;
+    const size_t nfixed = countTargets(targets, &wide);
+    std::vector<ValueSlot> slots;
+    if(!balanceValues(ft, &declroot, nfixed, wide, exprlist->aslist(), slots))
+        return;
 
     // Assign type based on value if automatic, or report type clash
-    size_t numconstval = 0;
-    for(size_t i = 0; i < exprs.n && idx < endidx; ++i)
+    varidx = localid;
+    for(size_t i = 0; i < nfixed; ++i)
     {
-        MLNode *e = &exprs.ch[i];
-        NumValuesResult eres = numResultValues(e, ft);
-        Type t = e->type();
-        if(eres.n == 0)
-            continue;
-        if(eres.n > 1)
+        MLNode *te = &targets.ch[i];
+        const ValueSlot& vs = slots[i];
+        if(te->m.cmd == ML_SINK)
         {
-            TypeIdList tl = ft.tr().aslist(t);
-            for(size_t k = 0; k < tl.n && idx < endidx; ++k)
-            {
-                Type tt = tl.ptr[k];
-                MLVar *v = &ft.mlir.vars[idx++];
-                assignVarType(v, tt, ft);
-            }
-            // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
+            checkSinkValue(ft, te, vs, &declroot);
+            continue;
+        }
+
+        MLVar *v = &ft.mlir.vars[varidx++];
+        // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
+        if(!v->isMutable() && vs.single && vs.expr->isconst())
+        {
+            v->kind = MLVar::CONSTVAL;
+            v->u.val = vs.expr->asVal();
         }
         else
+            assignVarType(v, vs.t, ft);
+    }
+    if(wide)
+        for(size_t i = nfixed; i < slots.size(); ++i)
+            checkSinkValue(ft, &targets.ch[nfixed], slots[i], &declroot);
+
+    // DO NOT ELIMINATE DECLS, even if all vars became constants: post-folding needs them
+}
+
+static void doAssign(MLFoldTracker& ft, MLNode *node)
+{
+    MLNode *ch = node->firstChild();
+    MLSub targets = ch[0].aslist();
+
+    bool wide;
+    const size_t nfixed = countTargets(targets, &wide);
+    std::vector<ValueSlot> slots;
+    if(!balanceValues(ft, node, nfixed, wide, ch[1].aslist(), slots))
+        return;
+
+    for(size_t i = 0; i < nfixed; ++i)
+    {
+        MLNode *dst = &targets.ch[i];
+        const ValueSlot& vs = slots[i];
+        switch(dst->m.cmd)
         {
-            MLVar *v = &ft.mlir.vars[idx++];
-            if(!v->isMutable() && e->isconst())
+            case ML_SINK:
+                checkSinkValue(ft, dst, vs, node);
+                break;
+
+            case ML_VAR:
             {
-                v->kind = MLVar::CONSTVAL;
-                v->u.val = e->asVal();
-                ++numconstval;
+                const MLVar& v = ft.mlir.vars[dst->m.p[0]];
+                assert(v.isMutable()); // the parser checks this
+                ft.checktype(vs.t, dst->type(), "Assigned value", vs.expr, v.decl ? &ft.mlir.nodes[v.decl] : dst);
             }
-            else
-                assignVarType(v, t, ft);
+            break;
+
+            case _ML_ERROR: // reported later
+                break;
+
+            default:
+                assert(false); // _construct() only lets idents and sinks through
         }
     }
-
-    // ALL values got replaced by compile-time known constants? Don't need this decl node, kick it.
-    // All ML_VAR referenced later that were declared here it will be replaced with constants,
-    // so there will be no reference left.
-    //if(numconstval == N)
-    //    node->makedummy();
-    // ^ DO NOT ELIMINATE DECLS!! post-folding needs it
 }
 
 static void foldNode(MLNode *node, MLFoldTracker& ft)
@@ -1848,6 +1998,10 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         }
         break;
 
+        case ML_ASSIGN:
+            doAssign(ft, node);
+            break;
+
         /*case ML_FUNC:
         {
             MLNode *argtypes = node->firstChild();
@@ -2036,9 +2190,11 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
         case ML_DECL:
         {
             const u32 firstvar = node->m.p[0];
-            const size_t nvars = node->firstChild()->aslist().n;
-            for(size_t i = 0; i < nvars; ++i)
-                addLocal(ft, firstvar + i);
+            const MLSub targets = node->firstChild()->aslist();
+            u32 nvars = 0;
+            for(size_t i = 0; i < targets.n; ++i)
+                if(!isSink(&targets.ch[i]))
+                    addLocal(ft, firstvar + nvars++);
         }
         break;
 
@@ -2179,6 +2335,7 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
     localenv->next = &env;
     // TODO: also add an "exported" env; because we don't want to export ALL the local namedecls
     MLFoldTracker ft = { *this, vm, syms, *localenv, true };
+    ft.assignMode = MLFoldTracker::ASSIGN_EXACT;
 
     ft.typesrc.resize(nodes.size());
     preFoldExternals(externals.data(), externals.size(), ft);
