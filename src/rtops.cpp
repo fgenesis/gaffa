@@ -4,6 +4,7 @@
 #include "gavm.h"
 #include "symtable.h"
 #include "runtime.h"
+#include "lex.h"
 
 template<typename T>
 struct TFuncTypes
@@ -139,7 +140,8 @@ static void _Register(SymTable& syms, Runtime& rt, const OpDef *def, OperatorId 
     const Type tp = rt.tr.mklistDesc(params, nparams)->id();
     const Type tret = rt.tr.mklistDesc(rets, nrets)->id();
     const Type tf = rt.tr.mkfuncDesc(tp, tret)->id();
-    const char *opname = GetOperatorName(op);
+    const char *opname = Lexer::GetOperatorName(op);
+    assert(opname);
     const sref sname = rt.sp.put(opname).id;
 
     DFunc * const df = DFunc::GCNew(rt.gc);
@@ -380,12 +382,10 @@ template<typename T>
 struct Equality
 {
     typedef WrappedBinComp<T, C_Eq, OP_EQ> _Eq;
-    typedef WrappedBinComp<T, C_Neq, OP_NEQ> _Neq;
 
     static void Register(SymTable& syms, Runtime& rt)
     {
         _Eq::Register(syms, rt);
-        _Neq::Register(syms, rt);
     }
 };
 

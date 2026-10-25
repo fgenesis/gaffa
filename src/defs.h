@@ -286,13 +286,7 @@ enum OperatorId
     OP_XOR,
 
     OP_EQ,
-    OP_NEQ,
-    OP_LT,
-    OP_LTE,
-    OP_GT,
-    OP_GTE,
-    OP_LOGAND,
-    OP_LOGOR,
+    OP_CMP,
 
     OP_CONCAT,
     OP_GETINDEX,
@@ -304,17 +298,20 @@ enum OperatorId
 
     _OP_MAX_FUNC,
 
-    // Any operator past the limit is not encoded as an operator function (__op_add, ...)
-    // and has no such name.
-    OP_QQM = _OP_MAX_FUNC,
+    // Any operator past the limit can't be overloaded and has no operator function name
+    OP_NEQ = _OP_MAX_FUNC, // not ==
+    OP_LT, // these use <=>
+    OP_LTE,
+    OP_GT,
+    OP_GTE,
+    OP_LOGAND,
+    OP_LOGOR,
+    OP_QQM,
     OP_UNWRAP,
 
     _OP_MAX
 };
 
-static bool IsOperatorPrefix(const char *s);
-const char *GetOperatorName(OperatorId op);
-OperatorId GetOperatorFromName(const char *name);
 size_t GetOperatorArity(OperatorId op);
 
 enum VisitResult

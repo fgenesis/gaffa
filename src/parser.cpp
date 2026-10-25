@@ -271,11 +271,12 @@ const Parser::ParseRule Parser::Rules[] =
 
     // logical
     { Lexer::TOK_EQ    , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY,  Parser::OPF_OVL  },
-    { Lexer::TOK_NEQ   , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY,  Parser::OPF_OVL  },
-    { Lexer::TOK_LT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
-    { Lexer::TOK_LTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
-    { Lexer::TOK_GT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
-    { Lexer::TOK_GTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
+    { Lexer::TOK_NEQ   , NULL,              &Parser::binary, NULL,             Parser::PREC_EQUALITY,  Parser::OPF_NONE },
+    { Lexer::TOK_LT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_NONE },
+    { Lexer::TOK_LTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_NONE },
+    { Lexer::TOK_GT    , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_NONE },
+    { Lexer::TOK_GTE   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_NONE },
+    { Lexer::TOK_CMP   , NULL,              &Parser::binary, NULL,             Parser::PREC_COMPARISON,Parser::OPF_OVL  },
     { Lexer::TOK_LOGAND, NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_AND, Parser::OPF_NONE },
     { Lexer::TOK_LOGOR , NULL,              &Parser::binary, NULL,             Parser::PREC_LOGIC_OR,  Parser::OPF_NONE },
     { Lexer::TOK_AND,    NULL,              &Parser::andor,  NULL,             Parser::PREC_AND,       Parser::OPF_NONE },
@@ -715,7 +716,8 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
         _funcattribs(&flags);
 
     unsigned hasns = 0;
-    Lexer::Token sep;
+    Lexer::Token sep, nametok;
+    OperatorId op = OP_ERROR;
     HLNode *ns = NULL;
     if(pname) // Named functions can be declared in a namespace
     {
@@ -802,13 +804,73 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     return f;
 }
 
-// namespace:hello
-// namespace.hello
-// int.@"+"
-// TODO: int.+ (operator names; postponed)
+// Methods and namespace operator overloading. After one of:
+//   func namespace:
+//   func namespace.
+// Eg.:
+//   namespace:hello
+//   namespace.hello
+// The shorter token form is the intended, safe way to do operator overloading:
+//   int.+  int.prefix-  T.[]  T.[]=  T.[]?  T.()  T:<=>
+// When written like this, it's a compile error to define an operator that doesn't exist or can't be overloaded.
+//
+// Alternatively, a method can be defined with any name via a single string:
+//   int.@"a method name with spaces"
+//   string.@"break"   (A method name that is a reserved keyword)
+//   int.@"+"      (this is a valid operator+ overload)
+//   T:@"whatev*<.-_:= \u{1234}"   (this is just a weird method name)
+//   int.@"&&"      (this is a method that reads like operator&&, but that is not overloadable, so this can only be called manually)
+//   int.@"prefix??" (same, ??x is for catching errors and not an operator that can be overloaded)
 HLNode * Parser::_methodname()
 {
-    return name("function or method");
+    Lexer::Token starttok = curtok;
+    const char *beg = curtok.begin;
+    size_t mthlen = curtok.u.len;
+
+    // Simple case: A regular method name or a potential operator overload as a single string. Use that as-is.
+    if(curtok.tt == Lexer::TOK_IDENT)
+    {
+        // If this yields an an operator, it's an overload as a string, eg. @"+" or @"prefix+"
+        OperatorId op = Lexer::GetOperatorFromName(curtok.begin, mthlen);
+        // Any identifier that's not a potential operator overload prefix is fine as method name
+        if(op != OP_ERROR || !Lexer::IsOperatorNamePrefix(beg, mthlen))
+        {
+            return name("method");
+        }
+    }
+
+    // Not-so-simple case: A couple tokens that are not necessarily strings that may form an operator.
+    // Keep eating tokens as long as this could be an operator overload. Spaces between tokens not supported.
+    size_t eaten = 0;
+    for(;;)
+    {
+        advance();
+        ++eaten;
+
+        if(!(curtok.u.len && curtok.begin == beg + mthlen))
+            break;
+
+        size_t newlen = mthlen + curtok.u.len;
+        if(!Lexer::IsOperatorNamePrefix(beg, newlen))
+            break;
+
+        mthlen = newlen;
+    }
+
+    // curtok is no longer part of a potential operator name. See what we have now.
+    // This could be a single string that happens to be the start of operator names, eg. "prefix",
+    // or a bunch of tokens strung together.
+    OperatorId op = Lexer::GetOperatorFromName(beg, mthlen);
+    if(op == OP_ERROR)
+    {
+        // Last chance: Single identifier on its own that happened to be a prefix of an operator overload
+        if(!(eaten == 1 && starttok.tt == Lexer::TOK_IDENT))
+            errorAt(starttok, "Expected function name or operator");
+    }
+
+    HLNode *node = ensure(hlir->name(), starttok);
+    node->u.name.nameStrId = strpool.put(beg, mthlen).id;
+    return node;
 }
 
 HLNode* Parser::_funcparams()

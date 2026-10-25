@@ -1,6 +1,8 @@
 #include "lex.h"
 #include "util.h"
 
+#include <string.h>
+
 struct ShortEntry
 {
     char s[4];
@@ -31,6 +33,7 @@ static const ShortEntry ShortTab[] =
     { "=",  Lexer::TOK_CASSIGN },
     { ":=", Lexer::TOK_MASSIGN },
     { "!=", Lexer::TOK_NEQ,    },
+    { "<=>",Lexer::TOK_CMP,    },
     { "<=", Lexer::TOK_LTE,    },
     { ">=", Lexer::TOK_GTE,    },
     { "<",  Lexer::TOK_LT,     },
@@ -560,6 +563,7 @@ OperatorId Lexer::TokenToBinOp(TokenType tok)
         case TOK_LTE: return OP_LTE;
         case TOK_GT: return OP_GT;
         case TOK_GTE: return OP_GTE;
+        case TOK_CMP: return OP_CMP;
         case TOK_LOGAND: return OP_LOGAND;
         case TOK_LOGOR: return OP_LOGOR;
         case TOK_CONCAT: return OP_CONCAT;
@@ -568,6 +572,89 @@ OperatorId Lexer::TokenToBinOp(TokenType tok)
     }
     assert(false);
     return OP_ERROR;
+}
+
+struct OpSpelling
+{
+    OperatorId op;
+    bool prefix;
+    Lexer::TokenType tok[3]; // unused entries are TOK_E_ERROR
+};
+
+// Names of overloadable operators, in OperatorId order
+static const OpSpelling OpSpellings[] =
+{
+    { OP_UPLUS,       true,  { Lexer::TOK_PLUS } },
+    { OP_UNEG,        true,  { Lexer::TOK_MINUS } },
+    { OP_UNOT,        true,  { Lexer::TOK_EXCL } },
+    { OP_UBITNOT,     true,  { Lexer::TOK_TILDE } },
+    { OP_ULEN,        true,  { Lexer::TOK_HASH } },
+    { OP_ADD,         false, { Lexer::TOK_PLUS } },
+    { OP_SUB,         false, { Lexer::TOK_MINUS } },
+    { OP_MUL,         false, { Lexer::TOK_STAR } },
+    { OP_FDIV,        false, { Lexer::TOK_SLASH } },
+    { OP_IDIV,        false, { Lexer::TOK_SLASH2X } },
+    { OP_MOD,         false, { Lexer::TOK_MOD } },
+    { OP_SHL,         false, { Lexer::TOK_SHL } },
+    { OP_SHR,         false, { Lexer::TOK_SHR } },
+    { OP_BITAND,      false, { Lexer::TOK_BITAND } },
+    { OP_BITOR,       false, { Lexer::TOK_BITOR } },
+    { OP_XOR,         false, { Lexer::TOK_HAT } },
+    { OP_EQ,          false, { Lexer::TOK_EQ } },
+    { OP_CMP,         false, { Lexer::TOK_CMP } },
+    { OP_CONCAT,      false, { Lexer::TOK_CONCAT } },
+    { OP_GETINDEX,    false, { Lexer::TOK_LSQ, Lexer::TOK_RSQ } },
+    { OP_SETINDEX,    false, { Lexer::TOK_LSQ, Lexer::TOK_RSQ, Lexer::TOK_CASSIGN } },
+    { OP_GETINDEXOPT, false, { Lexer::TOK_LSQ, Lexer::TOK_RSQ, Lexer::TOK_QM } },
+    { OP_CALL,        false, { Lexer::TOK_LPAREN, Lexer::TOK_RPAREN } },
+};
+
+struct OpNames
+{
+    char names[_OP_MAX_FUNC][8];
+
+    OpNames()
+    {
+        static_assert(Countof(OpSpellings) == _OP_MAX_FUNC - 1, "OpSpellings must have an entry for each operator function");
+        memset(names, 0, sizeof(names));
+        for(size_t i = 0; i < Countof(OpSpellings); ++i)
+        {
+            const OpSpelling& sp = OpSpellings[i];
+            assert(sp.op == i + 1);
+            char *s = &names[sp.op][0];
+            if(sp.prefix)
+                strcat(s, "prefix");
+            for(size_t k = 0; k < Countof(sp.tok) && sp.tok[k] != Lexer::TOK_E_ERROR; ++k)
+                strcat(s, Lexer::GetTokenText(sp.tok[k]));
+            assert(strlen(s) < sizeof(names[0]));
+        }
+    }
+};
+
+static const OpNames s_opnames; // ShortTab is constant-initialized, so this can use it
+
+const char *Lexer::GetOperatorName(OperatorId op)
+{
+    return op > OP_ERROR && op < _OP_MAX_FUNC ? &s_opnames.names[op][0] : NULL;
+}
+
+OperatorId Lexer::GetOperatorFromName(const char *s, size_t len)
+{
+    for(size_t i = 1; i < _OP_MAX_FUNC; ++i)
+    {
+        const char *name = &s_opnames.names[i][0];
+        if(!strncmp(name, s, len) && !name[len])
+            return (OperatorId)i;
+    }
+    return OP_ERROR;
+}
+
+bool Lexer::IsOperatorNamePrefix(const char *s, size_t len)
+{
+    for(size_t i = 1; i < _OP_MAX_FUNC; ++i)
+        if(!strncmp(&s_opnames.names[i][0], s, len))
+            return true;
+    return false;
 }
 
 OperatorId Lexer::TokenToUnOp(TokenType tok)

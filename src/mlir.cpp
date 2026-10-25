@@ -1252,9 +1252,14 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         return true;
     }
 
-    // Operator is unary or binary operator that resolves to a function (__op_*)
+    // Operator is unary or binary operator that resolves to a function
 
-    const char *opname = GetOperatorName(opid);
+    const char *opname = Lexer::GetOperatorName(opid);
+    if(!opname)
+    {
+        node->setError(ft.sp(), "Operator not implemented yet (needs lowering to <=> or ==)");
+        return false;
+    }
     Str name = ft.putstr(opname);
 
 
@@ -1266,7 +1271,7 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
         node->setError(ft.sp(), os.str().c_str());
         return false;
     }
-    const DFunc *func = opr->asFunc(); // FIXME: resolve __op_call
+    const DFunc *func = opr->asFunc();
     if(!func)
     {
         std::ostringstream os;

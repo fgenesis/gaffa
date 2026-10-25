@@ -34,6 +34,7 @@ public:
         TOK_GT,     // >
         TOK_LTE,    // <=
         TOK_GTE,    // >=
+        TOK_CMP,    // <=>
         TOK_FATARROW,// =>
         TOK_QQM,    // ??
         TOK_QM,     // ?
@@ -116,6 +117,11 @@ public:
 
     static OperatorId TokenToBinOp(TokenType tok);
     static OperatorId TokenToUnOp(TokenType tok);
+
+    // Operator function names: "+", "prefix-", "[]=", "()", ...
+    static const char *GetOperatorName(OperatorId op); // NULL if op can't be overloaded
+    static OperatorId GetOperatorFromName(const char *s, size_t len); // OP_ERROR if not an operator name
+    static bool IsOperatorNamePrefix(const char *s, size_t len); // true if s is the start of an operator name
 
     struct UnescResult
     {

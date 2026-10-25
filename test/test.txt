@@ -100,14 +100,14 @@
 --func i2f(int i) -> float { return i }
 
 --var w = uint::zero
-uint x, y = 1, 2
+--uint x, y = 1, 2
 
-func test(uint a)
-	return x+y+a
+--func test(uint a)
+--	return x+y+a
 
 --uint z = x+y
-uint z = 1+2
-return ??z
+--uint z = 1+2
+--return ??z
 
 --return x+y, "hi"
 
@@ -168,3 +168,5 @@ return ??z
 --func +(int a, int b) -> int {}
 
 --func int.+_(int a, int b) -> int {}
+
+func T:() () {}

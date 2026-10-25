@@ -5,6 +5,7 @@
 #include "strings.h"
 #include "gavm.h"
 #include "runtime.h"
+#include "lex.h"
 #include <assert.h>
 #include <limits>
 
@@ -129,7 +130,8 @@ DFunc *ClassReg::method(const char * name, LeafFunc lfunc, const Type * params, 
 DFunc *ClassReg::op(OperatorId op, LeafFunc lfunc, Type t, unsigned arity)
 {
     assert(arity <= 2);
-    const char *name = GetOperatorName(op);
+    const char *name = Lexer::GetOperatorName(op);
+    assert(name);
     Type ta[] = { t, t };
     return this->method(name, lfunc, ta, arity, ta, 1, FuncInfo::Pure);
 }

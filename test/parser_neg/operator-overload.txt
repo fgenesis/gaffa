@@ -1,0 +1,14 @@
+### invalid operator 1
+func T.[)() {}
+### invalid operator 2
+func T.""() {}
+### invalid operator 3
+func T.[ ]() {}
+### invalid operator 4
+func T.[ ] () {}
+### invalid operator 5
+func T.+-() {}
+### invalid operator 6
+func T.prefix-+() {}
+### not overloadable operator
+func T.prefix?? () {}

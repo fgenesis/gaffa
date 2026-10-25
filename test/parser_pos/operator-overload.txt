@@ -1,4 +1,71 @@
-func int.+(int a, int b) {}
-func int.@"-"(int a, int b) {}
-func int:*(int o) -> int {}
-func int:/(int o) { return self }
+-- Operator functions: infix ops use the token ("+"), prefix ops are "prefix" + token ("prefix-"),
+-- plus "[]", "[]=", "[]?", "()". Methods count 'self' as the first parameter.
+### infix operators
+func int.+(int a, int b) -> int { return a }
+func int.-(int a, int b) -> int { return a }
+func int.*(int a, int b) -> int { return a }
+func int./(int a, int b) -> int { return a }
+func int.//(int a, int b) -> int { return a }
+func int.%(int a, int b) -> int { return a }
+func int.++(int a, int b) -> int { return a }
+### bitwise operators
+func uint.&(uint a, uint b) -> uint { return a }
+func uint.|(uint a, uint b) -> uint { return a }
+func uint.^(uint a, uint b) -> uint { return a }
+func uint.<<(uint a, uint b) -> uint { return a }
+func uint.>>(uint a, uint b) -> uint { return a }
+### equality and comparison
+func int.==(int a, int b) -> bool { return true }
+func int.<=>(int a, int b) -> int { return a }
+### prefix operators
+func int.prefix-(int a) -> int { return a }
+func int.prefix+(int a) -> int { return a }
+func int.prefix!(int a) -> bool { return true }
+func int.prefix~(int a) -> int { return a }
+func int.prefix#(int a) -> uint { return 0 }
+### methods
+func int:*(int o) -> int { return self }
+func int:/(int o) -> int { return self }
+func int:prefix-() -> int { return self }
+func int:<=>(int o) -> int { return 0 }
+### index and call operators
+func T:[](uint k) -> uint { return k }
+func T:[]=(uint k, uint v) {}
+func T:[]?(uint k) -> uint? { return k }
+func T:()(uint a, uint b) {}
+func T.()(T self, ...) {}
+### quoted operator names are the same as plain ones
+func int.@"-"(int a, int b) -> int { return a }
+func int.@"prefix-"(int a) -> int { return a }
+func T:@"[]="(uint k, uint v) {}
+### assigning operators via the namespace
+T::["prefix-"] = func(T a) -> T { return a }
+T::["()"] = func(T self) {}
+T::["[]?"] = func(T self, uint k) -> uint? { return k }
+### a method named prefix is not an operator 1
+func T:prefix() {}
+### a method named prefix is not an operator 2
+func T.prefix(T a) {}
+### comparison operator in an expression
+bool b = 1 <=> 2 == 0
+### non-constant namespace keys
+string s = "x y"
+var f = T::[s]
+### quoted names are not checked against operator names
+func int.@"prefx-"(int a) -> int { return a }
+### quoted name with a space in a namespace
+func T.@"my func"() {}
+### quoted name that is a keyword
+func T.@"break"() {}
+func T.@"func"() {}
+func T.@"if"() {}
+### spaces after operator name
+func T.() () {}
+### spaces around operator name
+func T. [] () {}
+### any key can be assigned in a namespace
+T::["prefx-"] = func(T a) -> T { return a }
+### any quoted name can be read from a namespace
+var f = T::@"[ ]"
+### any key can be used in a method call
+func f(T t) { t:["<==>"]() }

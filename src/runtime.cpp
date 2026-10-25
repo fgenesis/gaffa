@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "lex.h"
 
 Runtime::Runtime()
     : sp(gc)
@@ -22,6 +23,6 @@ bool CommonStrings::init(StringPool& sp)
     for(size_t i = 0; i < PRIMTYPE_MAX; ++i)
         primtypeNames[i] = sp.put(GetPrimTypeName(i)).id;
     for(size_t i = 0; i < _OP_MAX; ++i)
-        operatorNames[i] = sp.put(GetOperatorName((OperatorId)i)).id;
+        operatorNames[i] = sp.put(Lexer::GetOperatorName((OperatorId)i)).id;
     return true;
 }
