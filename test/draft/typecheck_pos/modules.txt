@@ -1,0 +1,225 @@
+-- Exports and imports that must link and fold (docs/agents/language.md, "Exports and imports")
+### type constructor with methods, import target
+func [pure] Box(type T) -> symtab, type
+{
+    export type B = { v = T }
+    export func B:get() -> T { return self.v }
+    return export, B
+}
+var import, type FB = Box(float)
+FB b = {v = 1.0}
+float x = b:get()
+### import prefix sugar
+func [pure] Box(type T) -> symtab, type
+{
+    export type B = { v = T }
+    export func B:get() -> T { return self.v }
+    return export, B
+}
+type FB = import Box(float)
+FB b = {v = 1.0}
+float x = b:get()
+### methods are keyed by the deduplicated type, aliases work
+func [pure] Box(type T) -> symtab, type
+{
+    export type B = { v = T }
+    export func B:get() -> T { return self.v }
+    return export, B
+}
+type FB = import Box(float)
+type G = FB
+type H = { v = float }
+H h = {v = 1.0}
+float x = h:get()
+### export in a branch that ran
+func [pure] M(bool b) -> symtab
+{
+    if(b) { export func f() -> uint { return 1 } }
+    return export
+}
+import M(true)
+uint x = f()
+### same name exported in alternative branches
+func [pure] M(bool c) -> symtab
+{
+    if(c) export uint f = 1 else export uint f = 2
+    return export
+}
+import M(false)
+uint x = f
+### named export declares only the local
+func [pure] M() -> symtab
+{
+    export ("g") func f() -> uint { return 1 }
+    uint y = f()
+    return export
+}
+import M()
+uint x = g()
+### export expression is the live table
+func [pure] M() -> symtab
+{
+    var e = export
+    export func f() -> uint { return 1 }
+    return e
+}
+import M()
+uint x = f()
+### export target merges
+func [pure] Inner() -> symtab
+{
+    export func f() -> uint { return 1 }
+    return export
+}
+func [pure] Outer() -> symtab
+{
+    export = Inner()
+    export func g() -> uint { return 2 }
+    return export
+}
+import Outer()
+uint x = f() + g()
+### export import combined target
+func [pure] Inner() -> symtab
+{
+    export func f() -> uint { return 1 }
+    return export
+}
+func [pure] Outer() -> symtab
+{
+    var export import = Inner()
+    uint y = f()
+    return export
+}
+import Outer()
+uint x = f()
+### export import statement sugar
+func [pure] Inner() -> symtab
+{
+    export func f() -> uint { return 1 }
+    return export
+}
+func [pure] Outer() -> symtab
+{
+    export import Inner()
+    uint y = f()
+    return export
+}
+import Outer()
+uint x = f()
+### export prefix exports every target, including the import
+func [pure] Box(type T) -> symtab, type
+{
+    export type B = { v = T }
+    export func B:get() -> T { return self.v }
+    return export, B
+}
+func [pure] Lib() -> symtab
+{
+    export var import, type FB = Box(float)
+    return export
+}
+import Lib()
+FB b = {v = 1.0}
+float x = b:get()
+### variadic values after the symtab
+func [pure] V() -> symtab, uint...
+{
+    export func f() -> uint { return 1 }
+    return export, 1, 2, 3
+}
+var import, uint a, ___ = V()
+uint x = f() + a
+### import prefix with variadic values
+func [pure] V() -> symtab, uint...
+{
+    export func f() -> uint { return 1 }
+    return export, 1, 2, 3
+}
+var a, b, ___ = import V()
+uint x = f() + a + b
+### value count adjust keeps the symtab
+func [pure] V() -> symtab, uint...
+{
+    export func f() -> uint { return 1 }
+    return export, 1, 2, 3
+}
+var import, uint a = V()#2
+uint x = f() + a
+### local shadows an import when declared before use
+func [pure] M() -> symtab
+{
+    export func f() -> uint { return 1 }
+    return export
+}
+import M()
+func f() -> uint { return 2 }
+assert(f() == 2)
+### clashing imports are fine if the name is unused
+func [pure] A() -> symtab
+{
+    export func f() -> uint { return 1 }
+    export func a() -> uint { return 1 }
+    return export
+}
+func [pure] B() -> symtab
+{
+    export func f() -> uint { return 2 }
+    return export
+}
+import A()
+import B()
+uint x = a()
+### import is visible to the end of its block
+func [pure] M() -> symtab
+{
+    export func f() -> uint { return 1 }
+    return export
+}
+{
+    import M()
+    uint x = f()
+}
+### export in a closure belongs to the closure
+func [pure] M() -> symtab
+{
+    var g = func() -> symtab
+    {
+        export func f() -> uint { return 1 }
+        return export
+    }
+    return g()
+}
+import M()
+uint x = f()
+### export in a value block belongs to the enclosing function
+func [pure] M() -> symtab
+{
+    uint y = $ { export func f() -> uint { return 1 } emit 5 }
+    return export
+}
+import M()
+uint x = f()
+### namespaced export
+func [pure] Box(type T) -> symtab, type
+{
+    export type B = { v = T }
+    export B::zero = B{v = 0.0}
+    return export, B
+}
+type FB = import Box(float)
+FB z = FB::zero
+### top level exports without referencing export: no warning
+export func f() -> uint { return 1 }
+### function with no exports returns an empty table
+## warning: 'export' referenced, but nothing exported
+func [pure] M() -> symtab { return export }
+import M()
+### exports never fetched
+## warning: symbols exported, but 'export' never referenced
+func M() -> uint
+{
+    export func f() -> uint { return 1 }
+    return 1
+}
+uint x = M()

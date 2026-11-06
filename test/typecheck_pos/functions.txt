@@ -11,9 +11,6 @@ float a = f()
 ### several return values
 func f() return 1, 2.0
 uint a, float b = f()
-### extra return values are dropped
-func f() return 1, 2.0
-uint a = f()
 ### return values adjusted with #
 func f() return 1, 2.0
 uint a = f()#1

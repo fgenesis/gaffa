@@ -1,0 +1,26 @@
+-- Exports and imports: syntax/symbol errors the parser must reject
+### mutable export
+## error: exports are immutable
+export uint a := 1
+### exported deferred declaration
+## error: can't export a deferred declaration
+export uint a = defer
+### import used inside an expression
+## error: import prefix only directly after '='
+g(import M())
+### import prefix in the middle of a value list
+## error: import prefix only directly after '='
+var a, b = 1, import M()
+### local declared after the name was used (extern)
+## error: foo was used before this declaration
+uint a = foo
+uint foo = 1
+### local declared after the name was used (import)
+## error: f was used before this declaration
+import M()
+uint x = f()
+func f() -> uint { return 2 }
+### export twice under the same name in straight-line code
+## error: already exported
+export uint a = 1
+export ("a") uint b = 2

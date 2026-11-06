@@ -1,0 +1,54 @@
+-- Exports and imports: syntax that must parse (docs/agents/language.md, "Exports and imports")
+### export prefix at top level
+export uint a = 1
+export func f() -> uint { return 1 }
+### export prefix in a nested block
+func M() -> symtab
+{
+    if(true) { export func f() -> uint { return 1 } }
+    return export
+}
+### named export
+func M() -> symtab
+{
+    export ("g") func f() -> uint { return 1 }
+    return export
+}
+### exported method and namespaced symbol
+func M(type T) -> symtab, type
+{
+    export type B = { v = T }
+    export func B:get() -> T { return self.v }
+    export B::zero = 0
+    return export, B
+}
+### export as expression
+func M() -> symtab
+{
+    var e = export
+    return e
+}
+### export target
+func M() -> symtab
+{
+    export = N()
+    return export
+}
+### import target, symtab first
+var import, type X = M(float)
+### import target with variadic rest
+var import, a, b, ___ = M()
+### import prefix sugar
+type X = import M(float)
+### import prefix sugar with several values
+var a, b, ___ = import M()
+### import statement sugar
+import M()
+### export import combined target
+var export import, type X = M(float)
+### export import statement sugar
+export import M()
+### export prefix on a declaration with an import target
+export var import, type X = M(float)
+### import in a nested block
+{ import M() }

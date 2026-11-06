@@ -28,6 +28,9 @@ var x = f(+1)
 ### too few values for a declaration
 func f() return 1
 uint a, b = f()
+### too many values for a declaration
+func f() return 1, 2.0
+uint a = f()
 ### call adjusted to more values than available
 func f() return 1, 2
 uint a, b, c = f()#3
