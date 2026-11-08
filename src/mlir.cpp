@@ -9,6 +9,7 @@
 #include <sstream>
 #include "valconv.h"
 #include "gavm.h"
+#include "gaimpdbg.h"
 
 /* TODO:
 - When constant folding calls, [], {}, or anything that created an object for which isMutableRefType() is true,
@@ -1123,6 +1124,7 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
         os << what << " is Const and can't be used as non-Const";
     else
         os << what << " has mismatched type";
+    os << " ('" << getTypeName(rt(), sub) << "', expected '" << getTypeName(rt(), reference) << "')";
     error(where, os.str().c_str());
     error(decl, "(type should be same as here)");
     return false;
@@ -1738,22 +1740,16 @@ static void assignVarType(MLVar *v, Type t, MLFoldTracker& ft)
 {
     const Type valt = v->u.local.type;
 
-    // FIXME: make a thing in TR that pretty-prints a type name
-    const char *tn = GetPrimTypeName(t);
-    const char *cn = GetPrimTypeName(valt);
-    if(!tn)
-        tn = "(unnamed)";
-    if(!cn)
-        cn = "(unnamed)";
-
+    const std::string tn = getTypeName(ft.rt(), t);
+    const std::string cn = getTypeName(ft.rt(), valt);
     const char *vname = ft.str(v->name).s;
 
-    printf("assignVarType '%s' = %s (currently: %s)\n", vname, tn ? tn : "(unnamed)", cn ? cn : "(unnamed)");
+    printf("assignVarType '%s' = %s (currently: %s)\n", vname, tn.c_str(), cn.c_str());
 
     if(valt == PRIMTYPE_AUTO)
     {
         v->u.local.type = t;
-        printf("Var '%s' now has type %s\n", vname, tn ? tn : "(unnamed)");
+        printf("Var '%s' now has type %s\n", vname, tn.c_str());
     }
     else if(valt != t)
     {
@@ -2199,10 +2195,7 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
             else
             {
                 std::ostringstream os;
-                const char *nss = GetPrimTypeName(nstype->tid);
-                if(!nss)
-                    nss = "(unnamed)";
-                os << "Failed to resolve namespaced symbol " << nss << "::" << nss;
+                os << "Failed to resolve namespaced symbol " << getTypeName(ft.rt(), nstype->tid) << "::" << ft.str(keyval.u.str).s;
                 node->setError(ft.sp(), os.str().c_str());
                 return;
             }

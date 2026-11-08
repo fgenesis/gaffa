@@ -56,60 +56,113 @@ static const char *getLabel(HLNodeType t)
 #include <sstream>
 
 
+static void buildTypeName(std::ostringstream& os, const Runtime& rt, Type t);
+
+static void buildTypeNames(std::ostringstream& os, const Runtime& rt, const Type *ts, size_t n, const char *sep)
+{
+    for(size_t i = 0; i < n; ++i)
+    {
+        if(i)
+            os << sep;
+        buildTypeName(os, rt, ts[i]);
+    }
+}
+
+// Elements of a type list, or t itself if it's not a list
+static void buildListElems(std::ostringstream& os, const Runtime& rt, Type t)
+{
+    const TDesc *d = rt.tr.lookupDesc(t);
+    if(d && d->kind == TKIND_TYPELIST)
+        buildTypeNames(os, rt, d->types(), d->n, ", ");
+    else
+        buildTypeName(os, rt, t);
+}
+
+static void buildSubtyped(std::ostringstream& os, const Runtime& rt, const TDesc *d)
+{
+    const Type *ts = d->types();
+    switch(ts[0])
+    {
+        case PRIMTYPE_FUNC: // (func, params, rets)
+        {
+            os << "func(";
+            buildListElems(os, rt, ts[1]);
+            os << ")";
+            const TDesc *rd = rt.tr.lookupDesc(ts[2]);
+            if(!(rd && rd->kind == TKIND_TYPELIST && !rd->n))
+            {
+                os << " -> ";
+                buildListElems(os, rt, ts[2]);
+            }
+            return;
+        }
+        case PRIMTYPE_ARRAY: os << "Array"; break;
+        case PRIMTYPE_TABLE: os << "Table"; break;
+        default:
+        {
+            const char *pn = GetPrimTypeName(ts[0]);
+            os << (pn ? pn : "?");
+        }
+    }
+    os << "(";
+    buildTypeNames(os, rt, ts + 1, d->n - 1, ", ");
+    os << ")";
+}
+
+// Type names in script syntax: Const(Table(string, int))?, func(int, float) -> bool, {x=float, y=float}, (A, B), A | B
 static void buildTypeName(std::ostringstream& os, const Runtime& rt, Type t)
 {
-    if(t < PRIMTYPE_MAX)
-    {
-        prim:
-        os << GetPrimTypeName(t);
-    }
-    else if(const TDesc *d = rt.tr.lookupDesc(t))
-    {
-        if(d->h.tid < PRIMTYPE_MAX)
-        {
-            os << GetPrimTypeName(d->h.tid);
-        }
-        else
-        {
-            os << "TODO:TDesc";
-        }
-    }
-    else
-    {
-        TypeIdList tl = rt.tr.aslist(t);
-        if(tl.kind == TKIND_SUBTYPED)
-        {
-            buildTypeName(os, rt, tl.ptr[1]);
+    if(t & TYPEBIT_CONST)
+        os << "Const(";
 
-            os << "<";
-            for(size_t i = 1; i < tl.n; ++i)
-            {
-                buildTypeName(os, rt, tl.ptr[i]);
-                if(i < tl.n - 1)
-                    os << ",";
-            }
-            os << ">";
-        }
-        else
+    const Type base = t & TYPEBASE_MASK;
+    const TDesc *d = rt.tr.lookupDesc(base);
+    if(!d)
+        os << "<unknown type " << base << ">";
+    else switch(d->kind)
+    {
+        case TKIND_PRIMTYPE:
         {
+            const char *pn = GetPrimTypeName(d->h.tid);
+            os << (pn ? pn : "?");
+            break;
+        }
+        case TKIND_TYPELIST:
             os << "(";
-            for(size_t i = 0; i < tl.n; ++i)
-            {
-                buildTypeName(os, rt, tl.ptr[i]);
-                if(i < tl.n - 1)
-                    os << ",";
-            }
+            buildTypeNames(os, rt, d->types(), d->n, ", ");
             os << ")";
+            break;
+        case TKIND_UNION:
+            buildTypeNames(os, rt, d->types(), d->n, " | ");
+            break;
+        case TKIND_STRUCT:
+        {
+            const sref *names = d->names();
+            os << "{";
+            for(tsize i = 0; i < d->n; ++i)
+            {
+                if(i)
+                    os << ", ";
+                os << rt.sp.lookup(names[i]).s << "=";
+                buildTypeName(os, rt, d->types()[i]);
+            }
+            os << "}";
+            break;
         }
+        case TKIND_SUBTYPED:
+            buildSubtyped(os, rt, d);
+            break;
     }
 
+    if(t & TYPEBIT_CONST)
+        os << ")";
     if(t & TYPEBIT_OPTIONAL)
         os << "?";
     if(t & TYPEBIT_VARIADIC)
         os << "...";
 }
 
-static std::string getTypeName(const Runtime& rt, Type t)
+std::string getTypeName(const Runtime& rt, Type t)
 {
     std::ostringstream os;
     buildTypeName(os, rt, t);
