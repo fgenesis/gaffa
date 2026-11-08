@@ -71,7 +71,6 @@ public:
         TOK_VAR,    // var
         TOK_FOR,    // for
         TOK_WHILE,  // while
-        TOK_CONST,  // const
         TOK_BREAK,  // break
         TOK_RETURN, // return
         TOK_CONTINUE,// continue

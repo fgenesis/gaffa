@@ -52,18 +52,26 @@ public:
 
 // generated from TDesc
 // A DType is the runtime side of a TDesc and can be passed around as an object of type 'type'
+// Each TDesc has one base DType (TDesc::h.dtype, tid without modifier bits).
+// Variants (eg. const T) are separate DTypes with modifier bits in tid that share the TDesc.
+// Objects always have a base DType as their dtype.
 class DType : public GCobj
 {
 private:
-    DType(const TDesc *desc, DType *typeType);
+    DType(const TDesc *desc, DType *typeType, Type tid);
 public:
     // desc = Descriptor for type to create, typeType = runtime instance of the type 'type'
     // (Types are instances of type 'type')
     static DType *GCNew(GC& gc, const TDesc *desc, DType *typeType);
-    const Type tid; // Allocated by TypeRegistry, or a PRIMTYPE_*
-    const TDesc *tdesc;
-    Table fieldIndices;
+    // Variant of base with modifier bits (TYPEBIT_*) set. Use TypeRegistry::asObj() instead of calling this directly.
+    static DType *GCNewVariant(GC& gc, DType *base, Type bits);
+    const Type tid; // Allocated by TypeRegistry, or a PRIMTYPE_*; may have TYPEBIT_* set
+    const TDesc * tdesc;
+    Table fieldIndices; // only used in the base DType
+    DType *nextVariant; // singly linked list of variants, starting at the base DType
     tsize numfields() const { return tdesc->size(); }
+    inline DType *base() const { return tdesc->h.dtype; }
+    inline bool isBase() const { return this == tdesc->h.dtype; }
 };
 
 inline Type DObj::dynamicType() const { return dtype->tid; }

@@ -53,3 +53,7 @@ func T:[ ](uint k) -> uint { return k }
 func T.if() {}
 ### operator name at end of file
 func T.+
+### const attribute without parameters
+func [const] f() return 1
+### unknown function attribute
+func [foo] f(int i) return i

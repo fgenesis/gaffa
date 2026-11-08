@@ -242,6 +242,8 @@ static void mlirDumpNode(MLDumper& dump, const MLNode *node, size_t idx)
     if(size_t nparams = mlirNumParams(cmd))
         for(size_t i = 0; i < nparams; ++i)
             dump.tree.write(node->m.p[i]);
+    if(cmd == ML_FUNC)
+        dump.tree.write(node->m.flags);
 
     // dump each child. via queue because that way all child nodes for any node are sequential in memory,
     // plus there's no way that while decoding deep nesting could cause a stack overflow.
@@ -667,6 +669,7 @@ dolist:
             MLNode *ch = &nodes[s.chIdx];
 
             const size_t idx = indexOf(dst);
+            dst->m.flags = (f.hdr->flags & FUNCFLAGS_CONST) ? MLFUNC_CONST : 0;
             const u32 firstvar = _decllist(q, ch, fh->paramlist, sp); // may reallocate nodes[]
             nodes[idx].m.p[0] = firstvar;
 
@@ -992,7 +995,7 @@ struct MLFoldTracker
     MLIR &mlir;
     VM &vm;
     Symstore& syms;
-    SymTable &env;
+    SymTable &externalEnv;
     bool ok;
     // -----
 
@@ -1019,8 +1022,10 @@ struct MLFoldTracker
         u32 varidx;   // var that a named function declaration assigns to, or NONE
         Type declrets; // type list; PRIMTYPE_AUTO if not declared
         Type deducedrets; // type list; PRIMTYPE_AUTO until the first return
+        SymTable *imports; // NULL until the function imports something
     };
     std::vector<FoldFunc> foldFuncs;
+    SymTable *fileImports; // file scope import layer; NULL until something is imported there
 
     // Per var: index in MLIR::funcs[] of the function that has it as a local, and its slot there
     std::vector<u32> varOwner;
@@ -1042,6 +1047,8 @@ struct MLFoldTracker
     inline TypeRegistry& tr() { return rt().tr; }
     inline Strp str(sref id) { return sp().lookup(id); }
     inline Str putstr(const char *s) { return sp().put(s); }
+    SymTable& symbols(); // innermost import layer, chained to the outer ones and finally the externals
+    SymTable *importLayer(); // import layer of the current scope, created on demand
 
     const DFunc *getObjectOperator(const GCobj *obj, OperatorId op);
     const DFunc *getCallable(const GCobj *obj);
@@ -1083,6 +1090,28 @@ void MLFoldTracker::warn(const MLNode* where, const char *msg)
     printf("(%s:%u): Warning: %s\n", filename.c_str(), line, msg);
 }
 
+SymTable& MLFoldTracker::symbols()
+{
+    for(size_t i = foldFuncs.size(); i--; )
+        if(foldFuncs[i].imports)
+            return *foldFuncs[i].imports;
+    return fileImports ? *fileImports : externalEnv;
+}
+
+SymTable *MLFoldTracker::importLayer()
+{
+    SymTable **layer = foldFuncs.empty() ? &fileImports : &foldFuncs.back().imports;
+    if(!*layer)
+    {
+        SymTable *outer = &symbols();
+        SymTable *st = SymTable::GCNew(gc()); // TODO GC: not rooted while folding
+        if(st)
+            st->next = outer;
+        *layer = st;
+    }
+    return *layer;
+}
+
 bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const MLNode* where, const MLNode* decl)
 {
     if(vm.rt->tr.isListCompatible(sub, reference))
@@ -1090,7 +1119,10 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
 
     // oh no. it's error time
     std::ostringstream os;
-    os << what << " has mismatched type";
+    if((sub & TYPEBIT_CONST) && vm.rt->tr.isListCompatible(sub & ~TYPEBIT_CONST, reference))
+        os << what << " is Const and can't be used as non-Const";
+    else
+        os << what << " has mismatched type";
     error(where, os.str().c_str());
     error(decl, "(type should be same as here)");
     return false;
@@ -1099,7 +1131,7 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
 const DFunc *MLFoldTracker::getObjectOperator(const GCobj *obj, OperatorId op)
 {
     sref method = rt().cs.operatorNames[op];
-    const Val *v = env.lookupObjectMethod(obj, method);
+    const Val *v = symbols().lookupObjectMethod(obj, method);
     return v ? v->asFunc() : NULL;
 }
 
@@ -1267,7 +1299,7 @@ static void preFoldExternals(MLExternal *ext, size_t N, MLFoldTracker& ft)
     for(size_t i = 0; i < N; ++i)
     {
         MLExternal& e = ext[i];
-        const Val *val = ft.env.lookupSymbol(e.name);
+        const Val *val = ft.symbols().lookupSymbol(e.name);
         e.val = val ? *val : _Notype(); // PRIMTYPE_NOTYPE is never valid for externals
     }
 }
@@ -1418,6 +1450,10 @@ static Type funcType(MLFoldTracker& ft, MLNode *func, Type rets)
     std::vector<Type> ts(nargs);
     for(size_t i = 0; i < nargs; ++i)
         ts[i] = ft.mlir.vars[firstvar + i].u.local.type;
+    if(nargs && (func->m.flags & MLFUNC_CONST))
+        if(DType *d = ft.tr().asObj(ts[0]))
+            if(DType *c = ft.tr().mkconst(d))
+                ts[0] = c->tid;
     Type params = ft.tr().mklistDesc(ts.data(), ts.size())->id();
     return ft.tr().mkfuncDesc(params, rets)->id();
 }
@@ -1433,9 +1469,9 @@ struct ValueSlot
 static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl);
 
 // Like fitValue(), but without converting or reporting anything
-static bool canFit(const ValueSlot& vs, Type t)
+static bool canFit(MLFoldTracker& ft, const ValueSlot& vs, Type t)
 {
-    if(vs.t == t || (t == PRIMTYPE_ANY && vs.t != PRIMTYPE_NIL))
+    if(ft.tr().isCompatible(vs.t, t) || (t == PRIMTYPE_ANY && vs.t != PRIMTYPE_NIL))
         return true;
     Val tmp;
     return vs.single && vs.expr->isconst() && convertImplicit(&tmp, vs.expr->asVal(), t);
@@ -1508,7 +1544,7 @@ static bool applyOpResult(OpResult res, const Val& v)
 static const DFunc *lookupOperator(MLFoldTracker& ft, MLNode *L, size_t arity, sref name, bool *nonfunc)
 {
     const Type ns = L->type();
-    const Val *opr = ft.env.lookupInNamespace(ns, name);
+    const Val *opr = ft.symbols().lookupInNamespace(ns, name);
     *nonfunc = opr && !opr->asFunc();
     const DFunc *func = opr ? opr->asFunc() : NULL;
     if(func && arity == 2 && L[1].type() != ns)
@@ -1517,8 +1553,8 @@ static const DFunc *lookupOperator(MLFoldTracker& ft, MLNode *L, size_t arity, s
         const ValueSlot rv = { &L[1], L[1].type(), true };
         FuncTypes fty;
         if(ft.tr().lookupFunc(&fty, func->info.functype) && fty.params.n == 2
-            && !canFit(rv, fty.params.ptr[1]) && canFit(lv, rv.t))
-            if(const Val *o2 = ft.env.lookupInNamespace(rv.t, name))
+            && !canFit(ft, rv, fty.params.ptr[1]) && canFit(ft, lv, rv.t))
+            if(const Val *o2 = ft.symbols().lookupInNamespace(rv.t, name))
                 if(const DFunc *f2 = o2->asFunc())
                     func = f2;
     }
@@ -1678,7 +1714,14 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
 
         case ML_FUNC:
         {
-            MLFoldTracker::FoldFunc ff = { (u32)ft.mlir.indexOf(node), MLFoldTracker::NONE, PRIMTYPE_AUTO, PRIMTYPE_AUTO };
+            MLFoldTracker::FoldFunc ff =
+            {
+                (u32)ft.mlir.indexOf(node),
+                (u32)MLFoldTracker::NONE,
+                PRIMTYPE_AUTO,
+                PRIMTYPE_AUTO,
+                NULL
+            };
             if(parent->m.cmd == ML_NAMEDECL && node == parent->firstChild() + 1 && !parent->firstChild()->aslist().n)
                 ff.varidx = ft.mlir.symToVarRemap[parent->m.p[1]];
             ft.foldFuncs.push_back(ff);
@@ -1819,7 +1862,7 @@ static bool balanceValues(MLFoldTracker& ft, const MLNode *where, size_t nfixed,
 // decl is where t comes from, for errors.
 static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl)
 {
-    if(vs.t == t)
+    if(ft.tr().isCompatible(vs.t, t))
         return true;
     if(t == PRIMTYPE_ANY && vs.t != PRIMTYPE_NIL) // any holds any value, except nil
         return true;
@@ -2146,7 +2189,7 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
                 return;
             }
 
-            if(const Val *val = ft.env.lookupInNamespace(nstype->tid, keyval.u.str))
+            if(const Val *val = ft.symbols().lookupInNamespace(nstype->tid, keyval.u.str))
             {
                 printf("%s::%s replaced with constant from env\n",
                     GetPrimTypeName(val->type), ft.str(keyval.u.str).s);
@@ -2591,13 +2634,12 @@ static void debugPrintFuncInfo(MLFoldTracker& ft, const MLFunc& f)
         debugPrintVar(ft, i, "upval", f.upvals[i].varidx);
 }
 
-bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
+bool MLIR::fold(VM& vm, Symstore& syms, SymTable &extSyms)
 {
-    SymTable *localenv = SymTable::GCNew(vm.rt->gc);
-    localenv->next = &env;
     // TODO: also add an "exported" env; because we don't want to export ALL the local namedecls
-    MLFoldTracker ft = { *this, vm, syms, *localenv, true };
+    MLFoldTracker ft = { *this, vm, syms, extSyms, true };
     ft.assignMode = MLFoldTracker::ASSIGN_EXACT;
+    ft.fileImports = NULL;
 
     ft.typesrc.resize(nodes.size());
     preFoldExternals(externals.data(), externals.size(), ft);
@@ -2632,7 +2674,7 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &env)
         assert(ft.nextFunc == funcs.size());
     }
 
-    printf("Local symtol table: %u entries\n", localenv->size());
+    printf("File import table: %u entries\n", ft.fileImports ? (unsigned)ft.fileImports->size() : 0u);
 
     size_t N = funcs.size();
     printf("MLIR: Broke tree into %u functions:\n", (unsigned)N);

@@ -22,8 +22,9 @@ enum TypeBits
 {
     TYPEBIT_OPTIONAL = 1u << (sizeof(Type) * 8 - 1), // T -> T?
     TYPEBIT_VARIADIC = 1u << (sizeof(Type) * 8 - 2), // T -> T...
+    TYPEBIT_CONST    = 1u << (sizeof(Type) * 8 - 3), // T -> const T
 
-    TYPEBASE_MASK = ~(TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC)
+    TYPEBASE_MASK = ~(TYPEBIT_OPTIONAL | TYPEBIT_VARIADIC | TYPEBIT_CONST)
 };
 
 // TypeKind changes the semantic meaning of a type.
@@ -60,7 +61,7 @@ enum { MAX_SUBTYPES = 2 };
 struct _FieldDefault
 {
     _AnyValU u; // This is NOT ValU and instead is split into two to make sure that there's
-    PrimType t;     // no unused padding in TDesc that could interfere with deduplication.
+    PrimType t; // no unused padding in TDesc that could interfere with deduplication.
     tsize idx;
 };
 
@@ -175,8 +176,12 @@ public:
 
 
 
-    DType *asObj(Type t) const;
-    DType *asObj(const TDesc *td) const;
+    DType *asObj(Type t) const; // modifier bits in t select (and create on demand) a variant DType
+    DType *asObj(const TDesc *td) const; // always the base DType
+
+    // Const(T): T with TYPEBIT_CONST for mutable reference types (and unions), T itself otherwise.
+    // NULL if t is a plain type list.
+    DType *mkconst(DType *t) const;
 
     // Pointer to list start if plain typelist, or to single element
     TypeIdList aslist(Type t) const;
@@ -199,6 +204,9 @@ public:
     // (A, B?) is not compatible with (A, B) since B? doesn't guarantee a valid B
 
     bool isListCompatible(Type sub, Type bigger) const;
+
+    // Single types: same type, or T fits Const(T) (but not the other way round)
+    bool isCompatible(Type sub, Type bigger) const;
 
     FORCEINLINE void mark(Type t) { if(t > PRIMTYPE_MAX) _dedup.mark(t - PRIMTYPE_MAX); }
 

@@ -27,6 +27,8 @@ enum HLFlags
     IDENTFLAGS_RHS          = 0x10, // Identifier is in a context of being evaluated
     // Neither LHS/RHS set: Identifier without a specific role
 
+    FUNCFLAGS_CONST         = 0x20, // Function header: [const] attribute, first param accepts Const(T)
+
     HLFLAG_KNOWNTYPE        = 0x40, // Runtime type has been deducted or is known somehow
     HLFLAG_NOEXTMEM         = 0x80, // Node doesn't use any external memory, don't try to free on deletion
 };

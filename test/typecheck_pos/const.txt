@@ -1,0 +1,48 @@
+-- Const(T): T fits Const(T); Const of a value type is the type itself
+### T fits Const(T)
+type CT = Const(table)
+func f(table t) { CT c = t }
+### Const(Const(T)) is Const(T)
+type CT = Const(table)
+type CT2 = Const(CT)
+func f(CT a) { CT2 b = a
+CT c = b }
+### Const of a value type is the type itself
+type CI = Const(int)
+int i = 1
+CI j = i
+int k = j
+### T as Const(T) argument and return value
+type CT = Const(table)
+func g(CT x) return x
+func f(table t) { CT r = g(t) }
+### return T from a function declared to return Const(T)
+type CT = Const(table)
+func f(table x) -> CT return x
+### Const(T) fits any
+type CT = Const(table)
+func f(CT c) { any a = c }
+### assign T to a Const(T) variable
+type CT = Const(table)
+func f(table t) { CT c := t
+c = t }
+### [const] function accepts Const(T) as first argument
+type CT = Const(table)
+func [const] g(table x) return 1
+func f(CT c) { var r = g(c) }
+### [const] function accepts T as first argument
+func [const] g(table x) return 1
+func f(table c) { var r = g(c) }
+### first param of a [const] function is plain T inside
+func [const] g(table x) { table y = x }
+### [const] closure
+type CT = Const(table)
+var g = func [const] (table x) return 1
+func f(CT c) { var r = g(c) }
+### [const] recursion
+type CT = Const(table)
+func [const] g(table x) -> int return g(x)
+func f(CT c) { int r = g(c) }
+### [const] on a value type param changes nothing
+func [const] g(int i) return i
+int k = g(1)

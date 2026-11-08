@@ -90,6 +90,11 @@ MUL PLUS CALL 1 2 -3 PLUS a b 3 4
 
 union MLNode;
 
+enum MLFuncFlags
+{
+    MLFUNC_CONST = 0x01, // [const]: the function type has Const(T) as first param, the param var stays T
+};
+
 struct MLSub
 {
     MLNode *ch; // index of first child
@@ -117,7 +122,8 @@ union MLNode
         u32 chOffs; // must be usable together with hl.node, HL_LIST, others. _ML_VAL conflicts.
         byte cmd;
         byte nch;   // number of direct child nodes. Optional, but makes LLIR generation easier.
-        // 2 unused bytes
+        byte flags; // ML_FUNC: MLFuncFlags; unused otherwise
+        // 1 unused byte
     } m;
     struct
     {
@@ -245,7 +251,7 @@ public:
 
 
     // Typecheck and optimize the tree.
-    bool fold(VM& vm, Symstore& syms, SymTable &env);
+    bool fold(VM& vm, Symstore& syms, SymTable &extSyms);
 
     size_t indexOf(const MLNode *node) const;
     size_t indexOf(const MLVar *v) const;

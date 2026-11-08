@@ -76,7 +76,6 @@ static const Keyword Keywords[] =
     { "var",       Lexer::TOK_VAR      },
     { "for",       Lexer::TOK_FOR      },
     { "while",     Lexer::TOK_WHILE    },
-    { "const",     Lexer::TOK_CONST    },
     { "break",     Lexer::TOK_BREAK    },
     { "return",    Lexer::TOK_RETURN   },
     { "continue",  Lexer::TOK_CONTINUE },
@@ -434,7 +433,6 @@ bool Lexer::IsReserved(TokenType tt)
 {
     switch(tt)
     {
-        case TOK_CONST:
         case TOK_LIKE:
         case TOK_DO:
         case TOK_TRY:

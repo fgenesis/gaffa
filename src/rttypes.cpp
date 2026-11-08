@@ -170,6 +170,7 @@ void reg_type_type(RTReg& r)
     DType *d = DType::GCNew(r.gc, desc, dummy);
     d->dtype = d;
     desc->h.dtype = d;
+    assert(d->dtype->tdesc); // This must be present for the type system to be sound
 
     r.types.type = d;
 
@@ -372,6 +373,25 @@ static int u_time(VM *vm, Val *v)
     return 1;
 }
 
+static int u_const(VM *vm, Val *v)
+{
+    DType *t = v->asDType();
+    if(!t)
+        return RTE_INCOMPATIBLE_TYPE;
+
+    DType *tc = vm->rt->tr.mkconst(t);
+    if(!tc)
+        return RTE_INCOMPATIBLE_TYPE;
+
+    *v = Val(tc);
+    return 1;
+}
+
+static void reg_builtins(RTReg& r)
+{
+    const Type type1[] = { PRIMTYPE_TYPE };
+    r.regfunc(NULL, "Const", u_const, type1, 1, type1, 1, FuncInfo::Pure);
+}
 
 static void reg_test(RTReg& r)
 {
@@ -397,6 +417,7 @@ void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)
     reg_type_symtab(r);
     reg_type_any(r);
     reg_constants(r);
+    reg_builtins(r);
     reg_test(r);
 
     OpReg opr = { syms, gc, sp, tr };

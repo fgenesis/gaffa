@@ -716,6 +716,7 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
 
     unsigned flags = 0;
 
+    const Lexer::Token attribtok = curtok;
     if(tryeat(Lexer::TOK_LSQ))
         _funcattribs(&flags);
 
@@ -789,6 +790,8 @@ HLNode* Parser::_functiondef(HLNode **pname, HLNode **pnamespac)
     }
 
     h->u.fhdr.paramlist = params;
+    if((flags & FUNCFLAGS_CONST) && !params)
+        errorAt(attribtok, "Function attribute 'const' needs a first parameter (or self)");
 
     if(tryeat(Lexer::TOK_RARROW))
         h->u.fhdr.rettypes = _funcreturns();
@@ -928,14 +931,16 @@ void Parser::_funcattribs(unsigned *pfuncflags)
     // '[' was just eaten
     const Lexer::Token opening = prevtok;
     const Str pure = this->strpool.put("pure");
+    const Str Const = this->strpool.put("const");
 
     while(match(Lexer::TOK_IDENT))
     {
-        Str s = _identStr(curtok);
-        if(pure.id && s.id == pure.id)
+        if(Const.id && _identStr(curtok).id == Const.id)
+            *pfuncflags |= FUNCFLAGS_CONST;
+        else if(pure.id && _identStr(curtok).id == pure.id)
             errorAtCurrent("Function attribute 'pure' is not implemented yet"); // TODO: *pfuncflags |= FUNCFLAGS_PURE;
         else
-            errorAtCurrent("Expected function attrib: pure");
+            errorAtCurrent("Expected function attrib: pure, const");
 
         advance();
         tryeat(Lexer::TOK_COMMA);

@@ -4,6 +4,7 @@
 DObj::DObj(DType * dty)
     : /*dfields(NULL),*/ nmembers(dty->numfields())
 {
+    assert(dty->isBase());
     this->dtype = dty;
     const _FieldDefault *def = dty->tdesc->defaults();
     const tsize n = dty->tdesc->numdefaults;
@@ -36,21 +37,28 @@ tsize DObj::memberOffset(const Val* pmember) const
 }
 
 // A type is an object of the type 'type'
-DType::DType(const TDesc* desc, DType* typeType)
-    : tid(desc->h.tid), tdesc(desc)
+DType::DType(const TDesc* desc, DType* typeType, Type tid)
+    : tid(tid), tdesc(desc)
     , fieldIndices(PRIMTYPE_STRING, PRIMTYPE_UINT)
+    , nextVariant(NULL)
 {
     this->dtype = typeType;
     assert(typeType->tid == PRIMTYPE_TYPE);
-    assert(!desc->h.dtype); // It's a 1:1 mapping, creating a 2nd instance is a bug
 }
 
 DType* DType::GCNew(GC& gc, const TDesc *desc, DType* typeType)
 {
-    const tsize nfields = typeType->numfields();
-    const size_t sz = sizeof(DType);
-    void *mem = gc_new(gc, sz, PRIMTYPE_TYPE);
-    return mem ? GA_PLACEMENT_NEW(mem) DType(desc, typeType) : NULL;
+    assert(!desc->h.dtype); // The base DType is 1:1 with its TDesc, creating a 2nd instance is a bug
+    void *mem = gc_new(gc, sizeof(DType), PRIMTYPE_TYPE);
+    return mem ? GA_PLACEMENT_NEW(mem) DType(desc, typeType, desc->h.tid) : NULL;
+}
+
+DType* DType::GCNewVariant(GC& gc, DType* base, Type bits)
+{
+    assert(base->isBase());
+    assert(bits && !(bits & TYPEBASE_MASK));
+    void *mem = gc_new(gc, sizeof(DType), PRIMTYPE_TYPE);
+    return mem ? GA_PLACEMENT_NEW(mem) DType(base->tdesc, base->dtype, base->tid | bits) : NULL;
 }
 
 DFunc* DFunc::GCNew(GC& gc)

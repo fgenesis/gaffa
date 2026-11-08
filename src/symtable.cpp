@@ -29,6 +29,7 @@ SymTable* SymTable::GCNew(GC& gc)
 
 void SymTable::addToNamespace(GC& gc, Type ns, sref key, const Val& val)
 {
+    ns &= ~TYPEBIT_CONST; // T and const T share methods
     // Important: Table uses nil and xnil to denote free/unused/tombstone keys.
     // Conveniently, sref is always a valid string, and is never 0, so this can never be nil/xnil.
     static_assert(PRIMTYPE_NIL == 0, "fail");
@@ -47,6 +48,7 @@ void SymTable::addToNamespace(GC& gc, Type ns, sref key, const Val& val)
 
 const Val* SymTable::lookupInNamespace(Type ns, sref key) const
 {
+    ns &= ~TYPEBIT_CONST; // T and const T share methods
     assert(key && ns);
     ValU k;
     k.type = (PrimType)key;

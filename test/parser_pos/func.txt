@@ -86,3 +86,10 @@ var f = func(uint n) return f(n)
 type T = {x=float}
 func T.f(T a) {}
 func T:f() {}
+### const attribute
+func [const] f(table t) return 1
+### const attribute on a method
+type T = { x = 0 }
+func [const] T:get() return self.x
+### const attribute on a closure
+var f = func [const] (table t) return 1

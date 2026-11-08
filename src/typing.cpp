@@ -197,7 +197,33 @@ DType* TypeRegistry::mkprim(PrimType t)
 
 DType *TypeRegistry::asObj(Type t) const
 {
-    return asObj(lookupDesc(t));
+    DType *base = asObj(lookupDesc(t));
+    const Type bits = t & ~TYPEBASE_MASK;
+    if(!base || !bits)
+        return base;
+
+    for(DType *v = base->nextVariant; v; v = v->nextVariant)
+        if(v->tid == t)
+            return v;
+
+    // TODO GC: variants (like base DTypes) aren't marked; keep them alive as long as their base
+    DType *v = DType::GCNewVariant(_dedup.gc, base, bits);
+    if(v)
+    {
+        v->nextVariant = base->nextVariant;
+        base->nextVariant = v;
+    }
+    return v;
+}
+
+DType *TypeRegistry::mkconst(DType *t) const
+{
+    const TDesc *td = t->tdesc;
+    if(td->kind == TKIND_TYPELIST)
+        return NULL;
+    if(td->kind != TKIND_UNION && !isMutableRefType(td->objprimtype))
+        return t;
+    return asObj(t->tid | TYPEBIT_CONST);
 }
 
 DType *TypeRegistry::asObj(const TDesc *td) const
@@ -252,7 +278,27 @@ const TDesc *TypeRegistry::lookupFunc(FuncTypes *ft, Type t) const
 
 bool TypeRegistry::isListCompatible(Type sub, Type bigger) const
 {
-    return sub == bigger; // FIXME
+    if(sub == bigger)
+        return true;
+    const TDesc *ds = lookupDesc(sub);
+    const TDesc *db = lookupDesc(bigger);
+    if(ds && db && ds->kind == TKIND_TYPELIST && db->kind == TKIND_TYPELIST)
+    {
+        if(ds->n != db->n)
+            return false; // FIXME: variadics and optionals, see the examples in typing.h
+        for(tsize i = 0; i < ds->n; ++i)
+            if(!isCompatible(ds->types()[i], db->types()[i]))
+                return false;
+        return true;
+    }
+    return isCompatible(sub, bigger);
+}
+
+bool TypeRegistry::isCompatible(Type sub, Type bigger) const
+{
+    if(sub == bigger)
+        return true;
+    return (bigger & TYPEBIT_CONST) && (sub | TYPEBIT_CONST) == bigger;
 }
 
 // This is mainly for figuring out the size before concatenating typelists.

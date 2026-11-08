@@ -1,0 +1,31 @@
+-- Const(T) doesn't fit T
+### Const(T) declared as T
+type CT = Const(table)
+func f(CT c) { table t = c }
+### Const(T) as T argument
+type CT = Const(table)
+func g(table x) return x
+func f(CT c) { var r = g(c) }
+### Const(T) returned as T
+type CT = Const(table)
+func f(CT x) -> table return x
+### Const(T) through a multi-decl
+type CT = Const(table)
+func f(CT c) { var x, y = c, 1
+table t = x }
+### Const(T) assigned to T
+type CT = Const(table)
+func f(CT c, table t0) { table t := t0
+t = c }
+### Const(T) to a function without [const]
+type CT = Const(table)
+func g(table x) return 1
+func f(CT c) { var r = g(c) }
+### [const] only applies to the first param
+type CT = Const(table)
+func [const] g(table x, table y) return 1
+func f(CT c) { var r = g(c, c) }
+### Const(T) to a closure without [const]
+type CT = Const(table)
+var g = func (table x) return 1
+func f(CT c) { var r = g(c) }
