@@ -938,7 +938,7 @@ void Parser::_funcattribs(unsigned *pfuncflags)
         if(Const.id && _identStr(curtok).id == Const.id)
             *pfuncflags |= FUNCFLAGS_CONST;
         else if(pure.id && _identStr(curtok).id == pure.id)
-            errorAtCurrent("Function attribute 'pure' is not implemented yet"); // TODO: *pfuncflags |= FUNCFLAGS_PURE;
+            *pfuncflags |= FUNCFLAGS_PURE;
         else
             errorAtCurrent("Expected function attrib: pure, const");
 

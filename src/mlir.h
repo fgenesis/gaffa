@@ -90,9 +90,10 @@ MUL PLUS CALL 1 2 -3 PLUS a b 3 4
 
 union MLNode;
 
-enum MLFuncFlags
+enum MLFuncFlags // must fit in a byte
 {
     MLFUNC_CONST = 0x01, // [const]: the function type has Const(T) as first param, the param var stays T
+    MLFUNC_PURE  = 0x02, // [pure]
 };
 
 struct MLSub

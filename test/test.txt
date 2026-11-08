@@ -169,4 +169,5 @@
 
 --func int.+_(int a, int b) -> int {}
 
-func T:() () {}
+func [const] int:zero() { return +0 }
+

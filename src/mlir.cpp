@@ -471,14 +471,8 @@ void MLIR::visit(MLVisitorPre pre, MLVisitorPost post, void *ud)
     }
 }
 
-/*static void invalidatePost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
-{
-    node->m.cmd = _ML_DEAD;
-}*/
-
 void MLNode::invalidate()
 {
-    //visitRec(NULL, invalidatePost, NULL, this, NULL);
     m.cmd = _ML_DEAD;
 }
 
@@ -692,8 +686,13 @@ dolist:
             assert(s.n == 3);
             MLNode *ch = &nodes[s.chIdx];
 
+            unsigned ff = 0;
             const size_t idx = indexOf(dst);
-            dst->m.flags = (f.hdr->flags & FUNCFLAGS_CONST) ? MLFUNC_CONST : 0;
+            if(f.hdr->flags & FUNCFLAGS_CONST)
+                ff |= MLFUNC_CONST;
+            if(f.hdr->flags & FUNCFLAGS_PURE)
+                ff |= MLFUNC_PURE;
+            dst->m.flags = (byte)ff;
             const u32 firstvar = _decllist(q, ch, fh->paramlist, sp); // may reallocate nodes[]
             nodes[idx].m.p[0] = firstvar;
 
@@ -1966,6 +1965,8 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
                         te->setError(ft.sp(), os.str().c_str());
                     }
                 }
+                else if(te->m.cmd == _ML_ERROR)
+                    v->u.local.type = PRIMTYPE_ANY; // already reported; any avoids follow-up errors
                 else
                 {
                     std::ostringstream os;
@@ -2438,21 +2439,24 @@ static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
     foldNode(node, ft);
 
-    if(parent && parent->m.cmd == ML_FUNC && node == parent->firstChild())
+    if(parent && parent->m.cmd == ML_FUNC)
     {
-        // Special case: Just finished the parameter list of a function.
-        // Add those to the list of known locals before handling the rest of the function.
-        const size_t localid = parent->m.p[0];
-        doDecl(ft, localid, *parent, *node, NULL);
-    }
-    else if(parent && parent->m.cmd == ML_FUNC && node == parent->firstChild() + 1)
-    {
-        // Just finished the declared return types. Known before the body, so the body can recurse.
-        MLFoldTracker::FoldFunc& ff = ft.foldFuncs.back();
-        assert(ff.nodeidx == ft.mlir.indexOf(parent));
-        ff.declrets = typeListFromTypeExprs(ft, node);
-        if(ff.declrets != PRIMTYPE_AUTO && ff.varidx != MLFoldTracker::NONE)
-            ft.mlir.vars[ff.varidx].u.local.type = funcType(ft, parent, ff.declrets);
+        if(node == parent->firstChild())
+        {
+            // Special case: Just finished the parameter list of a function.
+            // Add those to the list of known locals before handling the rest of the function.
+            const size_t localid = parent->m.p[0];
+            doDecl(ft, localid, *parent, *node, NULL);
+        }
+        else if(node == parent->firstChild() + 1)
+        {
+            // Just finished the declared return types. Known before the body, so the body can recurse.
+            MLFoldTracker::FoldFunc& ff = ft.foldFuncs.back();
+            assert(ff.nodeidx == ft.mlir.indexOf(parent));
+            ff.declrets = typeListFromTypeExprs(ft, node);
+            if(ff.declrets != PRIMTYPE_AUTO && ff.varidx != MLFoldTracker::NONE)
+                ft.mlir.vars[ff.varidx].u.local.type = funcType(ft, parent, ff.declrets);
+        }
     }
 }
 

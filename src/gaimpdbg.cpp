@@ -118,7 +118,13 @@ static void buildTypeName(std::ostringstream& os, const Runtime& rt, Type t)
     const Type base = t & TYPEBASE_MASK;
     const TDesc *d = rt.tr.lookupDesc(base);
     if(!d)
-        os << "<unknown type " << base << ">";
+    {
+        const char *pn = base < PRIMTYPE_MAX ? GetPrimTypeName(base) : NULL; // eg. auto has no TDesc
+        if(pn)
+            os << pn;
+        else
+            os << "<unknown type " << base << ">";
+    }
     else switch(d->kind)
     {
         case TKIND_PRIMTYPE:

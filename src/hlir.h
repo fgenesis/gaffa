@@ -28,8 +28,8 @@ enum HLFlags
     // Neither LHS/RHS set: Identifier without a specific role
 
     FUNCFLAGS_CONST         = 0x20, // Function header: [const] attribute, first param accepts Const(T)
+    FUNCFLAGS_PURE          = 0x40, // Function header: [pure] attribute
 
-    HLFLAG_KNOWNTYPE        = 0x40, // Runtime type has been deducted or is known somehow
     HLFLAG_NOEXTMEM         = 0x80, // Node doesn't use any external memory, don't try to free on deletion
 };
 
@@ -440,9 +440,6 @@ struct HLNode
 
     bool isconst() const;
     bool iscall() const;
-
-    bool isknowntype() const { return flags & HLFLAG_KNOWNTYPE; }
-    void setknowntype(Type tid);
 
     void makeconst(GC& gc, const Val& val);
     void clear(GC& gc);
