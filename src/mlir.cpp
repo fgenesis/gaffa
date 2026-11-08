@@ -420,32 +420,55 @@ MLVar* MLIR::getVarFromSymid(size_t symid)
     return &vars[idx];
 }
 
-static void visitRec(PodArray<MLNode>& nodes, MLVisitorPre pre, MLVisitorPost post, void *ud, u32 nodeidx, u32 parentidx)
+struct MLVisitFrame
 {
-    // Careful: Visiting may:
-    // 1) reallocate nodes[] -> don't keep pointers
-    // 2) Morph nodes into something else -> don't keep any values like #children, either
-    MLPreVisitResult vis { VISIT_CONTINUE, 0 };
-    if(pre)
-        vis = pre(&nodes[nodeidx], &nodes[parentidx], ud);
+    u32 node, parent;
+    u32 firstChild, nch, next; // children, read once after pre() ran; next = next child to enter
+    uintptr_t aux; // from pre(), for post()
+};
 
-    {
-        MLNode *node = &nodes[nodeidx];
-        if(size_t nch = node->numchildren())
-        {
-            size_t firstChildIdx = nodeidx + node->m.chOffs;
-            for(size_t i = 0; i < nch; ++i)
-                visitRec(nodes, pre, post, ud, firstChildIdx + i, nodeidx);
-        }
-    }
-
-    if(post)
-        post(&nodes[nodeidx], &nodes[parentidx], ud, vis.aux);
-}
-
+// Depth-first with an explicit stack instead of recursion: long operator chains make very deep trees.
+// Careful: Visiting may:
+// 1) reallocate nodes[] -> don't keep pointers
+// 2) Morph nodes into something else -> a node's children are read once, after its pre() ran
 void MLIR::visit(MLVisitorPre pre, MLVisitorPost post, void *ud)
 {
-    visitRec(nodes, pre, post, ud, 0, NULL);
+    PodArray<MLVisitFrame> stack;
+    u32 nodeidx = 0, parentidx = 0; // the root is its own parent
+    for(;;)
+    {
+        MLPreVisitResult vis = { VISIT_CONTINUE, 0 };
+        if(pre)
+            vis = pre(&nodes[nodeidx], &nodes[parentidx], ud);
+
+        const MLNode *node = &nodes[nodeidx];
+        const u32 nch = (u32)node->numchildren();
+        const MLVisitFrame f = { nodeidx, parentidx, nch ? u32(nodeidx + node->m.chOffs) : 0, nch, 0, vis.aux };
+        MLVisitFrame *pf = stack.push_back(gc, f);
+        assert(pf); // TODO: handle alloc fail
+        (void)pf;
+
+        // Go to the next child of the innermost unfinished node, finishing nodes along the way
+        for(;;)
+        {
+            MLVisitFrame& top = stack.back();
+            if(top.next < top.nch)
+            {
+                parentidx = top.node;
+                nodeidx = top.firstChild + top.next;
+                ++top.next;
+                break;
+            }
+            const MLVisitFrame done = stack.pop_back();
+            if(post)
+                post(&nodes[done.node], &nodes[done.parent], ud, done.aux);
+            if(stack.empty())
+            {
+                stack.dealloc(gc);
+                return;
+            }
+        }
+    }
 }
 
 /*static void invalidatePost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
