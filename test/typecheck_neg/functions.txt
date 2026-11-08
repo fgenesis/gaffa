@@ -66,3 +66,5 @@ var y = f("hi")
 ### nil is not a type
 -- use '-> void' for no return values
 func f() -> nil {}
+### Method on unresolved external
+func T:() () {}

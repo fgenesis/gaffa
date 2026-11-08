@@ -51,7 +51,7 @@ public:
     FORCEINLINE void pop_n(tsize n) { assert(n <= sz); sz -= n; }
 
     FORCEINLINE T& back() { assert(sz); return data()[sz-1]; }
-    FORCEINLINE const T& back() const { assert(sz); return arr[sz-1]; }
+    FORCEINLINE const T& back() const { assert(sz); return data()[sz-1]; }
 
     // Returns pointer to n free slots
     FORCEINLINE T *alloc_n_exact(GC& gc, tsize n)

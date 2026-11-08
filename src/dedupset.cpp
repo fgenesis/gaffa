@@ -139,7 +139,7 @@ sref Dedup::_finishset(HBlock& hb, HKey& k)
     const sref ref = _indexof(hb);
     assert(ref >= 2);
     k.ref = ref;
-    if(!_skipAtStart) printf("Strings %p [%u] = '%s'\n", this, ref, get(ref).p);
+    //if(!_skipAtStart) printf("Strings %p [%u] = '%s'\n", this, ref, get(ref).p);
     return ref;
 }
 
@@ -327,7 +327,7 @@ Dedup::HKey* Dedup::_kresize(tsize newsize)
     // TODO: make sure that newsize is power of 2
     const tsize oldsize = mask + 1;
     const tsize newmask = newsize - 1;
-    if(!_skipAtStart) printf("Dedup resize old = %u, new = %u\n", (unsigned)oldsize, (unsigned)newsize);
+    //if(!_skipAtStart) printf("Dedup resize old = %u, new = %u\n", (unsigned)oldsize, (unsigned)newsize);
     HKey * const newks = gc_alloc_unmanaged_zero_T<HKey>(gc, newsize);
     if(!newks && newsize)
         return oldsize > newsize ? keys : NULL; // Shrinking but can't alloc smaller buffer? keep old.

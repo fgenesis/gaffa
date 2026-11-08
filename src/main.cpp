@@ -37,11 +37,11 @@ static void *myalloc(void *ud, void *ptr, size_t osz, size_t nsz)
 {
     if(ptr && !nsz)
     {
-        printf("%p | free %u bytes\n", ptr, (unsigned)osz);
+        //printf("%p | free %u bytes\n", ptr, (unsigned)osz);
         free(ptr);
         return NULL;
     }
-    printf("alloc %u -> %u bytes\n", (unsigned)osz, (unsigned)nsz);
+    //printf("alloc %u -> %u bytes\n", (unsigned)osz, (unsigned)nsz);
     return realloc(ptr, nsz);
 }
 
