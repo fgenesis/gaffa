@@ -12,6 +12,7 @@
 #include "symtable.h"
 #include "runtime.h"
 #include "mlir.h"
+#include "mlir_debug.h"
 #include "io_libc.h"
 
 #include <stdio.h>
@@ -229,6 +230,8 @@ int main(int argc, char **argv)
 
     ml.construct(node, pp.syms, rt.sp, MLIR::DEFAULT);
 
+    mlirDebugDump(ml, rt, MLDUMP_DEFAULT);
+
     printf("ML nodes before folding: %u, mem: %u\n", (u32)ml.nodes.size(), (u32)(ml.nodes.size() * sizeof(MLNode)));
 
     {
@@ -239,6 +242,8 @@ int main(int argc, char **argv)
     }
 
     ml.fold(vm, pp.syms, *env);
+
+    mlirDebugDump(ml, rt, MLDUMP_TYPES | MLDUMP_TABLES);
 
 
    return 0;

@@ -30,6 +30,8 @@ set(src
     symstore.h
     mlir.cpp
     mlir.h
+    mlir_debug.cpp
+    mlir_debug.h
     gaimpdbg.cpp
     gaimpdbg.h
     hashfunc.cpp
