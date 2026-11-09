@@ -92,7 +92,6 @@ bool mlirIsStmt(MLCmd cmd)
     case ML_EMIT:
     case ML_EXPORT:
     case ML_SINK:  // not a stmt, but has no value either
-    case ML_WSINK:
         return true;
     default: ;
     }
@@ -148,7 +147,6 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_NEW_TABLE:
         case ML_EXPORT:
         case ML_SINK:
-        case ML_WSINK:
             return 1;
 
         case ML_NAMEDECL:
@@ -519,7 +517,8 @@ static void makeEmpty(MLNode *node)
 void MLIR::_sink(Queue<Cons>& q, MLNode *& dst, const HLNode *sink, const HLNode *type)
 {
     assert(sink->type == HLNODE_SINK);
-    MLCh s = _setupCh(dst, sink->tok == Lexer::TOK_WSINK ? ML_WSINK : ML_SINK);
+    MLCh s = _setupCh(dst, ML_SINK);
+    dst->m.p[0] = sink->tok == Lexer::TOK_WSINK;
     MLNode *te = &nodes[s.chIdx];
     if(type)
         _cons(q, te, type);
@@ -1838,7 +1837,7 @@ static std::string constantStr(const Val& v)
 
 static bool isSink(const MLNode *node)
 {
-    return node->m.cmd == ML_SINK || node->m.cmd == ML_WSINK;
+    return node->m.cmd == ML_SINK;
 }
 
 // Flatten exprs into one slot per value. A variadic tail is not included; returns false on error.
@@ -1966,10 +1965,16 @@ static void checkSinkValue(MLFoldTracker& ft, MLNode *sink, const ValueSlot& vs,
 }
 
 // Count fixed targets and check for a trailing '___'
-static size_t countTargets(const MLSub& targets, bool *wide)
+static size_t countTargets(const MLSub& targets, bool *pwide)
 {
-    *wide = targets.n && targets.ch[targets.n - 1].m.cmd == ML_WSINK;
-    return targets.n - *wide;
+    bool wide = false;
+    if(targets.n)
+    {
+        MLNode *last = &targets.ch[targets.n - 1];
+        wide = last->m.cmd == ML_SINK && last->m.p[0];
+    }
+    *pwide = wide;
+    return targets.n - wide;
 }
 
 // exprlist is optional, it must be present for ML_DECL nodes,

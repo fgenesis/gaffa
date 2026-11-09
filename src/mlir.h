@@ -47,8 +47,7 @@ enum MLCmd
     ML_NEW_TABLE,       // expr (1) (numkv) [1, exprlist] // {a=1, b=2, 3, 4} -> [a, 1, b, 2, 3, 4], numkv=2
     ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL or ML_VAR following
     ML_CALLADJ,         // expr (0) [2, numexpr. callexpr]
-    ML_SINK,            // target (0) [1, typeexpr] -- '_' in a decl or assignment, takes exactly 1 value; typeexpr is _ML_EMPTY if untyped
-    ML_WSINK,           // target (0) [1, typeexpr] -- '___', takes the remaining values (0 or more); always the last target
+    ML_SINK,            // target (1, wide) [1, typeexpr] -- typeexpr is _ML_EMPTY if untyped
     //ML_VALBLOCK,
 
     _ML_MAX,
