@@ -154,6 +154,8 @@ size_t GetOperatorArity(OperatorId op)
         case OP_QQM:
         case OP_UNWRAP:
             return 1;
+        case OP_SETINDEX: // obj[key] = value
+            return 3;
         default: ;
     }
 

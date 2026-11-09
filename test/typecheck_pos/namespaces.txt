@@ -1,0 +1,24 @@
+-- Namespaced function declarations (func T.f, func T:f), used via T::f
+### method on a builtin type, called through ::
+func string:twice() return self ++ self
+string s = string::twice("a")
+### namespaced function with declared return type
+func table.make() -> int return 1
+int x = table::make()
+### recursion through ::
+func int.fact(int n) -> int return int::fact(n)
+### declared and used in an inner function
+func f() { func string.g() return 1
+var y = string::g() }
+### used from an inner function (upvalue)
+func string.g() return 1
+func f() { var y = string::g() }
+### same name in different namespaces
+func string.g() return 1
+func table.g() return "x"
+uint a = string::g()
+string b = table::g()
+### Const(T)::m finds T's [const] method
+type CT = Const(table)
+func [const] table:sz() return 1
+func f(CT c) { var n = CT::sz(c) }

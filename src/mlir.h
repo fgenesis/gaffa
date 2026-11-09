@@ -30,7 +30,7 @@ enum MLCmd
     ML_CONST = _OP_MAX, // expr (1, consts idx)
     ML_VAR,             // expr (1, var idx)
     ML_EXT,             // expr (1, external table idx)
-    ML_NAMEDECL,        // stmt (2, name, symid) [2, namespace, value]
+    ML_NAMEDECL,        // stmt (2, name, symid) [2, namespace, value] -- namespaced (func T.f / T:f): (2, name, varidx) of a hidden var; no namespace: empty list
     ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- typeexprs: one per target, ML_SINK/ML_WSINK for sinks; the other targets are consecutive vars starting at varidx; no exprs: deferred
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
@@ -89,6 +89,8 @@ MUL PLUS CALL 1 2 -3 PLUS a b 3 4
 
 
 union MLNode;
+
+bool mlirIsStmt(MLCmd cmd); // also true for sinks: no value
 
 enum MLFuncFlags // must fit in a byte
 {

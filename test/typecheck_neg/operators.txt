@@ -38,7 +38,7 @@ func int.prefix-(int a, int b) -> int { return a }
 ### method operator counts self
 func int:+(int a, int b) -> int { return a }
 ### set-index with too few parameters
-func T:[]=(uint k) {}
+func table:[]=(uint k) {}
 ### variadic operator
 func int.+(int...) -> int { return 0 }
 ### wrapped value doesn't fit the target

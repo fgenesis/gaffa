@@ -1,0 +1,24 @@
+-- Namespaced function declarations
+### used outside the function that declares it
+func f() { func string.g() return 1 }
+var y = string::g()
+### declared twice
+func string.g() return 1
+func string.g() return 2
+### namespace is not a type
+var x = 1
+func x.m() {}
+### unknown member
+func string.g() return 1
+var y = string::h()
+### method argument type
+func string:twice() return self ++ self
+string s = string::twice(1)
+### Const(T)::m without [const]
+type CT = Const(table)
+func table:sz() return 1
+func f(CT c) { var n = CT::sz(c) }
+### operator function with wrong parameter count
+func int.-(int a) -> int { return a }
+### operator function declarations are not implemented yet
+func int.+(int a, int b) -> int { return a }

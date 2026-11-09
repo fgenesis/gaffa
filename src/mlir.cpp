@@ -73,7 +73,7 @@ struct MLDumper
 };
 
 // statements have no associated type
-static bool mlirIsStmt(MLCmd cmd)
+bool mlirIsStmt(MLCmd cmd)
 {
     if(cmd == ML_LIST)
         return true;
@@ -105,12 +105,17 @@ static size_t mlirNumParams(MLCmd cmd)
     {
         case ML_CONST:
         case ML_VAR:
+        case ML_EXT:
         case _ML_UPVAL:
-        case ML_NAMEDECL:
+        case _ML_LOCAL:
         case ML_DECL:
         case ML_FUNC:
+        case ML_NEW_TABLE:
         case _ML_FUNCIDX:
             return 1;
+
+        case ML_NAMEDECL:
+            return 2;
 
         default: ;
     }
@@ -128,6 +133,7 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_CONST:
         case ML_VAR:
         case _ML_UPVAL:
+        case _ML_LOCAL:
         case ML_EXT:
         case _ML_VAL:
         case _ML_FUNCIDX:
@@ -374,6 +380,14 @@ Type MLNode::type() const
 
     return x.exprtype;
 
+}
+
+// ML_NAMEDECL: func T.f / func T:f, as opposed to a plain named function (namespace is an empty list)
+static bool isNamespacedDecl(const MLNode *namedecl)
+{
+    assert(namedecl->m.cmd == ML_NAMEDECL);
+    const MLNode *ns = namedecl->firstChild();
+    return !(ns->m.cmd == ML_LIST && !ns->list.len);
 }
 
 // ------------------------------------------------------------
@@ -651,10 +665,15 @@ dolist:
         case HLNODE_FUNCDECL:
         {
             const HLFuncDecl& decl = hl->u.funcdecl;
-            if(decl.namespac) // namespaced names are not symbols, just names
+            if(decl.namespac) // namespaced names are not symbols, just names; they get a hidden var
             {
-                dst->m.p[0] = decl.ident->as<HLName>()->nameStrId;
-                dst->m.p[1] = 0;
+                const sref name = decl.ident->as<HLName>()->nameStrId;
+                const u32 varidx = (u32)vars.size();
+                MLVar *v = vars.alloc_n(gc, 1);
+                v->name = name;
+                v->kind = MLVar::CVAR;
+                dst->m.p[0] = name;
+                dst->m.p[1] = varidx;
             }
             else
             {
@@ -1046,9 +1065,21 @@ struct MLFoldTracker
         Type declrets; // type list; PRIMTYPE_AUTO if not declared
         Type deducedrets; // type list; PRIMTYPE_AUTO until the first return
         SymTable *imports; // NULL until the function imports something
+        size_t nsLocalsStart; // nsLocals[] entries from here on are declared in this function
     };
     std::vector<FoldFunc> foldFuncs;
     SymTable *fileImports; // file scope import layer; NULL until something is imported there
+
+    // Namespaced local symbols (func T.f, func T:f), innermost scope last.
+    // Looked up before imports and externs.
+    struct NsLocal
+    {
+        Type ns; // without TYPEBIT_CONST
+        sref name;
+        u32 varidx; // hidden var of the declaration
+    };
+    std::vector<NsLocal> nsLocals;
+    const NsLocal *findNsLocal(Type ns, sref name) const;
 
     // Per var: index in MLIR::funcs[] of the function that has it as a local, and its slot there
     std::vector<u32> varOwner;
@@ -1111,6 +1142,15 @@ void MLFoldTracker::warn(const MLNode* where, const char *msg)
     const MLInfo *info = mlir.infoOf(where);
     const u32 line = info ? info->line : 0;
     printf("(%s:%u): Warning: %s\n", filename.c_str(), line, msg);
+}
+
+const MLFoldTracker::NsLocal *MLFoldTracker::findNsLocal(Type ns, sref name) const
+{
+    ns &= ~TYPEBIT_CONST;
+    for(size_t i = nsLocals.size(); i--; )
+        if(nsLocals[i].ns == ns && nsLocals[i].name == name)
+            return &nsLocals[i];
+    return NULL;
 }
 
 SymTable& MLFoldTracker::symbols()
@@ -1744,10 +1784,11 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
                 (u32)MLFoldTracker::NONE,
                 PRIMTYPE_AUTO,
                 PRIMTYPE_AUTO,
-                NULL
+                NULL,
+                ft.nsLocals.size()
             };
-            if(parent->m.cmd == ML_NAMEDECL && node == parent->firstChild() + 1 && !parent->firstChild()->aslist().n)
-                ff.varidx = ft.mlir.symToVarRemap[parent->m.p[1]];
+            if(parent->m.cmd == ML_NAMEDECL && node == parent->firstChild() + 1)
+                ff.varidx = isNamespacedDecl(parent) ? parent->m.p[1] : ft.mlir.symToVarRemap[parent->m.p[1]];
             ft.foldFuncs.push_back(ff);
         }
         break;
@@ -2093,6 +2134,7 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         {
             const MLFoldTracker::FoldFunc ff = ft.foldFuncs.back();
             ft.foldFuncs.pop_back();
+            ft.nsLocals.resize(ff.nsLocalsStart); // namespaced locals of the function go out of scope
             assert(ff.nodeidx == ft.mlir.indexOf(node));
             Type rets = ff.declrets;
             if(rets == PRIMTYPE_AUTO)
@@ -2209,6 +2251,14 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
                 return;
             }
 
+            if(const MLFoldTracker::NsLocal *loc = ft.findNsLocal(nstype->tid, keyval.u.str))
+            {
+                node->m.cmd = ML_VAR;
+                node->m.p[0] = loc->varidx;
+                foldNode(node, ft);
+                return;
+            }
+
             if(const Val *val = ft.symbols().lookupInNamespace(nstype->tid, keyval.u.str))
             {
                 printf("%s::%s replaced with constant from env\n",
@@ -2229,68 +2279,33 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
 
         case ML_NAMEDECL:
         {
-            MLNode *ns = node->firstChild();
-            MLNode *valnode = ns + 1;
+            MLNode *valnode = node->firstChild() + 1;
             sref nameid = node->m.p[0];
-            u32 symid = node->m.p[1];
-            const char *name = ft.str(nameid);
-            printf("ML namedecl '%s', symid %u\n", name, symid);
-            switch(ns->aslist().n)
+            const bool namespaced = isNamespacedDecl(node);
+            printf("ML namedecl '%s'%s\n", ft.str(nameid).s, namespaced ? " (namespaced)" : "");
+
+            // A const local; a namespaced one is a hidden var, registered by declareNsLocal()
+            MLVar *v = namespaced ? &ft.mlir.vars[node->m.p[1]] : ft.mlir.getVarFromSymid(node->m.p[1]);
+            assert(v->name == nameid);
+            v->kind = MLVar::CVAR;
+            v->decl = ft.mlir.indexOf(node);
+
+            switch(valnode->m.cmd)
             {
-                case 0:
-                {
-                    // It's a dummy entry -> no namespace -> make it a const local, potentially exported
-                    // This is likely a function, but functions aren't availble yet.
-                    // Store the index of the node, which should hopefully be folded into a function
-                    // or some other constant value later.
-                    MLVar *v = ft.mlir.getVarFromSymid(symid);
-                    assert(v->name == nameid);
-                    v->kind = MLVar::CVAR;
-                    v->decl = ft.mlir.indexOf(node);
-
-                    switch(valnode->m.cmd)
-                    {
-                        case ML_FUNC:
-                            v->u.local.type = valnode->type();
-                            break;
-                        case _ML_VAL:
-                            v->u.val = valnode->asVal();
-                            break;
-                        case _ML_ERROR:
-                            break;
-                        default:
-                            assert(false);
-                            break;
-                    }
-
-                    //ft.env.addSymbol(ft.gc(), nameid, val);
-
-                    // TODO: exporting
-                }
-                break;
-#if 0
-                case 1:
-                    // Regsiter in namespace
-                    if(!ns->isconst())
-                    {
-                        // TODO: This restriction should be loosened at some point
-                        node->setError(ft.sp(), "Namespace should be a compile-time constant value");
-                        return;
-                    }
-
-                    if(val.isconst())
-                    {
-                        // Known at compile time -> register now
-                    }
-                    else
-                    {
-                        // Need to do it at runtime
-                    }
-#endif
+                case ML_FUNC:
+                    v->u.local.type = valnode->type();
+                    break;
+                case _ML_VAL:
+                    v->u.val = valnode->asVal();
+                    break;
+                case _ML_ERROR:
+                    break;
                 default:
-                    node->setError(ft.sp(), "Namespaced function declarations not implemented yet");
-                    return;
+                    assert(false);
+                    break;
             }
+
+            // TODO: exporting
         }
         break;
 
@@ -2434,10 +2449,54 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
     // stmts have no type. Don't write x.exprtype, a stmt may use both params.
 }
 
+// func T.f / func T:f: registers T::f as soon as T is folded, before the body, so the body can refer to it
+static void declareNsLocal(MLFoldTracker& ft, MLNode *namedecl, MLNode *ns)
+{
+    if(ns->m.cmd == _ML_ERROR)
+        return; // already reported
+    const DType *dt = ns->isconst() ? ns->asVal().asDType() : NULL;
+    if(!dt)
+    {
+        ns->setError(ft.sp(), "Namespace of a function declaration must be a compile-time constant type");
+        return;
+    }
+
+    const sref name = namedecl->m.p[0];
+    const Strp s = ft.str(name);
+    std::ostringstream os;
+
+    const OperatorId op = Lexer::GetOperatorFromName(s.s, s.len);
+    if(op != OP_ERROR)
+    {
+        MLNode *func = namedecl->firstChild() + 1;
+        const size_t arity = GetOperatorArity(op);
+        if(func->m.cmd == ML_FUNC && op != OP_CALL && func->firstChild()->aslist().n != arity)
+            os << "Operator function " << getTypeName(ft.rt(), dt->tid) << "::" << s.s
+               << " must have " << arity << " parameter(s), including self";
+        else
+            os << "Declaring operator functions is not implemented yet in MLIR";
+        ns->setError(ft.sp(), os.str().c_str());
+        return;
+    }
+
+    if(ft.findNsLocal(dt->tid, name))
+    {
+        os << getTypeName(ft.rt(), dt->tid) << "::" << s.s << " is already declared";
+        ns->setError(ft.sp(), os.str().c_str());
+        return;
+    }
+
+    const MLFoldTracker::NsLocal e = { dt->tid & ~TYPEBIT_CONST, name, namedecl->m.p[1] };
+    ft.nsLocals.push_back(e);
+}
+
 static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
     foldNode(node, ft);
+
+    if(parent && parent->m.cmd == ML_NAMEDECL && node == parent->firstChild() && isNamespacedDecl(parent))
+        declareNsLocal(ft, parent, node);
 
     if(parent && parent->m.cmd == ML_FUNC)
     {
@@ -2524,11 +2583,7 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
         break;
 
         case ML_NAMEDECL:
-            if(!node->firstChild()->aslist().n) // not namespaced
-            {
-                const u32 varidx = ft.mlir.symToVarRemap[node->m.p[1]];
-                addLocal(ft, varidx);
-            }
+            addLocal(ft, isNamespacedDecl(node) ? node->m.p[1] : ft.mlir.symToVarRemap[node->m.p[1]]);
             break;
 
         default:
