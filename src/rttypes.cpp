@@ -284,7 +284,7 @@ static void reg_type_string(RTReg& r)
     {
         const Type str1[] = { PRIMTYPE_STRING };
         const Type uint1[] = { PRIMTYPE_UINT };
-        xstr.method("len", mth_string_len, str1, uint1);
+        xstr.method("len", mth_string_len, str1, uint1, FuncInfo::Pure);
     }
 }
 

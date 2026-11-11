@@ -169,5 +169,7 @@
 
 --func int.+_(int a, int b) -> int {}
 
-func [const] int:zero() { return +0 }
+--func [const] int:zero() { return +0 }
 
+--uint a = clock()
+uint x = "aaa":len()

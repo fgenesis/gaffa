@@ -14,7 +14,7 @@ Val::Val(DType *t)       { _init(PRIMTYPE_TYPE);   u.obj = t; }
 Val::Val(SymTable *symt) { _init(PRIMTYPE_SYMTAB); u.obj = symt; }
 Val::Val(DFunc *func)    { _init(PRIMTYPE_FUNC);   u.obj = func; }
 
-Val::Val(DObj *o)
+Val::Val(GCobj *o)
 {
     PrimType pt = o->primtype();
     assert(pt == o->dtype->tdesc->objprimtype);
@@ -23,15 +23,18 @@ Val::Val(DObj *o)
 }
 
 
-DFunc      *Val::asFunc()     { return static_cast<DFunc*   >(asObj(PRIMTYPE_FUNC)); }
-SymTable   *Val::asSymTab()   { return static_cast<SymTable*>(asObj(PRIMTYPE_SYMTAB)); }
-DObj       *Val::asDObj()     { return static_cast<DObj*    >(asObj(PRIMTYPE_OBJECT)); }
-DType      *Val::asDType()    { return static_cast<DType*   >(asObj(PRIMTYPE_TYPE)); }
+DFunc      *Val::asFunc()    const { return static_cast<DFunc*   >(asObj(PRIMTYPE_FUNC)); }
+SymTable   *Val::asSymTab()  const { return static_cast<SymTable*>(asObj(PRIMTYPE_SYMTAB)); }
+DObj       *Val::asDObj()    const { return static_cast<DObj*    >(asObj(PRIMTYPE_OBJECT)); }
+DType      *Val::asDType()   const { return static_cast<DType*   >(asObj(PRIMTYPE_TYPE)); }
 
-const DFunc      *Val::asFunc()    const { return static_cast<const DFunc*   >(asObj(PRIMTYPE_FUNC)); }
-const SymTable   *Val::asSymTab()  const { return static_cast<const SymTable*>(asObj(PRIMTYPE_SYMTAB)); }
-const DObj       *Val::asDObj()    const { return static_cast<const DObj*    >(asObj(PRIMTYPE_OBJECT)); }
-const DType      *Val::asDType()   const { return static_cast<const DType*   >(asObj(PRIMTYPE_TYPE)); }
+
+Type Val::getRtType() const
+{
+    if(const GCobj *obj = asAnyObj())
+        return obj->dtype->tid;
+    return type;
+}
 
 
 struct UintPair

@@ -644,6 +644,10 @@ dolist:
             dst->m.cmd = _ML_UVAR; // To be resolved later
             return;
 
+        case HLNODE_NAME:
+            dst->setVal(Val(_Str(hl->u.name.nameStrId)));
+            return;
+
         case HLNODE_VARDECLASSIGN:
         {
             MLCh s = _setupCh(dst, ML_DECL);
@@ -1103,8 +1107,15 @@ struct MLFoldTracker
     SymTable& symbols(); // innermost import layer, chained to the outer ones and finally the externals
     SymTable *importLayer(); // import layer of the current scope, created on demand
 
-    const DFunc *getObjectOperator(const GCobj *obj, OperatorId op);
-    const DFunc *getCallable(const GCobj *obj);
+    struct Callable
+    {
+        const DFunc *func;
+        bool method;
+    };
+
+    const DFunc *getMethod(Type t, sref nameid);
+    const DFunc *getOperatorFunc(Type t, OperatorId op);
+    Callable getCallable(const GCobj *obj);
 };
 
 void MLFoldTracker::extrainfo(const MLNode *where)
@@ -1191,22 +1202,32 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
     return false;
 }
 
-const DFunc *MLFoldTracker::getObjectOperator(const GCobj *obj, OperatorId op)
+const DFunc *MLFoldTracker::getOperatorFunc(Type t, OperatorId op)
 {
     sref method = rt().cs.operatorNames[op];
-    const Val *v = symbols().lookupObjectMethod(obj, method);
+    return getMethod(t, method);
+}
+
+const DFunc *MLFoldTracker::getMethod(Type t, sref nameid)
+{
+    const Val *v = symbols().lookupInNamespace(t, nameid);
     return v ? v->asFunc() : NULL;
 }
 
-const DFunc *MLFoldTracker::getCallable(const GCobj * obj)
+MLFoldTracker::Callable MLFoldTracker::getCallable(const GCobj * obj)
 {
-    if(!obj)
-        return NULL;
-
-    if(obj->primtype() == PRIMTYPE_FUNC)
-        return (DFunc*)obj;
-
-    return getObjectOperator(obj, OP_CALL);
+    Callable ret = {};
+    if(obj)
+    {
+        if(obj->primtype() == PRIMTYPE_FUNC)
+            ret.func = (DFunc*)obj;
+        else
+        {
+            ret.func = getOperatorFunc(obj->dtype->tid, OP_CALL);
+            ret.method = true;
+        }
+    }
+    return ret;
 }
 
 struct NumValuesResult
@@ -1278,6 +1299,7 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
         }
 
         case OP_CALL:
+        case ML_MTHCALL:
         {
             NumValuesResult ret = { NumValuesResult::ERROR, 0 };
             const Type t = node->x.exprtype;
@@ -1380,9 +1402,13 @@ static void preFoldVars(MLVar *vars, size_t N, MLFoldTracker& ft)
 
 // >= 0: folded into this manu values
 // < 0: error or not folded
-static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t argc, int maxresults, MLFoldTracker& ft)
+// If pself != NULL: It's a method call on an existing object
+static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t argc, int maxresults, MLFoldTracker& ft, Val *pself)
 {
-    if(!func.isPure() || argc < func.info.nargs)
+    const bool methodcall = !!pself;
+    const size_t realargc = argc + methodcall;
+
+    if(!func.isPure() || realargc < func.info.nargs)
         return -1;
 
     // Need all args to be constant
@@ -1393,15 +1419,17 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
         if(!args[i].isconst())
             return -2;
 
-    size_t spaceneeded = std::max<size_t>(func.info.nrets, argc);
+    size_t spaceneeded = std::max<size_t>(func.info.nrets, realargc);
 
     PodArray<ValU> argspace;
     ValU * const argp = argspace.alloc_n_exact(ft.gc(), spaceneeded);
     if(!argp)
         return -3;
 
+    if(methodcall)
+        argp[0] = *pself;
     for(size_t i = 0; i < argc; ++i)
-        argp[i] = args[i].asVal();
+        argp[i+methodcall] = args[i].asVal();
 
     // If the function call is successful, argp will hold the return values
     int status = func.call(&ft.vm, reinterpret_cast<Val*>(argp)); // FIXME: typecheck this?
@@ -1758,7 +1786,7 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     }
 
     // TODO: is there an operator that results in more than 1 return value?
-    const int status = tryFoldCall(node, *func, L, arity, 1, ft);
+    const int status = tryFoldCall(node, *func, L, arity, 1, ft, NULL);
     if(status > 0 && use->res != OPRES_DIRECT && node->isconst())
         node->setVal(Val(applyOpResult(use->res, node->asVal())));
     return status > 0;
@@ -2123,6 +2151,158 @@ static void doAssign(MLFoldTracker& ft, MLNode *node)
     }
 }
 
+// selfexpr is NULL for regular function calls, otherwise it's a method call
+static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *funcexpr, MLNode *argsexpr)
+{
+    assert(funcexpr->m.cmd != ML_LIST);
+    if(hasErrorChild(node)) // already reported
+    {
+        node->x.exprtype = PRIMTYPE_AUTO;
+        return;
+    }
+
+    const DFunc *df = NULL;
+    Val self;
+    Val *pself = NULL; // valid when self is a known constant
+    bool methodcall = false;
+    Type functype = PRIMTYPE_NIL;
+    if(selfexpr)
+    {
+        methodcall = true;
+        Type selftype;
+        if(selfexpr->isconst())
+        {
+            self = selfexpr->asVal();
+            selftype = self.getRtType();
+            pself = &self;
+        }
+        else
+            selftype = selfexpr->type();
+
+        // Usually a method name is a string.
+        if(funcexpr->isconst())
+        {
+            if(sref mth = funcexpr->asVal().asString())
+                df = ft.getMethod(selftype, mth);
+            else
+            {
+                funcexpr->setError(ft.sp(), "A method name must be a string");
+                return;
+            }
+        }
+        else
+        {
+            Type mthtype = funcexpr->type();
+            if(mthtype == PRIMTYPE_ANY || mthtype == PRIMTYPE_STRING)
+            {
+                if(mthtype == PRIMTYPE_ANY)
+                    ft.warn(funcexpr, "Dynamic method name is type 'Any', this will fail at runtime if not a string");
+                funcexpr->setError(ft.sp(), "TODO: Dynamic method calls are not yet supported");
+                return;
+            }
+            else
+            {
+                funcexpr->setError(ft.sp(), "A method name must be a string");
+                return;
+            }
+        }
+    }
+    else
+    {
+        // If we can get the actual function prefer that, otherwise get just the type
+        if(funcexpr->isconst())
+        {
+            GCobj *obj = funcexpr->asVal().asAnyObj(); // Maybe function or some object. Can be NULL.
+            MLFoldTracker::Callable cc = ft.getCallable(obj); // Might be __call operator (it's a method!)
+            df = cc.func;
+            methodcall = cc.method;
+            if(df && cc.method)
+            {
+                self = Val(obj);
+                pself = &self;
+            }
+        }
+        else
+        {
+            functype = funcexpr->type();
+        }
+    }
+
+    if(df)
+        functype = df->info.functype;
+
+    FuncTypes fty;
+    if(!ft.tr().lookupFunc(&fty, functype))
+    {
+        node->setError(ft.sp(), "Attempt to call something that is not callable");
+        return;
+    }
+
+    MLSub args = argsexpr->aslist();
+    NumValuesResult nv = numResultValuesOfList(args.ch, args.n, ft);
+    if(nv.verdict == NumValuesResult::ERROR)
+    {
+        node->x.exprtype = PRIMTYPE_AUTO;
+        return;
+    }
+    const bool variadic = fty.isVariadicParams();
+    size_t minargs = fty.minargs();
+    if(!minargs && methodcall)
+    {
+        node->setError(ft.sp(), "Method takes no parameter (should have failed typecheck before getting here)");
+        return;
+    }
+
+    // The implicit self we're going to pass means 1 param less needed than the func sig indicates
+    minargs -= methodcall;
+
+    if(nv.n < minargs && nv.verdict == NumValuesResult::EXACT_NUMBER)
+    {
+        std::ostringstream os;
+        os << (methodcall ? "Method" : "Function") << " takes " << (variadic ? "at least " : "") << minargs << " arguments, got " << nv.n;
+        node->setError(ft.sp(), os.str().c_str());
+        return;
+    }
+    if(nv.n > fty.params.n && !variadic)
+    {
+        std::ostringstream os;
+        os << "Function takes " << fty.params.n << " arguments, got " << nv.n
+            << (nv.verdict == NumValuesResult::MIN_NUMBER ? " or more" : "");
+        node->setError(ft.sp(), os.str().c_str());
+        return;
+    }
+
+    // Arguments must fit the parameter types; a variadic param takes the rest
+    std::vector<ValueSlot> argslots;
+    if(methodcall)
+    {
+        ValueSlot selfslot;
+        selfslot.expr = selfexpr;
+        selfslot.single = true;
+        selfslot.t = self.getRtType();
+        argslots.push_back(selfslot);
+    }
+    if(!flattenValues(ft, args.ch, args.n, argslots))
+    {
+        node->x.exprtype = PRIMTYPE_AUTO;
+        return;
+    }
+    bool argsok = true;
+    for(size_t i = 0; i < argslots.size(); ++i) // too many args were reported above
+    {
+        const Type pt = i < minargs ? fty.params.ptr[i] : (fty.params.ptr[fty.params.n - 1] & TYPEBASE_MASK);
+        argsok = fitValue(ft, argslots[i], pt, "Argument", funcexpr) && argsok;
+    }
+
+    const TDesc *td = ft.tr().lookupFunc(NULL, functype);
+    node->x.exprtype = singleOrList(ft, td->types()[2]);
+    if(!argsok)
+        return;
+
+    if(df && (!methodcall || pself))
+        tryFoldCall(node, *df, args.ch, args.n, -1, ft, pself);
+}
+
 static void foldNode(MLNode *node, MLFoldTracker& ft)
 {
     const MLCmd cmd = (MLCmd)node->m.cmd;
@@ -2339,66 +2519,14 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         case OP_CALL:
         {
             MLNode *funcexpr = node->firstChild();
-            assert(funcexpr->m.cmd != ML_LIST);
-            if(hasErrorChild(node)) // already reported
-            {
-                node->x.exprtype = PRIMTYPE_AUTO;
-                return;
-            }
-            const DFunc *df = funcexpr->isconst() ? ft.getCallable(funcexpr->asVal().asAnyObj()) : NULL;
-            FuncTypes fty;
-            if(!ft.tr().lookupFunc(&fty, df ? df->info.functype : funcexpr->type()))
-            {
-                node->setError(ft.sp(), "Attempt to call something that is not a function");
-                return;
-            }
+            foldCall(node, ft, NULL, funcexpr, funcexpr + 1);
+            return;
+        }
 
-            MLSub args = funcexpr[1].aslist();
-            NumValuesResult nv = numResultValuesOfList(args.ch, args.n, ft);
-            if(nv.verdict == NumValuesResult::ERROR)
-            {
-                node->x.exprtype = PRIMTYPE_AUTO;
-                return;
-            }
-            const bool variadic = fty.params.n && (fty.params.ptr[fty.params.n - 1] & TYPEBIT_VARIADIC);
-            const size_t minargs = fty.params.n - variadic;
-            if(nv.n < minargs && nv.verdict == NumValuesResult::EXACT_NUMBER)
-            {
-                std::ostringstream os;
-                os << "Function takes " << (variadic ? "at least " : "") << minargs << " arguments, got " << nv.n;
-                node->setError(ft.sp(), os.str().c_str());
-                return;
-            }
-            if(nv.n > fty.params.n && !variadic)
-            {
-                std::ostringstream os;
-                os << "Function takes " << fty.params.n << " arguments, got " << nv.n
-                    << (nv.verdict == NumValuesResult::MIN_NUMBER ? " or more" : "");
-                node->setError(ft.sp(), os.str().c_str());
-                return;
-            }
-
-            // Arguments must fit the parameter types; a variadic param takes the rest
-            std::vector<ValueSlot> argslots;
-            if(!flattenValues(ft, args.ch, args.n, argslots))
-            {
-                node->x.exprtype = PRIMTYPE_AUTO;
-                return;
-            }
-            bool argsok = true;
-            for(size_t i = 0; i < argslots.size(); ++i) // too many args were reported above
-            {
-                const Type pt = i < minargs ? fty.params.ptr[i] : (fty.params.ptr[fty.params.n - 1] & TYPEBASE_MASK);
-                argsok = fitValue(ft, argslots[i], pt, "Argument", funcexpr) && argsok;
-            }
-
-            const TDesc *td = ft.tr().lookupFunc(NULL, df ? df->info.functype : funcexpr->type());
-            node->x.exprtype = singleOrList(ft, td->types()[2]);
-            if(!argsok)
-                return;
-
-            if(df)
-                tryFoldCall(node, *df, args.ch, args.n, -1, ft);
+        case ML_MTHCALL:
+        {
+            MLNode *selfexpr = node->firstChild();
+            foldCall(node, ft, selfexpr, selfexpr + 1, selfexpr + 2);
             return;
         }
 

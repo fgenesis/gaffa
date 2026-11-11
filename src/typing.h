@@ -145,6 +145,11 @@ struct FuncTypes
 {
     TypeIdList params;
     TypeIdList rets;
+
+    bool isVariadicParams() const { return params.n && (params.ptr[params.n - 1] & TYPEBIT_VARIADIC); }
+    bool isVariadicRets() const { return rets.n && (rets.ptr[rets.n - 1] & TYPEBIT_VARIADIC); }
+    tsize minargs() const { return params.n - (tsize)isVariadicParams(); }
+    tsize minrets() const { return rets.n - (tsize)isVariadicRets(); }
 };
 
 class TypeRegistry

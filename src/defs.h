@@ -132,7 +132,7 @@ struct Strp
 
 struct _Str
 {
-    _Str(sref x) : ref(x) {}
+    inline _Str(sref x) : ref(x) {}
     sref ref;
 };
 
@@ -224,29 +224,27 @@ struct Val : public ValU
     explicit Val(DType *t);
     explicit Val(SymTable *symt);
     explicit Val(DFunc *func);
-    explicit Val(DObj *o);
+    explicit Val(GCobj *o);
 
 
     Val(const void *func) = delete; // Not implemented, catch-all
 
-    inline GCobj *asAnyObj(PrimType prim) { return isObjectType(type) ? u.obj : NULL; }
-    inline GCobj *asObj(PrimType prim) { return prim == type ? u.obj : NULL; }
-    DFunc    *asFunc();
-    SymTable *asSymTab();
-    DObj     *asDObj();
-    DType    *asDType();
+    inline GCobj *asAnyObj() const { return isObjectType(type) ? u.obj : NULL; }
+    inline GCobj *asObj(PrimType prim) const { return prim == type ? u.obj : NULL; }
+    DFunc    *asFunc() const;
+    SymTable *asSymTab() const;
+    DObj     *asDObj() const;
+    DType    *asDType() const;
 
-    inline const GCobj *asAnyObj() const { return isObjectType(type) ? u.obj : NULL; }
-    inline const GCobj *asObj(PrimType prim) const { return prim == type ? u.obj : NULL; }
-    const DFunc    *asFunc() const;
-    const SymTable *asSymTab() const;
-    const DObj     *asDObj() const;
-    const DType    *asDType() const;
+    inline sref asString() const { return type == PRIMTYPE_STRING ? u.str : 0; } // any valid string is != 0
 
     // To check optional validity. false if nil or error.
     inline bool isValidValue() const { return type > PRIMTYPE_ERROR; }
 
     inline bool isTruthy() const { return isValidValue() && (type != PRIMTYPE_BOOL || u.ui); }
+
+    // TODO: To get the DType*, there should be a similiar thing in TypeRegistry
+    Type getRtType() const; // Either a PrimType, or the actual object type if object
 };
 
 // Size of an element of type t, when multiple elements of this type are stored in an array
