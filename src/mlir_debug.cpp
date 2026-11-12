@@ -53,6 +53,11 @@ static const char *cmdName(MLCmd cmd)
         case ML_EXPORT:    return "export";
         case ML_CALLADJ:   return "calladj";
         case ML_SINK:      return "sink";
+        case ML_BLOCK:     return "block";
+        case ML_IMPORT:    return "import";
+        case ML_COMPTIME:  return "comptime";
+        case ML_OPTIONAL:  return "optional";
+        case ML_UNWRAPBIND:return "unwrapbind";
         case _ML_UPVAL:    return "upval";
         case _ML_LOCAL:    return "local";
         case _ML_FUNCIDX:  return "funcidx";
@@ -77,6 +82,7 @@ static void printVal(const Runtime& rt, const Val& v)
         case PRIMTYPE_SINT:   printf("%lld", (long long)v.u.si); break;
         case PRIMTYPE_FLOAT:  printf("%g", (double)v.u.f); break;
         case PRIMTYPE_STRING: printf("\"%s\"", rt.sp.lookup(v.u.str).s); break;
+        case PRIMTYPE_ERROR:  printf("error(\"%s\")", rt.sp.lookup(v.u.str).s); break;
         case PRIMTYPE_TYPE:   printf("type %s", getTypeName(rt, v.asDType()->tid).c_str()); break;
         case PRIMTYPE_FUNC:
         {
@@ -103,10 +109,10 @@ static void printVar(const MLIR& ml, const Runtime& rt, u32 idx, unsigned flags)
     switch(v.kind)
     {
         case MLVar::MUTVAR: printf(" mut"); break;
-        case MLVar::CONSTVAL: printf(" = "); printVal(rt, v.u.val); break;
+        case MLVar::CVAR: if(v.known.type != PRIMTYPE_NOTYPE) { printf(" known "); printVal(rt, v.known); } break;
         default: ;
     }
-    if((flags & MLDUMP_TYPES) && v.kind != MLVar::CONSTVAL)
+    if(flags & MLDUMP_TYPES)
         printf(" : %s", getTypeName(rt, v.u.local.type).c_str());
 }
 
@@ -178,6 +184,7 @@ static void printNode(const MLIR& ml, const Runtime& rt, const MLNode *node, uns
             break;
         }
         case ML_VAR:
+        case ML_UNWRAPBIND:
             printf(" ");
             printVar(ml, rt, p0, flags);
             break;
@@ -219,6 +226,8 @@ static void printNode(const MLIR& ml, const Runtime& rt, const MLNode *node, uns
 
     if((flags & MLDUMP_TYPES) && !mlirIsStmt(cmd) && cmd != _ML_ERROR && cmd != _ML_DEAD && cmd != _ML_UVAR)
         printf(" :: %s", getTypeName(rt, node->type()).c_str());
+    if(cmd != ML_FUNC && cmd != _ML_VAL && (node->m.flags & MLNODE_RTCHECK))
+        printf(" [runtime check]");
 
     printf("\n");
 }

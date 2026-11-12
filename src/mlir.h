@@ -48,6 +48,13 @@ enum MLCmd
     ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL or ML_VAR following
     ML_CALLADJ,         // expr (0) [2, numexpr. callexpr]
     ML_SINK,            // target (1, wide) [1, typeexpr] -- typeexpr is _ML_EMPTY if untyped
+    ML_BLOCK,           // stmt (0) [1, stmts] -- an explicit block: a scope (imports, namespaced locals), kept even with a
+                        // single stmt. Not used where a block is opened implicitly, see mlOpensBlock().
+    ML_IMPORT,          // expr (0) [1, expr] -- import expr: folds to the values after the first (a symtab, imported)
+    ML_COMPTIME,        // expr (0) [1, expr] -- comptime expr: folds to its constant values
+    ML_OPTIONAL,        // expr (0) [1, typeexpr] -- T? (an identifier with '?'): folds to the optional variant of a constant type
+    ML_UNWRAPBIND,      // expr (1, varidx) [1, expr] -- x => v in if(): bool, declares v with x's type minus '?'.
+                        // If it always succeeds, the if folds into a list [unwrapbind, ifbranch]: then it's a statement that only binds v.
     //ML_VALBLOCK,
 
     _ML_MAX,
@@ -66,7 +73,8 @@ enum MLCmd
     _ML_DEAD, // Node was optimized away and is no longer valid
     _ML_VAL, // constant value, stored inline in MLNode
     _ML_UVAR, // Unresolved identifier // special; replaced before type analysis
-    _ML_ERROR, // Error. If encountered after folding, the tree isn't sound and no code can be generated.
+    _ML_ERROR, // Error (p[0] = message). If encountered after folding, the tree isn't sound and no code can be generated.
+               // p[1] != 0: a fold-time exception (eg. division by zero), p[1] is its plain message; '??' captures it.
 };
 
 /*
@@ -97,6 +105,14 @@ enum MLFuncFlags // must fit in a byte
     MLFUNC_PURE  = 0x02, // [pure]
 };
 
+enum MLNodeFlags // MLNode::m.flags of any expr except ML_FUNC (which uses MLFuncFlags)
+{
+    // The value's static type is the node's exprtype (a type list if it produces several values), which isn't
+    // known statically: it must be checked at runtime (LLIR emits LL_TYPECHECK). Set by fitValue() for an
+    // 'any' whose value isn't known. Not serialized: the result of folding.
+    MLNODE_RTCHECK = 0x80,
+};
+
 struct MLSub
 {
     MLNode *ch; // index of first child
@@ -124,7 +140,7 @@ union MLNode
         u32 chOffs; // must be usable together with hl.node, HL_LIST, others. _ML_VAL conflicts.
         byte cmd;
         byte nch;   // number of direct child nodes. Optional, but makes LLIR generation easier.
-        byte flags; // ML_FUNC: MLFuncFlags; unused otherwise
+        byte flags; // ML_FUNC: MLFuncFlags; other exprs: MLNodeFlags
         // 1 unused byte
     } m;
     struct
@@ -151,6 +167,8 @@ union MLNode
     bool isconst() const; // Is a const value for the puspose of constant folding?
     void setError(sref s);
     void setError(StringPool& sp, const char *err);
+    void setException(sref err, sref what); // an error that '??' can capture as an error value with message 'what'
+    sref exceptionWhat() const { return m.cmd == _ML_ERROR ? m.p[1] : 0; }
 
     // Invalidate this node and all its children
     void invalidate();
@@ -172,27 +190,27 @@ struct MLVar
     enum Kind
     {
         // --- serialized ---
-        CVAR,       // Local variable, not mutable
+        CVAR,       // Local variable, not mutable (its value may be known while folding, see 'known')
         MUTVAR,     // Local variable, mutable
-        // --- not serialized ---
-        CONSTVAL,   // During optimization step: When a CVAR was replaced by a constant value
     };
     Kind kind;
     sref name;
     // -- Nothing below here is serialized --
     u32 decl; // if != 0: node index of node that declares us
 
-    // if kind == CONSTVAL, this is the value, and the type
-    // if kind is a local or downval, val.type is the deduced type, and the rest is not used
     union
     {
-        ValU val; // if kind == CONSTVAL, this is the value, and the type
+        ValU val; // unused
         struct
         {
             _AnyValU _pad;
-            Type type; // PRIMTYPE_AUTO if unknown
+            Type type; // the var's (static) type; PRIMTYPE_AUTO if unknown
         } local;
     } u; // Arranged so that val.type and local.type overlap
+
+    // A CVAR's value if it's known while folding (PRIMTYPE_NOTYPE if not), see knownValue(). References to it
+    // stay var refs (locals stay locals in the generated code); the value is only used for folding.
+    ValU known;
 
     inline bool isMutable() const { return kind == MUTVAR; }
 };
@@ -210,6 +228,11 @@ struct MLPreVisitResult
 };
 typedef MLPreVisitResult (*MLVisitorPre)(MLNode *node, MLNode *parent, void *ud);
 typedef void (*MLVisitorPost)(MLNode *node, MLNode *parent, void *ud, uintptr_t aux);
+
+// Whether a node opens a block (a scope for imports and namespaced locals) when visited as a child of parent:
+// explicit ML_BLOCKs, the root (visited as its own parent), functions, for loops (iterators + body),
+// each branch of an if, and the body of a while.
+bool mlOpensBlock(const MLNode *node, const MLNode *parent);
 
 
 struct MLUpvalRef
@@ -283,6 +306,12 @@ private:
     {
         const HLNode *hl;
         size_t mlidx;
+        unsigned flags; // ConsFlags
+    };
+    enum ConsFlags
+    {
+        CONS_BODY = 1,      // body of a node that opens a block implicitly: a HLNODE_BLOCK here doesn't need an ML_BLOCK
+        CONS_NOTYPEMOD = 2, // an identifier's '?' was already handled (it's the child of the ML_OPTIONAL)
     };
 
     struct MLCh
@@ -294,8 +323,8 @@ private:
     void _setupVars(Symstore& syms, StringPool& sp);
     void _resolveVars(const size_t *unresolved, size_t n, Symstore& syms);
 
-    void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, StringPool& sp); // may reallocate dst
-    void _cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl);
+    void _construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, unsigned flags, StringPool& sp); // may reallocate dst
+    void _cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl, unsigned flags = 0);
 
     MLNode *_add(size_t n); // add a couple nodes to the end as one block; points to first node.
     MLCh _setupCh(MLNode *& node, MLCmd cmd); // assign children to node. may reallocate and invalidate note.

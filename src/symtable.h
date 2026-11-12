@@ -28,6 +28,12 @@ public:
     // Helpers
     const Val *lookupObjectMethod(const GCobj *obj, sref methodname);
 
+    // Adds all entries of o (not those reachable via o.next), namespaced ones included. A key that is already
+    // present with a different value becomes ambiguous: its value is replaced by a PRIMTYPE_NOTYPE marker,
+    // which lookups return like any other value. The same value twice is not ambiguous.
+    void importFrom(GC& gc, const SymTable& o);
+    static inline bool isAmbiguous(const Val *v) { return v && v->type == PRIMTYPE_NOTYPE; }
+
     inline tsize size() const { return tab.size(); }
 
 private:

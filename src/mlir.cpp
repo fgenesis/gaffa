@@ -91,6 +91,7 @@ bool mlirIsStmt(MLCmd cmd)
     case ML_RETURN:
     case ML_EMIT:
     case ML_EXPORT:
+    case ML_BLOCK:
     case ML_SINK:  // not a stmt, but has no value either
         return true;
     default: ;
@@ -111,6 +112,7 @@ static size_t mlirNumParams(MLCmd cmd)
         case ML_FUNC:
         case ML_NEW_TABLE:
         case _ML_FUNCIDX:
+        case ML_UNWRAPBIND:
             return 1;
 
         case ML_NAMEDECL:
@@ -147,6 +149,11 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_NEW_TABLE:
         case ML_EXPORT:
         case ML_SINK:
+        case ML_BLOCK:
+        case ML_IMPORT:
+        case ML_COMPTIME:
+        case ML_OPTIONAL:
+        case ML_UNWRAPBIND:
             return 1;
 
         case ML_NAMEDECL:
@@ -341,6 +348,7 @@ void MLNode::setVal(const ValU& v)
 {
     val = v;
     m.cmd = _ML_VAL; // Write this later in case the compiler decides to copy .val plus padding area
+    m.flags = 0; // known values never need a runtime check
 }
 
 bool MLNode::isconst() const
@@ -353,6 +361,14 @@ void MLNode::setError(sref s)
 {
     m.cmd = _ML_ERROR;
     m.p[0] = s;
+    m.p[1] = 0;
+    m.flags = 0;
+}
+
+void MLNode::setException(sref err, sref what)
+{
+    setError(err);
+    m.p[1] = what;
 }
 
 void MLNode::setError(StringPool& sp, const char* err)
@@ -454,7 +470,7 @@ void MLIR::visit(MLVisitorPre pre, MLVisitorPost post, void *ud)
             vis = pre(&nodes[nodeidx], &nodes[parentidx], ud);
 
         const MLNode *node = &nodes[nodeidx];
-        const u32 nch = (u32)node->numchildren();
+        const u32 nch = vis.res == VISIT_NOREC ? 0 : (u32)node->numchildren();
         const MLVisitFrame f = { nodeidx, parentidx, nch ? u32(nodeidx + node->m.chOffs) : 0, nch, 0, vis.aux };
         MLVisitFrame *pf = stack.push_back(gc, f);
         assert(pf); // TODO: handle alloc fail
@@ -493,13 +509,13 @@ void MLNode::invalidate()
 enum { EXTERNAL_BIT = 1 << 31 };
 
 // does not reallocate nodes[]
-void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl)
+void MLIR::_cons(Queue<Cons>& q, MLNode *dst, const HLNode *hl, unsigned flags)
 {
     dst->m.chOffs = 0;
     if(hl)
     {
         dst->m.cmd = 0xff; // For debugging: Mark as queued
-        Cons next { hl, indexOf(dst) };
+        Cons next { hl, indexOf(dst), flags };
         q.push(gc, next);
     }
     else
@@ -617,13 +633,22 @@ void MLIR::_opr(Queue<Cons>& q, MLNode *& dst, OperatorId op, const HLNode *hl)
 }
 
 // Don't call this recursively, call _cons() instead
-void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, StringPool& sp)
+void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, unsigned flags, StringPool& sp)
 {
     const HLNodeType hltype = (HLNodeType)hl->type;
 
     switch(hltype)
     {
-        case HLNODE_BLOCK:
+        case HLNODE_BLOCK: // A scope. Its stmts go into a list, so a single stmt keeps its block.
+        {
+            if(flags & CONS_BODY) // The parent opens a block anyway, see mlOpensBlock()
+                goto dolist;
+            MLCh s = _setupCh(dst, ML_BLOCK);
+            assert(s.n == 1);
+            dst = &nodes[s.chIdx];
+            goto dolist;
+        }
+
         case HLNODE_LIST:
         {
 dolist:
@@ -640,6 +665,13 @@ dolist:
             return;
 
         case HLNODE_IDENT:
+            if((hl->flags & IDENTFLAGS_OPTIONALTYPE) && !(flags & CONS_NOTYPEMOD)) // T?
+            {
+                MLCh s = _setupCh(dst, ML_OPTIONAL);
+                assert(s.n == 1);
+                _cons(q, &nodes[s.chIdx], hl, CONS_NOTYPEMOD);
+                return;
+            }
             dst->tmp.hlnode = hl;
             dst->m.cmd = _ML_UVAR; // To be resolved later
             return;
@@ -675,6 +707,7 @@ dolist:
                 MLVar *v = vars.alloc_n(gc, 1);
                 v->name = name;
                 v->kind = MLVar::CVAR;
+                v->known.type = PRIMTYPE_NOTYPE;
                 dst->m.p[0] = name;
                 dst->m.p[1] = varidx;
             }
@@ -719,9 +752,49 @@ dolist:
             nodes[idx].m.p[0] = firstvar;
 
             _cons(q, &ch[1], fh->rettypes);
-            _cons(q, &ch[2], f.body);
+            _cons(q, &ch[2], f.body, CONS_BODY);
             return;
         }
+
+        case HLNODE_CONDITIONAL:
+        {
+            const HLConditional& c = hl->u.conditional;
+            MLCh s = _setupCh(dst, ML_IFELSE);
+            assert(s.n == 3);
+            MLNode *ch = &nodes[s.chIdx];
+            _cons(q, &ch[0], c.condition);
+            _cons(q, &ch[1], c.ifblock, CONS_BODY);
+            _cons(q, &ch[2], c.elseblock, CONS_BODY); // no else: empty list
+            return;
+        }
+
+        case HLNODE_UNWRAPBIND: // if(x => v)
+        {
+            const HLUnwrapBind& ub = hl->u.unwrapbind;
+            const u32 symid = ub.ident->as<HLIdent>()->symid;
+            const u32 varidx = symToVarRemap[symid];
+            assert(!(varidx & EXTERNAL_BIT));
+            MLCh s = _setupCh(dst, ML_UNWRAPBIND);
+            assert(s.n == 1);
+            dst->m.p[0] = varidx;
+            _cons(q, &nodes[s.chIdx], ub.val);
+            return;
+        }
+
+        case HLNODE_WHILELOOP:
+        {
+            const HLWhileLoop& w = hl->u.whileloop;
+            MLCh s = _setupCh(dst, ML_WHILE);
+            assert(s.n == 2);
+            MLNode *ch = &nodes[s.chIdx];
+            _cons(q, &ch[0], w.cond);
+            _cons(q, &ch[1], w.body, CONS_BODY);
+            return;
+        }
+
+        case HLNODE_COMPTIME:
+            _setupChDefault(q, dst, hl, hl->tok == Lexer::TOK_IMPORT ? ML_IMPORT : ML_COMPTIME);
+            return;
 
         case HLNODE_RETURNEMIT:
         {
@@ -861,10 +934,10 @@ void MLIR::construct(const HLNode* root, Symstore& syms, StringPool& sp, Options
     PodArray<size_t> unresolved; // index of each node to fix
     unresolved.reserve(gc, syms.knownSize());
 
-    Cons r { root, indexOf(_add(1)) };
+    Cons r { root, indexOf(_add(1)), CONS_BODY }; // the root opens a block
     for(;;)
     {
-        _construct(q, &nodes[r.mlidx], r.hl, sp); // This may reallocate nodes[], don't keep a pointer
+        _construct(q, &nodes[r.mlidx], r.hl, r.flags, sp); // This may reallocate nodes[], don't keep a pointer
 
         if(!(options & STRIP_DEBUGINFO))
         {
@@ -939,6 +1012,7 @@ void MLIR::_setupVars(Symstore& syms, StringPool& sp)
 
             v->name = sym->nameStrId;
             v->kind = mut ? MLVar::MUTVAR : MLVar::CVAR;
+            v->known.type = PRIMTYPE_NOTYPE;
 
             printf("VAR[%u]: %s [kind %u] @ symidx %u\n",
                 symToVarRemap[symid], sp.lookup(v->name).s, v->kind, (unsigned)symid);
@@ -985,7 +1059,10 @@ void MLIR::convertVarDef(MLNode& m, HLNode& h)
 
 MLNode* MLIR::_add(size_t n)
 {
-    return n ? nodes.alloc_n(gc, n) : NULL;
+    MLNode *p = n ? nodes.alloc_n(gc, n) : NULL;
+    if(p)
+        memset(p, 0, n * sizeof(*p)); // flags must start out clear
+    return p;
 }
 
 MLIR::MLCh MLIR::_setupCh(MLNode *& node, MLCmd cmd)
@@ -1067,11 +1144,24 @@ struct MLFoldTracker
         u32 varidx;   // var that a named function declaration assigns to, or NONE
         Type declrets; // type list; PRIMTYPE_AUTO if not declared
         Type deducedrets; // type list; PRIMTYPE_AUTO until the first return
-        SymTable *imports; // NULL until the function imports something
-        size_t nsLocalsStart; // nsLocals[] entries from here on are declared in this function
     };
     std::vector<FoldFunc> foldFuncs;
-    SymTable *fileImports; // file scope import layer; NULL until something is imported there
+
+    // Scopes currently being folded, innermost last: one per ML_BLOCK and one per ML_FUNC (params; the body
+    // is usually an ML_BLOCK with its own scope). The file's root block is the outermost scope.
+    // Blocks currently being folded, innermost last; see mlOpensBlock().
+    struct Scope
+    {
+        SymTable *imports; // import layer; NULL until something is imported in this scope
+        size_t nsLocalsStart; // nsLocals[] entries from here on are declared in this scope
+        u32 stmts; // node holding the block's statements: a list of them, or a single statement
+        std::vector<SymTable*> pending; // imported by the current statement; visible from the next one. TODO GC: not rooted
+    };
+    std::vector<Scope> scopes;
+    void pushScope(u32 stmts);
+    void popScope(); // imports and namespaced locals of the scope go out of scope
+    bool isStmt(const MLNode *node, const MLNode *parent) const; // statement of the innermost block?
+    void flushImports(); // end of a statement in the innermost block
 
     // Namespaced local symbols (func T.f, func T:f), innermost scope last.
     // Looked up before imports and externs.
@@ -1163,17 +1253,88 @@ const MLFoldTracker::NsLocal *MLFoldTracker::findNsLocal(Type ns, sref name) con
     return NULL;
 }
 
+void MLFoldTracker::pushScope(u32 stmts)
+{
+    Scope s;
+    s.imports = NULL;
+    s.nsLocalsStart = nsLocals.size();
+    s.stmts = stmts;
+    scopes.push_back(s);
+}
+
+void MLFoldTracker::popScope()
+{
+    assert(!scopes.empty());
+    nsLocals.resize(scopes.back().nsLocalsStart);
+    scopes.pop_back(); // TODO GC: the import layer is garbage now; pending imports are dropped
+}
+
+bool MLFoldTracker::isStmt(const MLNode *node, const MLNode *parent) const
+{
+    assert(!scopes.empty());
+    const u32 stmts = scopes.back().stmts;
+    const u32 idx = (u32)mlir.indexOf(node);
+    if(idx == stmts) // a single statement
+        return node->m.cmd != ML_LIST;
+    return parent != node && parent->m.cmd == ML_LIST && (u32)mlir.indexOf(parent) == stmts;
+}
+
+void MLFoldTracker::flushImports()
+{
+    Scope& s = scopes.back();
+    for(size_t i = 0; i < s.pending.size(); ++i)
+        if(SymTable *layer = importLayer())
+            layer->importFrom(gc(), *s.pending[i]);
+    s.pending.clear();
+}
+
+bool mlOpensBlock(const MLNode *node, const MLNode *parent)
+{
+    if(node == parent) // the root
+        return true;
+    switch((MLCmd)node->m.cmd)
+    {
+        case ML_BLOCK:
+        case ML_FUNC: // params + body
+        case ML_FOR:  // iterators + body
+            return true;
+        default: ;
+    }
+    const MLNode *ch = parent->firstChild();
+    switch((MLCmd)parent->m.cmd)
+    {
+        case ML_IFELSE: return node == ch + 1 || node == ch + 2; // each branch is its own block
+        case ML_WHILE:  return node == ch + 1;
+        default: ;
+    }
+    return false;
+}
+
+// The node holding the statements of a block opened by node, see mlOpensBlock()
+static u32 blockStmts(MLIR& mlir, MLNode *node)
+{
+    switch((MLCmd)node->m.cmd) // also for the root, which may be a single ML_BLOCK
+    {
+        case ML_BLOCK: return (u32)mlir.indexOf(node->firstChild());
+        case ML_FUNC:  return (u32)mlir.indexOf(node->firstChild() + 2);
+        case ML_FOR:   return (u32)mlir.indexOf(node->firstChild() + 1);
+        default: ;
+    }
+    return (u32)mlir.indexOf(node); // the root, a branch or loop body
+}
+
 SymTable& MLFoldTracker::symbols()
 {
-    for(size_t i = foldFuncs.size(); i--; )
-        if(foldFuncs[i].imports)
-            return *foldFuncs[i].imports;
-    return fileImports ? *fileImports : externalEnv;
+    for(size_t i = scopes.size(); i--; )
+        if(scopes[i].imports)
+            return *scopes[i].imports;
+    return externalEnv;
 }
 
 SymTable *MLFoldTracker::importLayer()
 {
-    SymTable **layer = foldFuncs.empty() ? &fileImports : &foldFuncs.back().imports;
+    assert(!scopes.empty()); // everything is inside the file's root block
+    SymTable **layer = &scopes.back().imports;
     if(!*layer)
     {
         SymTable *outer = &symbols();
@@ -1194,6 +1355,8 @@ bool MLFoldTracker::checktype(Type sub, Type reference, const char *what, const 
     std::ostringstream os;
     if((sub & TYPEBIT_CONST) && vm.rt->tr.isListCompatible(sub & ~TYPEBIT_CONST, reference))
         os << what << " is Const and can't be used as non-Const";
+    else if((sub & TYPEBIT_OPTIONAL) && vm.rt->tr.isListCompatible(sub & ~TYPEBIT_OPTIONAL, reference))
+        os << what << " is optional, unwrap it first (*x, or if(x => v))";
     else
         os << what << " has mismatched type";
     os << " ('" << getTypeName(rt(), sub) << "', expected '" << getTypeName(rt(), reference) << "')";
@@ -1243,6 +1406,7 @@ struct NumValuesResult
 };
 
 static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft);
+static bool foldKnown(MLFoldTracker& ft, MLNode *n);
 
 static NumValuesResult numResultValuesOfList(MLNode *ch, size_t nch, MLFoldTracker& ft)
 {
@@ -1323,7 +1487,7 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
 
             MLNode *numexpr = node->firstChild();
             MLNode *myexpr = numexpr + 1;
-            if(!numexpr->isconst() || numexpr->val.type != PRIMTYPE_UINT)
+            if(!foldKnown(ft, numexpr) || numexpr->val.type != PRIMTYPE_UINT)
             {
                 numexpr->setError(ft.sp(), "Value-adjustment must result in a compile-time constant uint value");
                 return ret;
@@ -1376,8 +1540,8 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
     return ret;
 }
 
-// Replace any external symbols with their value.
-// Any EXT encountered afterwards will be turned into an error node since that symbol wasn't resolvable.
+// Record the value of each external symbol in the external symtab (for debug output).
+// Folding looks them up again where they're used, since imports may provide them.
 static void preFoldExternals(MLExternal *ext, size_t N, MLFoldTracker& ft)
 {
 
@@ -1397,7 +1561,71 @@ static void preFoldVars(MLVar *vars, size_t N, MLFoldTracker& ft)
         v.u.local.type = PRIMTYPE_AUTO; // actual types are assigned or deduced later
         v.u.val.type = PRIMTYPE_AUTO; // error marker, not used, for debugging only
         v.decl = 0; // filled when encountered in ML_DECL during folding
+        v.known.type = PRIMTYPE_NOTYPE;
+        v.known.u.opaque = 0;
     }
+}
+
+// A constant has its value's type, so only a var of a plain type can become one (not T?, any, Const(T))
+static bool isPlainType(Type t)
+{
+    return !(t & (TYPEBIT_OPTIONAL | TYPEBIT_CONST)) && (t & TYPEBASE_MASK) != PRIMTYPE_ANY;
+}
+
+// The value of a folded expr if it's known: a constant, or a var whose value is known (MLVar::known)
+static bool knownValue(MLFoldTracker& ft, const MLNode *n, Val *out)
+{
+    if(n->isconst())
+    {
+        *out = n->asVal();
+        return true;
+    }
+    if(n->m.cmd == ML_VAR)
+    {
+        const MLVar& v = ft.mlir.vars[n->m.p[0]];
+        if(v.kind == MLVar::CVAR && v.known.type != PRIMTYPE_NOTYPE)
+        {
+            *out = v.known;
+            return true;
+        }
+    }
+    return false;
+}
+
+// For places that only use a value at compile time (types, namespaces, comptime, ...): a var ref with a known
+// value becomes that constant. Then the same as isconst().
+static bool foldKnown(MLFoldTracker& ft, MLNode *n)
+{
+    Val v;
+    if(n->m.cmd == ML_VAR && knownValue(ft, n, &v))
+        n->setVal(v);
+    return n->isconst();
+}
+
+// An immutable var with a known value of (static) type t
+static void setVarValue(MLVar *v, const Val& val, Type t)
+{
+    v->u.local.type = t;
+    v->known = val;
+}
+
+// "nil" or "an error value ("msg")"
+static std::string noValueStr(MLFoldTracker& ft, const Val& v)
+{
+    if(v.type == PRIMTYPE_ERROR)
+        return std::string("an error value (\"") + ft.str(v.u.str).s + "\")";
+    return "nil";
+}
+
+// Whether a known value may be fit into t by its value, despite its static type st. any -> T is checked here
+// at compile time. Not Const(T) -> T. T? -> T only if the value is valid (an automatic unwrap, known to be safe).
+static bool staticAllowsValueFit(Type st, Type t, const Val& v)
+{
+    if((st & TYPEBIT_OPTIONAL) && !(t & TYPEBIT_OPTIONAL) && !v.isValidValue())
+        return false;
+    if((st & TYPEBIT_CONST) && !(t & TYPEBIT_CONST))
+        return false;
+    return true;
 }
 
 // >= 0: folded into this manu values
@@ -1411,12 +1639,21 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
     if(!func.isPure() || realargc < func.info.nargs)
         return -1;
 
+    // The results would become constants of their values' types, losing T?, any, Const(T)
+    {
+        const TypeIdList rl = ft.tr().aslist(func.info.rettype);
+        for(size_t i = 0; i < rl.n; ++i)
+            if(!isPlainType(rl.ptr[i] & ~TYPEBIT_VARIADIC))
+                return -4;
+    }
+
     // Need all args to be constant
     // TODO: typeof(x) needs special handling -- only needs known type, not full result
     // TODO: At some point handle special cases like x*0, x*1, 0+x, etc
     // -> Extra DFunc funcptr that exists only for functions supporting this feature (C-side-only!)
+    Val tmp;
     for(size_t i = 0; i < argc; ++i)
-        if(!args[i].isconst())
+        if(!knownValue(ft, &args[i], &tmp))
             return -2;
 
     size_t spaceneeded = std::max<size_t>(func.info.nrets, realargc);
@@ -1429,7 +1666,11 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
     if(methodcall)
         argp[0] = *pself;
     for(size_t i = 0; i < argc; ++i)
-        argp[i+methodcall] = args[i].asVal();
+    {
+        Val a;
+        knownValue(ft, &args[i], &a);
+        argp[i+methodcall] = a;
+    }
 
     // If the function call is successful, argp will hold the return values
     int status = func.call(&ft.vm, reinterpret_cast<Val*>(argp)); // FIXME: typecheck this?
@@ -1457,7 +1698,7 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
         {
             MLNode *rets = args; // Optimistically assume we can re-use the args nodes to store returned values
 
-            if(argc > (size_t)status) // Doesn't fit? Must add new nodes in the end.
+            if((size_t)status > argc) // Doesn't fit? Must add new nodes in the end.
             {
                 size_t callidx = ft.mlir.indexOf(call); // This is going to reallocate...
                 rets = ft.mlir.nodes.alloc_n(ft.gc(), status);
@@ -1479,7 +1720,7 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
         // TODO: Make it so that the function can return a warning or an error to display and handle here
         std::ostringstream os;
         os << "Constant folding failed: " << vmerrstr(status);
-        call->setError(ft.sp(), os.str().c_str());
+        call->setException(ft.putstr(os.str().c_str()).id, ft.putstr(vmerrstr(status)).id);
     }
 
     argspace.dealloc(ft.gc());
@@ -1522,7 +1763,7 @@ static Type typeListFromTypeExprs(MLFoldTracker& ft, MLNode *typeexprs)
     for(size_t i = 0; i < s.n; ++i)
     {
         MLNode *te = &s.ch[i];
-        if(!te->isconst() || te->val.type != PRIMTYPE_TYPE)
+        if(!foldKnown(ft, te) || te->val.type != PRIMTYPE_TYPE)
         {
             if(te->m.cmd != _ML_ERROR)
                 te->setError(ft.sp(), "Expected a type");
@@ -1555,6 +1796,7 @@ struct ValueSlot
     MLNode *expr; // the expression that produces this value
     Type t;
     bool single;  // expr produces only this value
+    u32 idx;      // index of this value among expr's values
 };
 
 static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl);
@@ -1562,10 +1804,10 @@ static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char 
 // Like fitValue(), but without converting or reporting anything
 static bool canFit(MLFoldTracker& ft, const ValueSlot& vs, Type t)
 {
-    if(ft.tr().isCompatible(vs.t, t) || (t == PRIMTYPE_ANY && vs.t != PRIMTYPE_NIL))
+    if(ft.tr().isCompatible(vs.t, t))
         return true;
-    Val tmp;
-    return vs.single && vs.expr->isconst() && convertImplicit(&tmp, vs.expr->asVal(), t);
+    Val kv, tmp;
+    return vs.single && knownValue(ft, vs.expr, &kv) && staticAllowsValueFit(vs.t, t, kv) && convertImplicit(&tmp, kv, t);
 }
 
 static bool hasErrorChild(MLNode *node)
@@ -1652,8 +1894,33 @@ static const DFunc *lookupOperator(MLFoldTracker& ft, MLNode *L, size_t arity, s
     return func;
 }
 
+static Val errorValue(sref msg)
+{
+    Val v = Val(_Str(msg));
+    v.type = PRIMTYPE_ERROR; // same payload as a string
+    return v;
+}
+
 static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
 {
+    {
+        MLNode *ch = node->firstChild();
+        // ??expr: a fold-time exception becomes an error value
+        if((OperatorId)node->m.cmd == OP_QQM && ch->exceptionWhat())
+        {
+            node->setVal(errorValue(ch->exceptionWhat()));
+            return true;
+        }
+        // An exception propagates up through the expression, until '??' or the statement
+        const size_t nch = node->numchildren();
+        for(size_t i = 0; i < nch; ++i)
+            if(ch[i].exceptionWhat())
+            {
+                node->setException(ch[i].m.p[0], ch[i].m.p[1]);
+                return false;
+            }
+    }
+
     if(hasErrorChild(node)) // already reported
     {
         node->x.exprtype = PRIMTYPE_AUTO;
@@ -1667,6 +1934,24 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     assert(arity);
     assert(node->numchildren() == arity);
 
+    // Operands of type T? known to hold a valid value are unwrapped automatically; known to hold none is an error
+    if(opid != OP_QQM && opid != OP_UNWRAP)
+        for(size_t i = 0; i < arity; ++i)
+        {
+            const Type ot = L[i].type();
+            Val kv;
+            if(!(ot & TYPEBIT_OPTIONAL) || !knownValue(ft, &L[i], &kv))
+                continue;
+            if(!kv.isValidValue())
+            {
+                std::ostringstream os;
+                os << "Operand is known to be " << noValueStr(ft, kv) << " here";
+                node->setError(ft.sp(), os.str().c_str());
+                return false;
+            }
+            L[i].x.exprtype = ot & ~TYPEBIT_OPTIONAL; // a var ref, narrowed (constants never have an optional type)
+        }
+
     // Left side of a binary operator defines the namespace it's looked up in
     Type ns = L->type();
     assert(ns != PRIMTYPE_AUTO); // We're post-folding, type should be resolved at this point
@@ -1675,6 +1960,40 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     {
         node->x.exprtype = ns | TYPEBIT_OPTIONAL;
         return true;
+    }
+
+    if(opid == OP_UNWRAP) // *x: T? -> T; panics if x has no value
+    {
+        Val v;
+        const bool known = knownValue(ft, L, &v);
+        if(known)
+        {
+            if(v.type == PRIMTYPE_NIL)
+            {
+                node->setError(ft.sp(), "Unwrapping nil");
+                return false;
+            }
+            if(v.type == PRIMTYPE_ERROR)
+            {
+                std::ostringstream os;
+                os << "Unwrapping an error value: " << ft.str(v.u.str).s;
+                node->setError(ft.sp(), os.str().c_str());
+                return false;
+            }
+        }
+        if(!(ns & TYPEBIT_OPTIONAL)) // a valid value, nothing to unwrap
+        {
+            std::ostringstream os;
+            os << "'*' on a non-optional ('" << getTypeName(ft.rt(), ns) << "') does nothing, the value can be used as-is";
+            ft.warn(node, os.str().c_str());
+        }
+        if(known)
+        {
+            node->setVal(v);
+            return true;
+        }
+        node->x.exprtype = ns & ~TYPEBIT_OPTIONAL;
+        return false;
     }
 
     // && and || aren't functions: bool only, and the rhs is only evaluated if needed
@@ -1687,13 +2006,14 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
                 return false;
             }
         node->x.exprtype = PRIMTYPE_BOOL;
-        if(!L[0].isconst())
+        Val lv, rv;
+        if(!knownValue(ft, &L[0], &lv))
             return false;
-        const bool a = !!L[0].asVal().u.ui;
+        const bool a = !!lv.u.ui;
         if(opid == OP_LOGAND ? !a : a) // result is known from the lhs
             node->setVal(Val(a));
-        else if(L[1].isconst()) // result is the rhs
-            node->setVal(L[1].asVal());
+        else if(knownValue(ft, &L[1], &rv)) // result is the rhs
+            node->setVal(rv);
         else
             return false;
         return true;
@@ -1749,6 +2069,8 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
                 os << (i ? " or '" : " '") << Lexer::GetOperatorName(rows[i].use) << "'";
             os << ")";
         }
+        if(ns & TYPEBIT_OPTIONAL)
+            os << "; '" << getTypeName(ft.rt(), ns) << "' is optional, unwrap it first (*x, or if(x => v))";
         node->setError(ft.sp(), os.str().c_str());
         return false;
     }
@@ -1792,6 +2114,16 @@ static bool tryFoldOpr(MLNode *node, MLFoldTracker& ft)
     return status > 0;
 }
 
+// foldPre() -> foldPost() flags. Decided before folding, since folding may morph the node.
+enum
+{
+    FOLDAUX_BLOCK = 1, // opened a block
+    FOLDAUX_STMT = 2,  // a statement of the enclosing block
+    FOLDAUX_DEAD = 4,  // a branch that never runs: not folded, children not visited
+};
+
+static int knownBranch(MLFoldTracker& ft, const MLNode *cond);
+
 static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
 {
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
@@ -1810,9 +2142,7 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
                 (u32)ft.mlir.indexOf(node),
                 (u32)MLFoldTracker::NONE,
                 PRIMTYPE_AUTO,
-                PRIMTYPE_AUTO,
-                NULL,
-                ft.nsLocals.size()
+                PRIMTYPE_AUTO
             };
             if(parent->m.cmd == ML_NAMEDECL && node == parent->firstChild() + 1)
                 ff.varidx = isNamespacedDecl(parent) ? parent->m.p[1] : ft.mlir.symToVarRemap[parent->m.p[1]];
@@ -1821,6 +2151,30 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
         break;
 
         default: ;
+    }
+
+    // A branch known not to run isn't folded (the if/while drops it)
+    if(parent != node && (parent->m.cmd == ML_IFELSE || parent->m.cmd == ML_WHILE) && node != parent->firstChild())
+    {
+        const MLNode *cond = parent->firstChild();
+        const int known = knownBranch(ft, cond);
+        const bool dead = parent->m.cmd == ML_IFELSE
+            ? (known == 1 && node == cond + 2) || (known == 2 && node == cond + 1)
+            : known == 2;
+        if(dead)
+        {
+            res.res = VISIT_NOREC;
+            res.aux |= FOLDAUX_DEAD;
+        }
+    }
+
+    // Checked before the node opens its own block
+    if(!ft.scopes.empty() && ft.isStmt(node, parent))
+        res.aux |= FOLDAUX_STMT;
+    if(mlOpensBlock(node, parent))
+    {
+        ft.pushScope(blockStmts(ft.mlir, node));
+        res.aux |= FOLDAUX_BLOCK;
     }
 
     return res;
@@ -1885,7 +2239,7 @@ static bool flattenValues(MLFoldTracker& ft, MLNode *ch, size_t n, std::vector<V
             return false;
         if(nv.n == 1 && nv.verdict == NumValuesResult::EXACT_NUMBER)
         {
-            ValueSlot vs = { e, e->type(), true };
+            ValueSlot vs = { e, e->type(), true, 0 };
             slots.push_back(vs);
         }
         else if(nv.n)
@@ -1894,7 +2248,7 @@ static bool flattenValues(MLFoldTracker& ft, MLNode *ch, size_t n, std::vector<V
             assert(tl.n >= nv.n);
             for(size_t k = 0; k < nv.n; ++k)
             {
-                ValueSlot vs = { e, tl.ptr[k], false };
+                ValueSlot vs = { e, tl.ptr[k], false, (u32)k };
                 slots.push_back(vs);
             }
         }
@@ -1946,20 +2300,74 @@ static bool balanceValues(MLFoldTracker& ft, const MLNode *where, size_t nfixed,
 
 // Check that a value fits type t. Constants are converted implicitly if no data is lost.
 // decl is where t comes from, for errors.
+// An 'any' (or 'any?') whose value isn't known fits T (or T?) with a check at runtime. any? -> T needs an unwrap.
+static bool fitsWithRuntimeCheck(Type st, Type t)
+{
+    return (st & TYPEBASE_MASK) == PRIMTYPE_ANY && (t & TYPEBASE_MASK) != PRIMTYPE_ANY
+        && (!(st & TYPEBIT_OPTIONAL) || (t & TYPEBIT_OPTIONAL));
+}
+
+// The value vs gets the static type t, checked at runtime (MLNODE_RTCHECK)
+static void markRuntimeCheck(MLFoldTracker& ft, const ValueSlot& vs, Type t)
+{
+    MLNode *e = vs.expr;
+    if(vs.single)
+        e->x.exprtype = t;
+    else
+    {
+        const TypeIdList tl = ft.tr().aslist(e->type());
+        std::vector<Type> ts(tl.ptr, tl.ptr + tl.n);
+        assert(vs.idx < ts.size());
+        ts[vs.idx] = t;
+        e->x.exprtype = ft.tr().mklistDesc(ts.data(), ts.size())->id();
+    }
+    e->m.flags |= MLNODE_RTCHECK;
+}
+
 static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl)
 {
     if(ft.tr().isCompatible(vs.t, t))
         return true;
-    if(t == PRIMTYPE_ANY && vs.t != PRIMTYPE_NIL) // any holds any value, except nil
-        return true;
-    if(vs.single && vs.expr->isconst())
+    Val v;
+    const bool known = vs.single && knownValue(ft, vs.expr, &v);
+    if(known && (vs.t & TYPEBIT_OPTIONAL) && !(t & TYPEBIT_OPTIONAL) && !v.isValidValue()) // an unwrap known to fail
     {
-        const Val v = vs.expr->asVal();
+        std::ostringstream os;
+        os << what << " is known to be " << noValueStr(ft, v) << " here, which doesn't fit '" << getTypeName(ft.rt(), t) << "'";
+        ft.error(vs.expr, os.str().c_str());
+        return false;
+    }
+    if(!known && fitsWithRuntimeCheck(vs.t, t))
+    {
+        markRuntimeCheck(ft, vs, t);
+        return true;
+    }
+    if(!known && (vs.t & TYPEBIT_OPTIONAL) && !(t & TYPEBIT_OPTIONAL) && fitsWithRuntimeCheck(vs.t & ~TYPEBIT_OPTIONAL, t))
+    {
+        std::ostringstream os;
+        os << what << " is optional, unwrap it first (*x, or if(x => v)) ('" << getTypeName(ft.rt(), vs.t) << "', expected '" << getTypeName(ft.rt(), t) << "')";
+        ft.error(vs.expr, os.str().c_str());
+        return false;
+    }
+    if(known && staticAllowsValueFit(vs.t, t, v))
+    {
         Val conv;
         if(convertImplicit(&conv, v, t))
         {
-            vs.expr->setVal(conv);
+            // Known to be fine, no runtime check needed. A var ref whose value needs no conversion stays a var ref
+            // (locals stay locals), narrowed to type t; otherwise the expr becomes the converted constant.
+            if(vs.expr->m.cmd == ML_VAR && conv.type == v.type && conv.u.opaque == v.u.opaque)
+                vs.expr->x.exprtype = t;
+            else
+                vs.expr->setVal(conv);
             return true;
+        }
+        if((vs.t & TYPEBASE_MASK) == PRIMTYPE_ANY)
+        {
+            std::ostringstream os;
+            os << what << ": the 'any' holds a '" << getTypeName(ft.rt(), v.type) << "' here, which doesn't fit '" << getTypeName(ft.rt(), t) << "'";
+            ft.error(vs.expr, os.str().c_str());
+            return false;
         }
         if(isNumericType(v.type) && isNumericType(t))
         {
@@ -1978,7 +2386,7 @@ static Type sinkType(MLFoldTracker& ft, MLNode *sink)
     MLNode *te = sink->firstChild();
     if(te->m.cmd == _ML_EMPTY || te->m.cmd == _ML_ERROR)
         return PRIMTYPE_AUTO;
-    if(te->isconst() && te->val.type == PRIMTYPE_TYPE)
+    if(foldKnown(ft, te) && te->val.type == PRIMTYPE_TYPE)
         return te->asVal().asDType()->tid;
     te->setError(ft.sp(), "Expected a type");
     return PRIMTYPE_AUTO;
@@ -2027,7 +2435,7 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         {
             case MLVar::CVAR:
             case MLVar::MUTVAR:
-                if(te->isconst())
+                if(foldKnown(ft, te))
                 {
                     Val tv = te->asVal();
                     if(tv.type == PRIMTYPE_TYPE)
@@ -2048,10 +2456,6 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
                     ft.warn(te, os.str().c_str());
                     v->u.local.type = PRIMTYPE_ANY;
                 }
-                break;
-
-            case MLVar::CONSTVAL:
-                assert(false && "constval during decl, should not be folded yet");
                 break;
 
         }
@@ -2079,15 +2483,15 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         }
 
         MLVar *v = &ft.mlir.vars[varidx++];
+        if(te->m.cmd == _ML_ERROR) // already reported, the var is 'any'
+            continue;
         const Type declt = v->u.local.type; // from the declared type, if any
         if(declt != PRIMTYPE_AUTO && !fitValue(ft, vs, declt, "Value", &declroot))
             continue;
         // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
-        if(!v->isMutable() && vs.single && vs.expr->isconst())
-        {
-            v->kind = MLVar::CONSTVAL;
-            v->u.val = vs.expr->asVal(); // converted to the declared type
-        }
+        Val kv;
+        if(!v->isMutable() && vs.single && knownValue(ft, vs.expr, &kv)) // value converted to the declared type
+            setVarValue(v, kv, declt != PRIMTYPE_AUTO ? declt : vs.t);
         else if(declt == PRIMTYPE_AUTO)
             assignVarType(v, vs.t, ft);
     }
@@ -2170,9 +2574,8 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
     {
         methodcall = true;
         Type selftype;
-        if(selfexpr->isconst())
+        if(knownValue(ft, selfexpr, &self))
         {
-            self = selfexpr->asVal();
             selftype = self.getRtType();
             pself = &self;
         }
@@ -2180,7 +2583,7 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
             selftype = selfexpr->type();
 
         // Usually a method name is a string.
-        if(funcexpr->isconst())
+        if(foldKnown(ft, funcexpr))
         {
             if(sref mth = funcexpr->asVal().asString())
                 df = ft.getMethod(selftype, mth);
@@ -2210,9 +2613,10 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
     else
     {
         // If we can get the actual function prefer that, otherwise get just the type
-        if(funcexpr->isconst())
+        Val fv;
+        if(knownValue(ft, funcexpr, &fv))
         {
-            GCobj *obj = funcexpr->asVal().asAnyObj(); // Maybe function or some object. Can be NULL.
+            GCobj *obj = fv.asAnyObj(); // Maybe function or some object. Can be NULL.
             MLFoldTracker::Callable cc = ft.getCallable(obj); // Might be __call operator (it's a method!)
             df = cc.func;
             methodcall = cc.method;
@@ -2279,6 +2683,7 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         ValueSlot selfslot;
         selfslot.expr = selfexpr;
         selfslot.single = true;
+        selfslot.idx = 0;
         selfslot.t = self.getRtType();
         argslots.push_back(selfslot);
     }
@@ -2303,6 +2708,84 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         tryFoldCall(node, *df, args.ch, args.n, -1, ft, pself);
 }
 
+// Only bool and optionals are allowed in conditions (nil and error values count as optionals).
+// any is not optional: it never holds nil or an error (any? does). Turns cond into an error otherwise.
+static bool checkCondition(MLFoldTracker& ft, MLNode *cond)
+{
+    if(cond->m.cmd == _ML_ERROR)
+        return false; // reported later
+    const Type t = cond->type();
+    if(t == PRIMTYPE_BOOL || t == PRIMTYPE_NIL || t == PRIMTYPE_ERROR || (t & TYPEBIT_OPTIONAL))
+        return true;
+    std::ostringstream os;
+    os << "Condition must be bool or an optional, not '" << getTypeName(ft.rt(), t) << "'";
+    cond->setError(ft.sp(), os.str().c_str());
+    return false;
+}
+
+// Which branch of an if is known to run, from its folded condition: 1 = the if branch (or a while body runs),
+// 2 = the else branch (or a while body never runs), 0 = not known. Invalid conditions are reported by checkCondition().
+static int knownBranch(MLFoldTracker& ft, const MLNode *cond)
+{
+    Val v;
+    if(cond->m.cmd == ML_UNWRAPBIND) // x => v succeeds if x is a non-optional or known to hold a value
+    {
+        const MLNode *val = cond->firstChild();
+        if(val->m.cmd == _ML_ERROR)
+            return 0;
+        // (known to have no value: the unwrapbind became the constant false)
+        return !(val->type() & TYPEBIT_OPTIONAL) || knownValue(ft, val, &v) ? 1 : 0;
+    }
+    if(!knownValue(ft, cond, &v))
+        return 0;
+    const Type t = cond->type();
+    if(t == PRIMTYPE_BOOL)
+        return v.u.ui ? 1 : 2;
+    if((t & TYPEBIT_OPTIONAL) || t == PRIMTYPE_NIL || t == PRIMTYPE_ERROR)
+        return v.isValidValue() ? 1 : 2;
+    return 0; // reported by checkCondition()
+}
+
+// The values of a completely folded expr: one constant, or a list of constants (a call folded into
+// several or no values). False if it isn't completely folded.
+static bool constValues(MLNode *e, MLSub *out)
+{
+    if(e->isconst())
+    {
+        out->ch = e;
+        out->n = 1;
+        return true;
+    }
+    if(e->m.cmd != ML_LIST)
+        return false;
+    const MLSub s = e->aslist();
+    for(size_t i = 0; i < s.n; ++i)
+        if(!s.ch[i].isconst())
+            return false;
+    *out = s;
+    return true;
+}
+
+// Replace node with vals, minus the first 'skip' ones. Doesn't add nodes: several values become a list
+// referencing the existing value nodes.
+static void replaceByValues(MLNode *node, const MLSub& vals, size_t skip)
+{
+    assert(skip <= vals.n);
+    const size_t n = vals.n - skip;
+    if(!n)
+        node->makedummy();
+    else if(n == 1)
+        node->setVal(vals.ch[skip].asVal());
+    else
+    {
+        MLNode *first = &vals.ch[skip];
+        assert(node < first); // children always come after their parent
+        node->m.cmd = ML_LIST;
+        node->list.len = (u32)n;
+        node->m.chOffs = (u32)(first - node);
+    }
+}
+
 static void foldNode(MLNode *node, MLFoldTracker& ft)
 {
     const MLCmd cmd = (MLCmd)node->m.cmd;
@@ -2315,11 +2798,99 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         case _ML_EMPTY:
             return;
 
+        case ML_BLOCK: // the scope is handled in foldPre()/foldPost()
+            return;
+
+        case ML_OPTIONAL:
+        {
+            MLNode *te = node->firstChild();
+            if(te->m.cmd == _ML_ERROR)
+            {
+                node->setError(te->m.p[0]);
+                return;
+            }
+            const DType *dt = foldKnown(ft, te) ? te->asVal().asDType() : NULL;
+            const DType *opt = dt ? ft.tr().mkoptional(dt) : NULL;
+            if(!opt)
+            {
+                const char *err = dt ? "This type can't be optional"
+                    : te->isconst() && te->asVal().type == PRIMTYPE_NIL ? "nil is a value, not a type"
+                    : "'?' needs a compile-time constant type";
+                node->setError(ft.sp(), err);
+                return;
+            }
+            node->setVal(Val(const_cast<DType*>(opt)));
+            return;
+        }
+
+        case ML_UNWRAPBIND:
+        {
+            MLNode *val = node->firstChild();
+            MLVar *v = &ft.mlir.vars[node->m.p[0]];
+            v->decl = (u32)ft.mlir.indexOf(node);
+            v->u.local.type = PRIMTYPE_ANY; // until known; avoids follow-up errors
+            if(val->m.cmd == _ML_ERROR)
+            {
+                node->setError(val->m.p[0]);
+                return;
+            }
+            Val kv;
+            const bool known = knownValue(ft, val, &kv);
+            if(known && !kv.isValidValue()) // nil or an error: always the else branch
+            {
+                node->setVal(Val(false));
+                return;
+            }
+            const Type t = val->type();
+            if(!(t & TYPEBIT_OPTIONAL)) // a valid value: always succeeds, see knownBranch()
+            {
+                std::ostringstream os;
+                os << "'=>' on a non-optional ('" << getTypeName(ft.rt(), t) << "') always succeeds, the if branch is always taken";
+                ft.warn(node, os.str().c_str());
+            }
+            v->u.local.type = t & ~TYPEBIT_OPTIONAL;
+            if(known) // v is known, too (the if folds into [unwrapbind, ifbranch], see knownBranch())
+                setVarValue(v, kv, t & ~TYPEBIT_OPTIONAL);
+            node->x.exprtype = PRIMTYPE_BOOL;
+            return;
+        }
+
+        case ML_COMPTIME:
+        case ML_IMPORT:
+        {
+            MLNode *e = node->firstChild();
+            if(e->m.cmd == _ML_ERROR) // move it up so that it's still reported
+            {
+                node->setError(e->m.p[0]);
+                return;
+            }
+            foldKnown(ft, e); // consumed at compile time
+            MLSub vals;
+            if(!constValues(e, &vals))
+            {
+                node->setError(ft.sp(), cmd == ML_IMPORT
+                    ? "import needs a compile-time constant symtab"
+                    : "comptime value is not a compile-time constant");
+                return;
+            }
+            if(cmd == ML_IMPORT)
+            {
+                SymTable *st = vals.n ? vals.ch[0].asVal().asSymTab() : NULL;
+                if(!st)
+                {
+                    node->setError(ft.sp(), "import needs a symtab as its first value");
+                    return;
+                }
+                ft.scopes.back().pending.push_back(st); // visible from the next statement
+            }
+            replaceByValues(node, vals, cmd == ML_IMPORT);
+            return;
+        }
+
         case ML_FUNC:
         {
             const MLFoldTracker::FoldFunc ff = ft.foldFuncs.back();
             ft.foldFuncs.pop_back();
-            ft.nsLocals.resize(ff.nsLocalsStart); // namespaced locals of the function go out of scope
             assert(ff.nodeidx == ft.mlir.indexOf(node));
             Type rets = ff.declrets;
             if(rets == PRIMTYPE_AUTO)
@@ -2357,9 +2928,17 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
 
         case ML_EXT:
         {
-            MLExternal *e = &ft.mlir.externals[node->m.p[0]];
-            if(e->val.type != PRIMTYPE_NOTYPE) // set by preFoldExternals() if unresolved
-                node->setVal(e->val);
+            // Looked up where it's used: imports of the enclosing blocks, then the externals
+            const MLExternal *e = &ft.mlir.externals[node->m.p[0]];
+            const Val *val = ft.symbols().lookupSymbol(e->name);
+            if(SymTable::isAmbiguous(val))
+            {
+                std::ostringstream os;
+                os << "'" << ft.str(e->name).s << "' is provided by more than one import";
+                node->setError(ft.sp(), os.str().c_str());
+            }
+            else if(val)
+                node->setVal(*val);
             else
             {
                 std::ostringstream os;
@@ -2374,12 +2953,9 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         {
             u32 varid = node->m.p[0];
             MLVar *v = &ft.mlir.vars[varid];
+
             switch(v->kind)
             {
-                case MLVar::CONSTVAL:
-                    node->setVal(v->u.val);
-                    return;
-
                 case MLVar::CVAR:
                 case MLVar::MUTVAR:
                 {
@@ -2412,7 +2988,7 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
             MLNode *ns = node->firstChild();
             MLNode *key = ns + 1;
 
-            if(!ns->isconst())
+            if(!foldKnown(ft, ns))
             {
                 node->setError(ft.sp(), "Namespace must be compile-time known");
                 return;
@@ -2444,7 +3020,15 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
                 return;
             }
 
-            if(const Val *val = ft.symbols().lookupInNamespace(nstype->tid, keyval.u.str))
+            const Val *nsval = ft.symbols().lookupInNamespace(nstype->tid, keyval.u.str);
+            if(SymTable::isAmbiguous(nsval))
+            {
+                std::ostringstream os;
+                os << getTypeName(ft.rt(), nstype->tid) << "::" << ft.str(keyval.u.str).s << " is provided by more than one import";
+                node->setError(ft.sp(), os.str().c_str());
+                return;
+            }
+            if(const Val *val = nsval)
             {
                 printf("%s::%s replaced with constant from env\n",
                     GetPrimTypeName(val->type), ft.str(keyval.u.str).s);
@@ -2481,7 +3065,7 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
                     v->u.local.type = valnode->type();
                     break;
                 case _ML_VAL:
-                    v->u.val = valnode->asVal();
+                    setVarValue(v, valnode->asVal(), valnode->type());
                     break;
                 case _ML_ERROR:
                     break;
@@ -2533,7 +3117,9 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         case ML_WHILE:
         {
             MLNode *cond = node->firstChild();
-            if(cond->isconst() && !cond->asVal().isTruthy())
+            if(!checkCondition(ft, cond))
+                break;
+            if(knownBranch(ft, cond) == 2) // the body never runs (and wasn't folded)
                 node->makedummy();
         }
         break;
@@ -2541,11 +3127,18 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         case ML_IFELSE:
         {
             MLNode *cond = node->firstChild();
-            if(cond->isconst())
+            if(!checkCondition(ft, cond))
+                break;
+            const int known = knownBranch(ft, cond);
+            if(known == 1 && cond->m.cmd == ML_UNWRAPBIND) // still binds v: [unwrapbind, ifbranch]
             {
-                MLNode *ifbr = cond + 1;
-                MLNode *elsebr = cond + 2;
-                MLNode *taken = cond->asVal().isTruthy() ? ifbr : elsebr;
+                node->m.cmd = ML_LIST;
+                node->list.len = 2;
+                node->m.chOffs = cond - node;
+            }
+            else if(known)
+            {
+                MLNode *taken = known == 1 ? cond + 1 : cond + 2;
                 node->m.cmd = ML_LIST;
                 node->list.len = 1;
                 node->m.chOffs = taken - node;
@@ -2587,7 +3180,7 @@ static void declareNsLocal(MLFoldTracker& ft, MLNode *namedecl, MLNode *ns)
 {
     if(ns->m.cmd == _ML_ERROR)
         return; // already reported
-    const DType *dt = ns->isconst() ? ns->asVal().asDType() : NULL;
+    const DType *dt = foldKnown(ft, ns) ? ns->asVal().asDType() : NULL;
     if(!dt)
     {
         ns->setError(ft.sp(), "Namespace of a function declaration must be a compile-time constant type");
@@ -2626,7 +3219,17 @@ static void declareNsLocal(MLFoldTracker& ft, MLNode *namedecl, MLNode *ns)
 static void foldPost(MLNode *node, MLNode *parent, void *ud, uintptr_t aux)
 {
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
+    if(aux & FOLDAUX_DEAD)
+    {
+        if(aux & FOLDAUX_BLOCK)
+            ft.popScope();
+        return;
+    }
     foldNode(node, ft);
+    if(aux & FOLDAUX_BLOCK)
+        ft.popScope();
+    if(aux & FOLDAUX_STMT)
+        ft.flushImports();
 
     if(parent && parent->m.cmd == ML_NAMEDECL && node == parent->firstChild() && isNamespacedDecl(parent))
         declareNsLocal(ft, parent, node);
@@ -2719,6 +3322,10 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
             addLocal(ft, isNamespacedDecl(node) ? node->m.p[1] : ft.mlir.symToVarRemap[node->m.p[1]]);
             break;
 
+        case ML_UNWRAPBIND:
+            addLocal(ft, node->m.p[0]);
+            break;
+
         default:
             break; // Nothing to do
     }
@@ -2769,12 +3376,15 @@ static void checkVarReference(MLFoldTracker& ft, u32 funcidx, MLNode *node)
     const u32 owner = ft.varOwner[varidx];
     assert(owner != MLFoldTracker::NONE); // referenced but never declared?
 
-    if(owner == funcidx)
+    const MLVar& v = ft.mlir.vars[varidx];
+    if(owner == funcidx) // locals stay locals, even if their value is known
     {
         node->m.cmd = _ML_LOCAL;
         node->m.p[0] = ft.varSlot[varidx];
     }
-    else
+    else if(v.kind == MLVar::CVAR && v.known.type != PRIMTYPE_NOTYPE)
+        node->setVal(v.known); // a constant of another function: cheaper inlined than as an upvalue. Typechecking is done.
+    else // mutable, or immutable with a value only known at runtime
     {
         node->m.cmd = _ML_UPVAL;
         node->m.p[0] = addUpvalueReference(ft, funcidx, varidx);
@@ -2847,7 +3457,6 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &extSyms)
     // TODO: also add an "exported" env; because we don't want to export ALL the local namedecls
     MLFoldTracker ft = { *this, vm, syms, extSyms, true };
     ft.assignMode = MLFoldTracker::ASSIGN_EXACT;
-    ft.fileImports = NULL;
 
     ft.typesrc.resize(nodes.size());
     preFoldExternals(externals.data(), externals.size(), ft);
@@ -2856,6 +3465,8 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &extSyms)
     // This does constant folding & propagation
     visit(foldPre, foldPost, &ft);
     assert(ft.foldFuncs.empty());
+    assert(ft.scopes.empty());
+    assert(ft.nsLocals.empty());
 
     // Create the root function that encompasses the entire file scope
     MLFunc *mf = GA_PLACEMENT_NEW(ft.mlir.funcs.alloc_n(ft.gc(), 1)) MLFunc; // TODO: alloc fail
@@ -2881,8 +3492,6 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &extSyms)
         assert(ft.funcStack.empty());
         assert(ft.nextFunc == funcs.size());
     }
-
-    printf("File import table: %u entries\n", ft.fileImports ? (unsigned)ft.fileImports->size() : 0u);
 
     size_t N = funcs.size();
     printf("MLIR: Broke tree into %u functions:\n", (unsigned)N);

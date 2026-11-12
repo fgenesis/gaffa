@@ -439,11 +439,35 @@ static void reg_builtins(RTReg& r)
     r.regfunc(NULL, "errstr", u_errstr, anyopt1, 1, stropt1, 1, FuncInfo::Pure);
 }
 
+// For testing import until scripts can build symtabs:
+// __testmod(n) -> symtab {tval = n, t<n> = n, string::tns = n}, n + 1
+static int u_testmod(VM *vm, Val *v)
+{
+    if(v[0].type != PRIMTYPE_UINT)
+        return RTE_INCOMPATIBLE_TYPE;
+    const uint n = v[0].u.ui;
+    Runtime& rt = *vm->rt;
+    SymTable *st = SymTable::GCNew(rt.gc); // TODO GC: not rooted
+    if(!st)
+        return RTE_ALLOC_FAIL;
+    char name[32];
+    snprintf(name, sizeof(name), "t%u", (unsigned)n);
+    st->addSymbol(rt.gc, rt.sp.put("tval").id, Val(n));
+    st->addSymbol(rt.gc, rt.sp.put(name).id, Val(n));
+    st->addToNamespace(rt.gc, PRIMTYPE_STRING, rt.sp.put("tns").id, Val(n));
+    v[0] = Val(st);
+    v[1] = Val(n + 1);
+    return 2;
+}
+
 static void reg_test(RTReg& r)
 {
     const Type uint1[] = { PRIMTYPE_UINT };
     r.regfunc(NULL, "clock", u_clock, NULL, 0, uint1, 1, FuncInfo::None);
     r.regfunc(NULL, "time", u_clock, NULL, 0, uint1, 1, FuncInfo::None);
+
+    const Type symtab_uint[] = { PRIMTYPE_SYMTAB, PRIMTYPE_UINT };
+    r.regfunc(NULL, "__testmod", u_testmod, uint1, 1, symtab_uint, 2, FuncInfo::Pure);
 }
 
 void rtinit(SymTable& syms, GC& gc, StringPool& sp, TypeRegistry& tr)

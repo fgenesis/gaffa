@@ -57,6 +57,20 @@ const Val* SymTable::lookupInNamespace(Type ns, sref key) const
     return v ? v : (next ? next->lookupInNamespace(ns, key) : NULL);
 }
 
+void SymTable::importFrom(GC& gc, const SymTable& o)
+{
+    const tsize n = o.tab.size();
+    for(tsize i = 0; i < n; ++i)
+    {
+        const Val k = o.tab.keyat(i); // not a real Val, see addToNamespace(); only passed through
+        Val v = o.tab.values().dynamicLookup(i);
+        if(const Val *have = tab.getp(k))
+            if(have->type != v.type || have->u.opaque != v.u.opaque)
+                v = _Notype();
+        tab.set(gc, k, v);
+    }
+}
+
 const Val *SymTable::lookupObjectMethod(const GCobj* obj, sref methodname)
 {
     Type t = obj->dtype->tid;
