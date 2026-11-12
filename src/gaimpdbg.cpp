@@ -45,6 +45,7 @@ static const char *getLabel(HLNodeType t)
         case HLNODE_UNWRAPBIND:     return "unwrapbind";
         case HLNODE_ANDOR:          return "and/or";
         case HLNODE_VALBLOCK:       return "valblock";
+        case HLNODE_COMPTIME:       return "comptime";
         case HLNODE_VARARGS:        return "...";
     }
     return NULL;

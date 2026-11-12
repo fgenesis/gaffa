@@ -73,6 +73,7 @@ protected:
     HLNode *stmt();
 
     HLNode *valblock(Context ctx); // after $
+    HLNode *comptime(Context ctx); // after 'comptime' or 'import'
 
     // control flow
     HLNode *conditional(); // after if

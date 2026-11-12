@@ -301,6 +301,8 @@ const Parser::ParseRule Parser::Rules[] =
     { Lexer::TOK_SINK,   &Parser::badSink,     NULL,        NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_WSINK,  &Parser::badSink,     NULL,        NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
     { Lexer::TOK_DOLLAR, &Parser::valblock, NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
+    { Lexer::TOK_IMPORT, &Parser::comptime, NULL,            NULL,             Parser::PREC_UNARY,     Parser::OPF_NONE },
+    { Lexer::TOK_COMPTIME,&Parser::comptime,NULL,            NULL,             Parser::PREC_UNARY,     Parser::OPF_NONE },
     { Lexer::TOK_FUNC,   &Parser::closurecons,NULL,          NULL,             Parser::PREC_NONE,      Parser::OPF_NONE },
 
     { Lexer::TOK_E_ERROR,NULL,              NULL,            NULL,             Parser::PREC_NONE,      Parser::OPF_NONE }
@@ -411,8 +413,8 @@ HLNode* Parser::stmt()
             ret = _assignTarget();
             if(match(Lexer::TOK_COMMA) || match(Lexer::TOK_CASSIGN) || match(Lexer::TOK_MASSIGN))
                 ret = _assignment(ret, beg);
-            else if(!(ret->iscall() || ret->type == HLNODE_CALLADJ || ret->type == HLNODE_NONE))
-                errorAt(beg, "Expected statement", "An expression on its own must be a call");
+            else if(!(ret->iscall() || ret->type == HLNODE_CALLADJ || ret->type == HLNODE_COMPTIME || ret->type == HLNODE_NONE))
+                errorAt(beg, "Expected statement", "An expression on its own must be a call, 'import' or 'comptime'");
         }
         break;
     }
@@ -511,6 +513,16 @@ HLNode* Parser::valblock(Context ctx)
     node->u.valblock.body = stmt();
     --_fctx.valblocks;
     _endScope();
+    return node;
+}
+
+// comptime expr / import expr -- prefix operators at unary precedence
+HLNode* Parser::comptime(Context ctx)
+{
+    // 'comptime' or 'import' was just eaten
+    HLNode *node = ensure(hlir->comptime(), prevtok);
+    node->tok = prevtok.tt;
+    node->u.comptime.what = parsePrecedence(PREC_UNARY);
     return node;
 }
 
@@ -1990,7 +2002,7 @@ static bool canStartStatement(Lexer::TokenType tt)
         case Lexer::TOK_IDENT: case Lexer::TOK_SINK: case Lexer::TOK_WSINK: case Lexer::TOK_LPAREN: case Lexer::TOK_LCUR:
         case Lexer::TOK_DOLLAR: case Lexer::TOK_VAR: case Lexer::TOK_FUNC: case Lexer::TOK_IF:
         case Lexer::TOK_FOR: case Lexer::TOK_WHILE: case Lexer::TOK_RETURN: case Lexer::TOK_EMIT:
-        case Lexer::TOK_BREAK: case Lexer::TOK_CONTINUE: case Lexer::TOK_EXPORT:
+        case Lexer::TOK_BREAK: case Lexer::TOK_CONTINUE: case Lexer::TOK_EXPORT: case Lexer::TOK_IMPORT: case Lexer::TOK_COMPTIME:
             return true;
         default:
             return false;

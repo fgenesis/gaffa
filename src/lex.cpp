@@ -84,6 +84,8 @@ static const Keyword Keywords[] =
     { "export",    Lexer::TOK_EXPORT   },
     { "emit",      Lexer::TOK_EMIT     },
     { "defer",     Lexer::TOK_DEFER    },
+    { "import",    Lexer::TOK_IMPORT   },
+    { "comptime",  Lexer::TOK_COMPTIME },
     // Below: Not handled yet, reserving for later
     { "like",      Lexer::TOK_LIKE     },
     { "do",        Lexer::TOK_DO       },

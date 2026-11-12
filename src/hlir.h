@@ -75,6 +75,7 @@ enum HLNodeType
     HLNODE_ANDOR,
     HLNODE_VALBLOCK,
     HLNODE_VARARGS,
+    HLNODE_COMPTIME, // 'comptime expr' or 'import expr'; node->tok tells which
 };
 
 enum HLTypeFlags
@@ -165,6 +166,13 @@ struct HLValBlock : HLNodeBase
 {
     enum { EnumType = HLNODE_VALBLOCK, Children = 1, DefaultValType = PRIMTYPE_AUTO };
     HLNode *body;
+};
+
+// comptime expr, import expr
+struct HLComptime : HLNodeBase
+{
+    enum { EnumType = HLNODE_COMPTIME, Children = 1, DefaultValType = PRIMTYPE_AUTO };
+    HLNode *what;
 };
 
 // '...' used as expression
@@ -378,6 +386,7 @@ struct HLNode
         HLRange range;
         HLAndOr andor;
         HLValBlock valblock;
+        HLComptime comptime;
         HLFnCall fncall;
         HLMthCall mthcall;
         HLCallAdj calladj;
@@ -487,6 +496,7 @@ public:
     inline HLNode *range()         { return allocT<HLRange>();         }
     inline HLNode *andor()         { return allocT<HLAndOr>();         }
     inline HLNode *valblock()      { return allocT<HLValBlock>();      }
+    inline HLNode *comptime()      { return allocT<HLComptime>();      }
     inline HLNode *varargs()       { return allocT<HLVarargs>();       }
     inline HLNode *fncall()        { return allocT<HLFnCall>();        }
     inline HLNode *mthcall()       { return allocT<HLMthCall>();       }

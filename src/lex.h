@@ -80,6 +80,8 @@ public:
         TOK_EXPORT, // export
         TOK_EMIT,   // emit
         TOK_DEFER,  // defer
+        TOK_IMPORT, // import
+        TOK_COMPTIME,// comptime
         TOK_DO,     // do
         TOK_TRY,    // try
         TOK_CATCH,  // catch
