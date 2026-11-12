@@ -349,6 +349,11 @@ static void reg_types_special(RTReg& r)
     DType *noret = r.tr.mkprim(PRIMTYPE_NORETURN);
     r.types.noreturn = noret;
     r.regclass("noreturn", noret);
+
+    // The types of nil and of error values, needed as value types (eg. a function returning an error value).
+    // Not named: there's no reason to use them as types in scripts.
+    r.tr.mkprim(PRIMTYPE_NIL);
+    r.tr.mkprim(PRIMTYPE_ERROR);
 }
 
 static void reg_constants(RTReg& r)
@@ -387,10 +392,51 @@ static int u_const(VM *vm, Val *v)
     return 1;
 }
 
+static int u_optional(VM *vm, Val *v)
+{
+    DType *t = v->asDType();
+    if(!t)
+        return RTE_INCOMPATIBLE_TYPE;
+
+    DType *to = vm->rt->tr.mkoptional(t);
+    if(!to)
+        return RTE_INCOMPATIBLE_TYPE;
+
+    *v = Val(to);
+    return 1;
+}
+
+// error("msg"): an error value, the error state of an optional. Same payload as the string.
+static int u_error(VM *vm, Val *v)
+{
+    if(v->type != PRIMTYPE_STRING)
+        return RTE_INCOMPATIBLE_TYPE;
+    v->type = PRIMTYPE_ERROR;
+    return 1;
+}
+
+// errstr(x) -> string?: the message if x is an error value, otherwise nil
+static int u_errstr(VM *vm, Val *v)
+{
+    if(v->type == PRIMTYPE_ERROR)
+        v->type = PRIMTYPE_STRING;
+    else
+        *v = _Nil();
+    return 1;
+}
+
 static void reg_builtins(RTReg& r)
 {
     const Type type1[] = { PRIMTYPE_TYPE };
     r.regfunc(NULL, "Const", u_const, type1, 1, type1, 1, FuncInfo::Pure);
+    r.regfunc(NULL, "optional", u_optional, type1, 1, type1, 1, FuncInfo::Pure);
+
+    const Type str1[] = { PRIMTYPE_STRING };
+    const Type err1[] = { PRIMTYPE_ERROR };
+    const Type anyopt1[] = { PRIMTYPE_ANY | TYPEBIT_OPTIONAL };
+    const Type stropt1[] = { PRIMTYPE_STRING | TYPEBIT_OPTIONAL };
+    r.regfunc(NULL, "error", u_error, str1, 1, err1, 1, FuncInfo::Pure);
+    r.regfunc(NULL, "errstr", u_errstr, anyopt1, 1, stropt1, 1, FuncInfo::Pure);
 }
 
 static void reg_test(RTReg& r)

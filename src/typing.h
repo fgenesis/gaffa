@@ -187,6 +187,7 @@ public:
     // Const(T): T with TYPEBIT_CONST for mutable reference types (and unions), T itself otherwise.
     // NULL if t is a plain type list.
     DType *mkconst(DType *t) const;
+    DType *mkoptional(const DType *t) const; // T? (T?? is T?); NULL if T can't be optional (typelists, nil, error)
 
     // Pointer to list start if plain typelist, or to single element
     TypeIdList aslist(Type t) const;

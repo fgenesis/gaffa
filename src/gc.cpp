@@ -75,8 +75,7 @@ static int markval(ga_RT& rt, ValU v, int steps)
     }
     else switch(v.type)
     {
-        case PRIMTYPE_ERROR:
-            assert(false); // ??? FIXME
+        case PRIMTYPE_ERROR: // carries a message, like a string
         case PRIMTYPE_STRING:
             rt.sp.mark(v.u.str);
             break;

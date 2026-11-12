@@ -226,6 +226,14 @@ DType *TypeRegistry::mkconst(DType *t) const
     return asObj(t->tid | TYPEBIT_CONST);
 }
 
+DType *TypeRegistry::mkoptional(const DType *t) const
+{
+    const Type base = t->tid & TYPEBASE_MASK;
+    if(t->tdesc->kind == TKIND_TYPELIST || base == PRIMTYPE_NIL || base == PRIMTYPE_ERROR)
+        return NULL;
+    return asObj(t->tid | TYPEBIT_OPTIONAL);
+}
+
 DType *TypeRegistry::asObj(const TDesc *td) const
 {
     if(!td)
@@ -298,6 +306,13 @@ bool TypeRegistry::isCompatible(Type sub, Type bigger) const
 {
     if(sub == bigger)
         return true;
+    if(bigger & TYPEBIT_OPTIONAL) // T -> T?; nil and error values -> T?
+        return sub == PRIMTYPE_NIL || sub == PRIMTYPE_ERROR
+            || isCompatible(sub & ~TYPEBIT_OPTIONAL, bigger & ~TYPEBIT_OPTIONAL);
+    if(sub & TYPEBIT_OPTIONAL) // T? -> T needs an unwrap
+        return false;
+    if(bigger == PRIMTYPE_ANY) // any holds any valid value: not nil or errors (any? does)
+        return sub != PRIMTYPE_NIL && sub != PRIMTYPE_ERROR;
     return (bigger & TYPEBIT_CONST) && (sub | TYPEBIT_CONST) == bigger;
 }
 

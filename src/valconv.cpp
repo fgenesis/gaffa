@@ -1,4 +1,5 @@
 #include "valconv.h"
+#include "typing.h"
 #include <math.h>
 
 bool isNumericType(Type t)
@@ -27,6 +28,15 @@ bool realToSint(sint *dst, real f)
 
 bool convertImplicit(Val *dst, const Val& src, Type t)
 {
+    if(t & TYPEBIT_OPTIONAL) // T? holds nil or a T
+    {
+        if(src.type == PRIMTYPE_NIL || src.type == PRIMTYPE_ERROR)
+        {
+            *dst = src;
+            return true;
+        }
+        t &= ~TYPEBIT_OPTIONAL;
+    }
     if(src.type == t)
     {
         *dst = src;
