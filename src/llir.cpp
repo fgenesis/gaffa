@@ -142,6 +142,10 @@ int LLCodegen::_lower_inner(const MLNode& ml)
     const MLNode *ch = nch ? ml.firstChild() : NULL;
     switch((MLCmd)ml.m.cmd)
     {
+        case ML_BLOCK: assert(nch == 1);
+            _lower_scopedExplicit(ch[0], ML_BLOCK);
+            break;
+
         case ML_IFELSE: assert(nch == 3);
         {
             Label Lelse = label();
@@ -275,13 +279,29 @@ int LLCodegen::_lower_expr(const MLNode & ml, size_t dstidx)
 {
     assert(false); // TODO
 
+    int n = 0;
     switch((MLCmd)ml.m.cmd)
     {
-        case _ML_VAL: loadConstant(dstidx, ml.val); return 1;
-        case ML_VAR: emitAssignment(dstidx, getVarIdxFromMLIdx(ml.m.p[0]));
+        case _ML_VAL: loadConstant(dstidx, ml.val); return 1; // constants never need a runtime check
+        case ML_VAR: emitAssignment(dstidx, getVarIdxFromMLIdx(ml.m.p[0])); n = 1; break;
+        default: ;
     }
 
-    return 0;
+    if(n && (ml.m.flags & MLNODE_RTCHECK))
+        emitTypeChecks(ml, dstidx, n);
+
+    return n;
+}
+
+// The n values starting at dstidx must have the node's type (a type list for several values)
+void LLCodegen::emitTypeChecks(const MLNode& ml, size_t dstidx, size_t n)
+{
+    const TypeIdList tl = _rt.tr.aslist(ml.x.exprtype);
+    for(size_t i = 0; i < n && i < tl.n; ++i)
+    {
+        const tsize cid = consts.put(Val(_rt.tr.asObj(tl.ptr[i])));
+        emit(LL_TYPECHECK, vars[dstidx + i].localslot, cid);
+    }
 }
 
 LLIters LLCodegen::_lower_iters(const MLNode& ml)

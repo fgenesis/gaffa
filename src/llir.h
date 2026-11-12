@@ -229,6 +229,7 @@ private:
     void emitAssignment(tsize dst, tsize src); // does the correct sequence for locals/upvals or mixed
     LLVarRef getVarRef(tsize id) const;
     void loadConstant(u32 idx, Val c);
+    void emitTypeChecks(const MLNode& ml, size_t dstidx, size_t n); // for MLNODE_RTCHECK
     u32 getVarIdxFromMLIdx(u32 mlvar) const;
 
     int _initUpvalues(const Val *upvals, size_t nupvals);
