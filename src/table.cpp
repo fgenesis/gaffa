@@ -162,46 +162,52 @@ void Table::_cleanupforward(tsize idx)
 tsize Table::_resize(GC& gc, tsize newsize)
 {
     assert(isValidCap(newsize));
-    const tsize oldcap = idxmask + 1;
-    TKey *newk = gc_alloc_unmanaged_T<TKey>(gc, keys, oldcap, newsize);
-    tsize *newbk = gc_alloc_unmanaged_T<tsize>(gc, backrefs, oldcap, newsize);
+    const tsize oldcap = idxmask + 1; // 0 if there are no keys yet
+    TKey * const oldk = keys;
 
-    if(newsize && !(newk && newbk))
+    // Rehash into a fresh key array. Rehashing in place breaks probe chains: a key moved to a slot beyond
+    // one whose old key hasn't been moved yet can't be found anymore once that slot is emptied.
+    TKey *newk = NULL;
+    if(newsize)
     {
-        if(newk)
-            gc_alloc_unmanaged_T<TKey>(gc, newk, oldcap, 0);
-        if(newbk)
-            gc_alloc_unmanaged_T<tsize>(gc, newbk, oldcap, 0);
+        newk = gc_alloc_unmanaged_T<TKey>(gc, NULL, 0, newsize);
+        if(!newk)
+            return 0;
+    }
+    tsize *newbk = gc_alloc_unmanaged_T<tsize>(gc, backrefs, oldcap, newsize);
+    if(newsize && !newbk)
+    {
+        gc_alloc_unmanaged_T<TKey>(gc, newk, newsize, 0);
         return 0;
     }
 
-    if(newsize > oldcap)
-    {
-        // Clear new keys to empty
-        memset(newk + oldcap, 0, sizeof(*newk) * (newsize - oldcap));
-    }
+    if(newsize)
+        memset(newk, 0, sizeof(*newk) * newsize); // all empty
 
     keys = newk;
     backrefs = newbk;
     idxmask = newsize - 1; // ok if this underflows
 
     if(oldcap && newsize)
-        _rehash(oldcap, newsize - 1);
+        _rehash(oldk, oldcap, newsize - 1);
+
+    if(oldk)
+        gc_alloc_unmanaged_T<TKey>(gc, oldk, oldcap, 0);
 
     return newsize;
 }
 
 
-void Table::_rehash(tsize oldsize, tsize newmask)
+void Table::_rehash(const TKey *oldk, tsize oldsize, tsize newmask)
 {
     for(tsize i = 0; i < oldsize; ++i)
     {
-        const TKey kcopy = keys[i];
-        makempty(keys[i]); // always clear; including tombstones
-        if(kcopy.type == PRIMTYPE_NIL)
+        const TKey& kcopy = oldk[i];
+        if(kcopy.type == PRIMTYPE_NIL) // empty or tombstone
             continue;
 
         TKey *tk = _getkey(*(const ValU*)&kcopy, newmask); // HACK: dirty cast: is fine because the memory layout is the same
+        assert(tk->type == PRIMTYPE_NIL && !tk->u.opaque); // keys are unique, there are no tombstones yet
         const tsize keyoffs = tk - keys;
         *tk = kcopy;
 
@@ -332,7 +338,8 @@ Val Table::pop(Val k)
 
 Val Table::keyat(tsize idx) const
 {
-    KCHECK(idx);
+    // idx is a value index, KCHECK() takes a key index
+    assert(idx < vals.sz && keys[backrefs[idx]].validx == idx);
     const TKey& tk = keys[backrefs[idx]];
     return Val(tk.u, tk.type);
 }

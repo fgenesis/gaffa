@@ -65,7 +65,7 @@ private:
     TKey *_getkey(ValU findkey, tsize mask) const;
     void _cleanupforward(tsize idx);
     tsize _resize(GC& gc, tsize newsize);
-    void _rehash(tsize oldsize, tsize newmask);
+    void _rehash(const TKey *oldk, tsize oldsize, tsize newmask);
 
     DArray vals;
 
