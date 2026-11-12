@@ -22,3 +22,12 @@ string b = table::g()
 type CT = Const(table)
 func [const] table:sz() return 1
 func f(CT c) { var n = CT::sz(c) }
+### declared and used in a block
+{ func string.g() return 1
+var y = string::g() }
+### same name in sibling blocks
+{ func string.g() return 1 }
+{ func string.g() return "x" }
+### declared in a block inside a function, used in a nested block
+func f() { { func string.g() return 1
+{ var y = string::g() } } }

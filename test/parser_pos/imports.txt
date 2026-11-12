@@ -1,0 +1,21 @@
+-- import and comptime syntax (prefix operators at unary precedence)
+### import prefix
+type X = import M(float)
+### import prefix with several values
+var a, b, ___ = import M()
+### import statement
+import M()
+### import in a nested block
+{ import M() }
+### import inside call arguments
+g(import M())
+### import in the middle of a value list
+var a, b = 1, import M()
+### import binds like a unary operator
+uint x = import M() + 1
+### import of a name
+import s
+### comptime
+uint x = comptime f(2)
+### comptime statement
+comptime g()

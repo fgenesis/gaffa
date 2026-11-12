@@ -5,12 +5,26 @@ export uint a := 1
 ### exported deferred declaration
 ## error: can't export a deferred declaration
 export uint a = defer
-### import used inside an expression
-## error: import prefix only directly after '='
-g(import M())
-### import prefix in the middle of a value list
-## error: import prefix only directly after '='
-var a, b = 1, import M()
+### export as assignment target
+## error: export can't be assigned to
+func M() -> symtab
+{
+    export = N()
+    return export
+}
+### export( inside an expression
+## error: 'export (' only starts a named export declaration
+func M() -> symtab
+{
+    var e = export("a")
+    return export
+}
+### import as a declaration target
+## error: import can't be a target
+var import, type X = M(float)
+### import as an assignment target
+## error: import can't be a target
+import = M()
 ### local declared after the name was used (extern)
 ## error: foo was used before this declaration
 uint a = foo
@@ -24,3 +38,11 @@ func f() -> uint { return 2 }
 ## error: already exported
 export uint a = 1
 export ("a") uint b = 2
+### __exports declared by hand, then export used
+## error: __exports already declared
+func M() -> symtab
+{
+    var __exports = 5
+    export uint a = 1
+    return export
+}

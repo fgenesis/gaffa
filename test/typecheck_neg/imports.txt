@@ -1,0 +1,39 @@
+-- import and comptime that must fail. __testmod(n): see typecheck_pos/imports.txt
+### import not visible within its own statement
+var a, b = import __testmod(1), t1
+### import not visible after its block
+{ import __testmod(1) }
+uint x = t1
+### braceless if body is a block
+if(true) import __testmod(1)
+uint x = t1
+### each branch of an if is its own block
+bool c := true
+c = false
+if(c) { import __testmod(1) } else { uint y = t1 }
+### while body is a block
+bool c := false
+c = true
+while(c) { import __testmod(1) }
+uint x = t1
+### import inside a function isn't visible outside of it
+func f() { import __testmod(1) }
+uint x = t1
+### import of a non-symtab
+import 5
+### import of a value that doesn't fold
+uint n := 1
+n = 2
+import __testmod(n)
+### clashing imports, name used
+import __testmod(1)
+import __testmod(2)
+uint x = tval
+### clashing imports, namespaced name used
+import __testmod(1)
+import __testmod(2)
+uint x = string::tns
+### comptime of a value that doesn't fold
+uint n := 1
+n = 2
+uint x = comptime n + 1

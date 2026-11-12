@@ -1,0 +1,26 @@
+-- Error values: error("msg") is the error state of an optional
+### error value into an optional
+uint? a = error("bad")
+### error value as a function result
+func f(bool b) -> uint? { if(b) return error("no")
+return 1 }
+uint? r = f(true)
+### error value into any?
+any? a = error("bad")
+### errstr of an error value
+string? s = errstr(error("bad"))
+### errstr of a value is nil
+string? s = errstr(1)
+### errstr binds the message
+uint? a := error("bad")
+if(errstr(a) => e) { string m = e }
+### error value in a condition
+if(error("x")) { string w = 5 }
+### => on an error value takes the else branch
+if(error("x") => v) { string w = 5 } else {}
+### capture turns a fold-time exception into an error value
+uint? r = ??(1 // 0)
+### capture of an exception in a nested expression
+uint? r = ??(1 // 0 + 1)
+### capture of a valid expression
+uint? r = ??(1 + 1)

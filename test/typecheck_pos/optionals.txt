@@ -1,0 +1,123 @@
+-- Optionals: T?, nil, unwrapping
+### nil to optional
+uint? a = nil
+### value to optional
+uint? a = 1
+### constant converts to the optional's base type
+float? f = 1
+### optional to optional
+uint? a = 1
+uint? b = a
+### optional param and return
+func f(uint? x) -> uint? { return x }
+uint? r = f(1)
+### nil for an optional param
+func f(uint? x) {}
+f(nil)
+### unwrap with *
+uint? a = 1
+uint b = *a
+### unwrap with =>
+uint? a = nil
+if(a => v) { uint w = v } else { uint w = 0 }
+### unwrapped value can be used with operators
+uint? a = 2
+if(a => v) { uint w = v + 1 }
+### optional in a condition
+uint? a = 1
+if(a) {}
+### optional in a while condition
+uint? a := 1
+while(a) a = nil
+### optional() builtin
+type T = optional(uint)
+T a = nil
+### optional of an optional is the same optional
+type T = optional(uint?)
+uint? a = 1
+T b = a
+### mutable optional
+uint? a := nil
+a = 5
+a = nil
+### var deduces the optional type
+uint? a = 1
+var b = a
+uint? c = b
+### unwrap of a non-optional does nothing
+## warning: '*' on a non-optional ('uint') does nothing, the value can be used as-is
+uint a := 1
+uint b = *a
+### => on a non-optional always takes the if branch
+## warning: '=>' on a non-optional ('uint') always succeeds, the if branch is always taken
+uint a := 1
+if(a => v) { uint w = v } else { string w = 5 }
+### => on nil takes the else branch
+if(nil => v) { string w = 5 } else {}
+### any? in a condition
+any? a := 1
+if(a) {}
+### any? holds nil and values
+any? a := nil
+a = 1
+### optional to any?
+uint? a = 1
+any? b = a
+### a known optional value converts like a constant
+uint? a = 1
+int? b = a
+### known optional value: the else branch is never checked
+uint? a = 1
+if(a) {} else { string w = 5 }
+### known nil: the if branch is never checked
+uint? a = nil
+if(a => v) { string w = 5 }
+### known value: v is known, too
+uint? a = 2
+if(a => v) { uint w = v + 1 } else { string w = 5 }
+### unwrap of a var with a known value
+uint? a = 1
+uint b = *a
+### a known any value is checked at compile time
+any a = 1
+uint b = a
+### known value through a deduced var
+uint? a = nil
+var b = a
+if(b) { string w = 5 }
+### known valid optional to non-optional in a decl
+uint? a = 1
+uint b = a
+### known valid optional to non-optional in an assignment
+uint? a = 1
+uint b := 0
+b = a
+### known valid any? to a concrete type
+any? a = 1
+uint b = a
+### known valid optional into a typed sink
+uint? a = 1
+uint _ = a
+### known valid optional as an argument
+func f(uint x) {}
+uint? a = 1
+f(a)
+### known valid optional as an operand
+uint? a = 1
+uint b = a + 1
+### known valid optional as a return value
+func f() -> uint { uint? a = 1
+return a }
+### any with an unknown value: runtime check
+any a := 1
+uint b = a
+### any argument with an unknown value: runtime check
+func f(uint x) {}
+any a := 1
+f(a)
+### any? with an unknown value to an optional: runtime check
+any? a := 1
+uint? b = a
+### any to an optional: runtime check
+any a := 1
+uint? b = a

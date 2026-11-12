@@ -22,3 +22,13 @@ func f(CT c) { var n = CT::sz(c) }
 func int.-(int a) -> int { return a }
 ### operator function declarations are not implemented yet
 func int.+(int a, int b) -> int { return a }
+### used outside the block that declares it (single-statement block)
+{ func string.g() return 1 }
+var y = string::g()
+### used outside the block that declares it, inside a function
+func f() { { func string.g() return 1
+var a = string::g() }
+var y = string::g() }
+### declared in a block, then again in a nested block
+{ func string.g() return 1
+{ func string.g() return 2 } }

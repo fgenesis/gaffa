@@ -1,0 +1,54 @@
+-- import and comptime. __testmod(n) is a pure test builtin returning symtab {tval = n, t<n> = n, string::tns = n}, n + 1
+### import returns the values after the symtab
+var n = import __testmod(5)
+uint x = tval + n
+### import statement
+import __testmod(3)
+uint x = t3
+### namespaced symbols come along
+import __testmod(4)
+uint x = string::tns
+### import in a nested block
+{ import __testmod(1)
+uint x = t1 }
+### import in an if branch
+bool c := true
+c = false
+if(c) { import __testmod(1)
+uint x = t1 }
+### import in a while body
+bool c := false
+c = true
+while(c) { import __testmod(1)
+uint x = t1 }
+### import a symtab local
+var s, n = __testmod(2)
+import s
+uint x = t2
+### the same symbols imported twice are not ambiguous
+import __testmod(1)
+import __testmod(1)
+uint x = tval
+### clashing imports are fine if the clashing name is unused
+import __testmod(1)
+import __testmod(2)
+uint x = t1 + t2
+### import in an inner block shadows an outer one
+import __testmod(1)
+{ import __testmod(2)
+uint x = tval }
+### import inside call arguments, visible from the next statement
+func g(uint v) -> uint { return v }
+uint y = g(import __testmod(5))
+uint x = t5 + y
+### import in the middle of a value list
+var a, b = 1, import __testmod(5)
+uint x = t5 + a + b
+### import inside a function
+func f() -> uint { import __testmod(7)
+return t7 }
+### comptime of a constant expression
+uint x = comptime 1 + 2
+### comptime of a call with several values
+var s, n = comptime __testmod(1)
+uint x = n

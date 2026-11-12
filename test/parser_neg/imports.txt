@@ -1,0 +1,9 @@
+-- import and comptime syntax errors
+### import as a declaration target
+var import, type X = M(float)
+### import as an assignment target
+import = M()
+### import without operand
+uint x = import
+### comptime without operand
+uint x = comptime

@@ -34,7 +34,7 @@ type P = {x=float}
 P p = {x=1.0}
 float f = p.y
 ### optional to non-optional without unwrap
-uint? a = 1
+uint? a := 1
 uint b = a
 ### number in condition
 uint a = 1

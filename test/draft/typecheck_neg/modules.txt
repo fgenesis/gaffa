@@ -7,18 +7,6 @@ func [pure] Box(type T) -> symtab, type
     return export, B
 }
 type FB = Box(float)
-### export = import with a single symtab
-## error: unbalanced; did you mean 'export import f()'?
-func [pure] Inner() -> symtab
-{
-    export func f() -> uint { return 1 }
-    return export
-}
-func [pure] Outer() -> symtab
-{
-    export = import Inner()
-    return export
-}
 ### import of a value that doesn't fold
 ## error: import needs a constant symtab
 func M(uint n) -> symtab
@@ -29,7 +17,7 @@ func M(uint n) -> symtab
 uint n := 1
 n = 2
 import M(n)
-### import target given a non-symtab (old return order)
+### import given a non-symtab (old return order)
 ## error: import needs a symtab
 func [pure] Box(type T) -> type, symtab
 {
@@ -37,13 +25,15 @@ func [pure] Box(type T) -> type, symtab
     return B, export
 }
 type FB = import Box(float)
-### export target given a non-symtab
-## error: export target needs a symtab
-func M() -> symtab
-{
-    export = 5
-    return export
-}
+### import of nothing
+## error: import needs a symtab
+func [pure] Nothing() -> void { }
+import Nothing()
+### comptime of a value that doesn't fold
+## error: comptime value is not constant
+uint n := 1
+n = 2
+uint x = comptime n + 1
 ### methods not imported
 ## error: no method get
 func [pure] Box(type T) -> symtab, type
@@ -88,20 +78,15 @@ func [pure] M() -> symtab
     return export
 }
 import M()
-### export target clashes with an existing export
+### export declaration after a table write of the same name
 ## error: already exported
-func [pure] Inner() -> symtab
+func [pure] M() -> symtab
 {
-    export func f() -> uint { return 1 }
+    export.f = 1
+    export uint f = 2
     return export
 }
-func [pure] Outer() -> symtab
-{
-    export func f() -> uint { return 2 }
-    export = Inner()
-    return export
-}
-import Outer()
+import M()
 ### bare return in a function returning a symtab
 ## error: missing return value
 func M() -> symtab
@@ -124,6 +109,14 @@ func [pure] B() -> symtab
 import A()
 import B()
 uint x = f()
+### import not visible within its own statement
+## error: unknown symbol f
+func [pure] M() -> symtab
+{
+    export func f() -> uint { return 1 }
+    return export
+}
+var x = import M(), f()
 ### import not visible after its block
 ## error: unknown symbol f
 func [pure] M() -> symtab
@@ -132,6 +125,15 @@ func [pure] M() -> symtab
     return export
 }
 { import M() }
+uint x = f()
+### braceless if body is a block
+## error: unknown symbol f
+func [pure] M() -> symtab
+{
+    export func f() -> uint { return 1 }
+    return export
+}
+if(true) import M()
 uint x = f()
 ### export in a closure doesn't reach the enclosing function
 ## error: unknown symbol f

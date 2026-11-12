@@ -1,0 +1,79 @@
+-- Optionals that must fail
+### nil to non-optional
+uint a = nil
+### nil assigned to a non-optional
+uint a := 1
+a = nil
+### optional to non-optional
+uint? a := 1
+uint b = a
+### optional return to non-optional
+uint? g := 1
+func f() -> uint? { return g }
+uint x = f()
+### optional argument for a non-optional param
+func f(uint x) {}
+uint? a := 1
+f(a)
+### optionals of different types
+uint? a := 1
+int? b = a
+### operator on an optional
+uint? a := 1
+uint b = a + 1
+### unwrap of nil
+uint b = *nil
+### optional of a non-type
+var x = 1
+x? y = 2
+### nil can't be optional
+nil? a = nil
+### var deduced from an optional is optional
+uint? a := 1
+var b = a
+uint c = b
+### any in a condition
+any a := 1
+if(a) {}
+### optional to any
+uint? a = 1
+any b = a
+### nil as a type
+nil a = nil
+### error value to a non-optional
+uint a = error("bad")
+### error value to any
+any a := 1
+a = error("bad")
+### unwrap of an error value
+uint b = *error("bad")
+### error() takes a string
+uint? a = error(5)
+### error can't be optional
+var e = error("x")
+var t = optional(e)
+### uncaptured exception
+uint r = 1 // 0
+### exception in a nested expression, uncaptured
+uint r = 1 // 0 + 1
+### unwrap of a var known to be nil
+uint? a = nil
+uint b = *a
+### a known any value that doesn't fit
+any a = 1
+string s = a
+### folded call results keep their optional type
+string s = errstr(error("x"))
+### known nil to non-optional
+uint? a = nil
+uint b = a
+### operator on an optional known to be nil
+uint? a = nil
+uint b = a + 1
+### known error value as an argument
+func f(uint x) {}
+uint? a = error("bad")
+f(a)
+### any? with an unknown value to a non-optional needs an unwrap
+any? a := 1
+uint b = a
