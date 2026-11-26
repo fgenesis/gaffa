@@ -15,6 +15,11 @@ class VM;
 // Rules:
 // exprs that survive folding must have <= 1 params, since MLNode::m.p[1] is overlaid with the deduced type
 // stmts can have up to 2 params
+//
+// Notes:
+// typeexpr empty means untyped or deduce automatically
+// ...idx is the index of the first affected slot, others follow consecutively
+
 enum MLCmd
 {
     ML_LIST = 0,        // always stmt
@@ -31,14 +36,14 @@ enum MLCmd
     ML_VAR,             // expr (1, var idx)
     ML_EXT,             // expr (1, external table idx)
     ML_NAMEDECL,        // stmt (2, name, symid) [2, namespace, value] -- namespaced (func T.f / T:f): (2, name, varidx) of a hidden var; no namespace: empty list
-    ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- typeexprs: one per target, ML_SINK/ML_WSINK for sinks; the other targets are consecutive vars starting at varidx; no exprs: deferred
+    ML_DECL,            // stmt (1, varidx) [2, typeexprs, exprs] -- no exprs: deferred
     ML_ASSIGN,          // stmt (0) [2, dstlist, exprlist]
     ML_IFELSE,          // stmt (0) [3, cond, ifblock, elseblock]
     ML_WHILE,           // stmt (0) [2, cond, block]
-    ML_FOR,             // stmt (0) [2, decls, block]
-    ML_GETINDEX,        // expr (0) [2, obj, key]
+    ML_FOR,             // stmt (0) [2, iterdecls, block] -- one ML_ITERDECL per iterator
+    ML_GETINDEX,        // expr (0) [3, obj, key, func] -- obj[key], obj.name
     ML_GETNS,           // expr (0) [2, ns, key]
-    ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs]
+    ML_MTHCALL,         // expr (0) [3, selfexpr, funcexpr, paramexprs] -- self:name(params)
     ML_FUNC,            // expr (1, varidx) [3, argtypes, rettypes, block] -- varidx = start of locals
     ML_RETURN,          // stmt (0) [1, exprs]
     ML_EMIT,            // stmt (0) [1, exprs]
@@ -46,16 +51,22 @@ enum MLCmd
     ML_NEW_ARRAY,       // expr (0) [1, exprs]
     ML_NEW_TABLE,       // expr (1) (numkv) [1, exprlist] // {a=1, b=2, 3, 4} -> [a, 1, b, 2, 3, 4], numkv=2
     ML_EXPORT,          // stmt (0) [1, exprs] // ML_NAMEDECL or ML_VAR following
-    ML_CALLADJ,         // expr (0) [2, numexpr. callexpr]
-    ML_SINK,            // target (1, wide) [1, typeexpr] -- typeexpr is _ML_EMPTY if untyped
-    ML_BLOCK,           // stmt (0) [1, stmts] -- an explicit block: a scope (imports, namespaced locals), kept even with a
-                        // single stmt. Not used where a block is opened implicitly, see mlOpensBlock().
-    ML_IMPORT,          // expr (0) [1, expr] -- import expr: folds to the values after the first (a symtab, imported)
-    ML_COMPTIME,        // expr (0) [1, expr] -- comptime expr: folds to its constant values
-    ML_OPTIONAL,        // expr (0) [1, typeexpr] -- T? (an identifier with '?'): folds to the optional variant of a constant type
-    ML_UNWRAPBIND,      // expr (1, varidx) [1, expr] -- x => v in if(): bool, declares v with x's type minus '?'.
-                        // If it always succeeds, the if folds into a list [unwrapbind, ifbranch]: then it's a statement that only binds v.
-    //ML_VALBLOCK,
+    ML_CALLADJ,         // expr (0) [2, numexpr, callexpr] -- f()#N, ...#N
+    ML_SINK,            // target (1, kind) [1, typeexpr] -- typeexpr is _ML_EMPTY if untyped
+    ML_BLOCK,           // stmt (0) [1, stmts] -- explicit block scope, only used if not handled by mlOpensBlock().
+    ML_IMPORT,          // expr (0) [1, expr]
+    ML_COMPTIME,        // expr (0) [1, expr]
+    ML_OPTIONAL,        // expr (0) [1, typeexpr] -- T -> T?
+    ML_UNWRAPBIND,      // expr (1, varidx) [1, expr] -- if(x => v)
+    ML_VALBLOCK,        // expr (0) [1, body] -- $stmt:
+    ML_ITERDECL,        // stmt (2, varidx, hiddenidx) [3, typeexprs, iterexpr, iterfunc] -- m.flags = number of values per iteration.
+    ML_ITERDECLVARIADIC,// stmt (2, varidx, hiddenidx) [1, typeexprs] -- for(decl = ...); m.flags = number of values per iteration.
+    ML_RANGE,           // expr (0) [3, begin, end, step] -- only as child of ML_ITERDECL;
+    ML_VARARGS,         // expr (0) [0]
+    ML_VARARGCOUNT,     // expr (0) [0] -- #...
+    ML_SETINDEX,        // target (0) [3, obj, key, func] -- obj[key] / obj.name as an ML_ASSIGN target
+    ML_BREAK,           // stmt (0) [0]
+    ML_CONTINUE,        // stmt (0) [0]
 
     _ML_MAX,
 
@@ -111,6 +122,56 @@ enum MLNodeFlags // MLNode::m.flags of any expr except ML_FUNC (which uses MLFun
     // known statically: it must be checked at runtime (LLIR emits LL_TYPECHECK). Set by fitValue() for an
     // 'any' whose value isn't known. Not serialized: the result of folding.
     MLNODE_RTCHECK = 0x80,
+
+    // The expr gives any number of values (T...), and its statement takes a fixed number of them (fixed targets or
+    // params). Folding sets its exprtype to the values the statement uses: its fixed values, then one entry per value
+    // taken from the variadic part, then T... only if more values are fine (a '___', ASSIGN_DROP_EXCESS, variadic
+    // params). LLIR pads missing values with nil, checks at runtime that the entries that aren't optional are there,
+    // and without a trailing T... that there are no more values. Not serialized.
+    // On an ML_CALLADJ (N values from a variadic part), extra values are always dropped.
+    MLNODE_VARTAKE = 0x40,
+};
+
+// Hidden vars of an ML_ITERDECL (from its hiddenidx), allocated by folding: ML_ITER_HIDDEN state vars (the most
+// any iterator needs), then one scratch var per value that goes into a sink ('_', or each value a '___' takes).
+// They're mutable and never referenced by MLIR nodes. Split pass 1 gives an iterator consecutive local slots:
+// the state vars its kind uses (LLIR may use fewer, eg. a range without a step), then one per value in order
+// (the loop var, or the scratch var for a sink). So LLIR only needs the first slot.
+enum MLIterHidden
+{
+    ML_ITER_HIDDEN = 3,
+    ML_ITER_NOHIDDEN = 0xffffffff, // hiddenidx before folding
+
+    // ML_RANGE: all three have the element type
+    ML_ITER_RANGE_CUR = 0,
+    ML_ITER_RANGE_END = 1,
+    ML_ITER_RANGE_STEP = 2,
+    ML_ITER_RANGE_USED = 3,
+
+    // Object iteration: obj has the iterated expr's type, idx is a uint passed to T::__iterN
+    ML_ITER_OBJ_OBJ = 0,
+    ML_ITER_OBJ_IDX = 1,
+    ML_ITER_OBJ_USED = 2,
+
+    // ML_ITERDECLVARIADIC: index and end, both uint
+    ML_ITER_VARARGS_IDX = 0,
+    ML_ITER_VARARGS_END = 1,
+    ML_ITER_VARARGS_USED = 2,
+};
+
+enum MLSinkKind // ML_SINK p[0]
+{
+    ML_SINK_ONE = 0,      // '_': takes one value
+    ML_SINK_WIDE = 1,     // '___': takes the remaining values
+    ML_SINK_VARIADIC = 2, // '...' (or 'T ...') ending a function's parameter list: its variadic params, which have no var.
+                          // typeexpr is T; _ML_EMPTY for an untyped '...' (any).
+};
+
+enum MLDeclFlags // MLNode::m.flags of ML_DECL
+{
+    // No values before folding: 'x = defer'. Set by folding before the values are folded, since values may
+    // fold to nothing (eg. a value block that emits nothing). Not serialized.
+    MLDECL_DEFERRED = 0x01,
 };
 
 struct MLSub
@@ -230,7 +291,7 @@ typedef MLPreVisitResult (*MLVisitorPre)(MLNode *node, MLNode *parent, void *ud)
 typedef void (*MLVisitorPost)(MLNode *node, MLNode *parent, void *ud, uintptr_t aux);
 
 // Whether a node opens a block (a scope for imports and namespaced locals) when visited as a child of parent:
-// explicit ML_BLOCKs, the root (visited as its own parent), functions, for loops (iterators + body),
+// explicit ML_BLOCKs, the root (visited as its own parent), functions, value blocks, for loops (iterators + body),
 // each branch of an if, and the body of a while.
 bool mlOpensBlock(const MLNode *node, const MLNode *parent);
 
@@ -312,6 +373,7 @@ private:
     {
         CONS_BODY = 1,      // body of a node that opens a block implicitly: a HLNODE_BLOCK here doesn't need an ML_BLOCK
         CONS_NOTYPEMOD = 2, // an identifier's '?' was already handled (it's the child of the ML_OPTIONAL)
+        CONS_ITERDECL = 4,  // a declaration in for(...): becomes an ML_ITERDECL
     };
 
     struct MLCh

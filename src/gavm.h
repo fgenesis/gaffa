@@ -51,6 +51,8 @@ enum RTError
     RTE_TOO_MANY_PARAMS    = RTE_FIRST_ERROR - 7,
     RTE_NOT_YIELDABLE      = RTE_FIRST_ERROR - 8,
     RTE_INCOMPATIBLE_TYPE  = RTE_FIRST_ERROR - 9,
+    RTE_OUT_OF_BOUNDS      = RTE_FIRST_ERROR - 10, // array index
+    RTE_KEY_NOT_FOUND      = RTE_FIRST_ERROR - 11, // table key
 };
 
 const char *vmerrstr(int rte);

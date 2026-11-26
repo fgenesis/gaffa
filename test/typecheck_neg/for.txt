@@ -1,0 +1,80 @@
+-- for loop errors
+### constant range parts of different types
+for(var i = 0..1.0) {}
+### variable range parts of different types
+uint a = 1
+int b = +1
+for(var i = a..b) {}
+### range of strings
+for(var i = "a".."b") {}
+### range step 0
+for(uint i = 0..10..0) {}
+### constant that doesn't fit the range type
+int n = +5
+for(var i = 0.5..n) {}
+### loop variable not visible after the loop
+for(uint i = 0..3) {}
+uint j = i
+### iterating over several values
+func g() return 1, 2
+for(var x = g()) {}
+### iteration method without the index parameter
+func string:__iter1() -> uint { return 1 }
+for(uint c = "abc") {}
+### iteration method returning the wrong number of values
+func string:__iter1(uint i) -> uint, uint { return i, i }
+for(uint c = "abc") {}
+### no iteration method for this number of loop variables
+type P = {x=float}
+func P:__iter1(uint i) -> float { return self.x }
+P p = {x=1.0}
+for(var a, b = p) {}
+### loop value doesn't fit the loop variable
+func string:__iter1(uint i) -> uint { return i }
+for(string c = "abc") {}
+### loop value doesn't fit a typed sink
+func string:__iter2(uint i) -> uint, string { return i, self }
+for(string _, string s = "abc") {}
+### value block with a breakable endless loop
+func f(bool c) -> uint
+{
+    return ${ while(true) { if(c) break emit 1 } }
+}
+### value block ending in a range loop
+func f() -> uint
+{
+    return ${ for(uint i = 0..10) emit i }
+}
+### function ending in a loop with a break
+func f() -> uint { while(true) { break } }
+### wide sink alone can't select __iterN
+func string:__iter1(uint i) -> uint { return i }
+for(var ___ = "abc") {}
+### value doesn't fit a typed wide sink
+for(string ___ = 0..3) {}
+### wide sink doesn't add loop variables to a range
+for(var a, b, ___ = 0..3) {}
+### three loop variables for variadic values
+func f(uint ...) { for(var a, b, c = ...) {} }
+### wide sink with variadic values
+func f(uint ...) { for(var x, ___ = ...) {} }
+### variadic value doesn't fit the loop variable
+func f(uint ...) { for(string x = ...) {} }
+### variadic index is a uint
+func f(uint ...) { for(string i, uint x = ...) {} }
+### array element doesn't fit the loop variable
+var a = [1]
+for(string v = a) {}
+### table key doesn't fit the loop variable
+var t = {x=1}
+for(uint k, uint v = t) {}
+### arrays have no __iter3
+var a = [1]
+for(var x, y, z = a) {}
+### table position is a uint
+var t = {x=1}
+for(string i, string k, uint v = t) {}
+### string bytes are uints
+for(string c = "abc") {}
+### strings have no __iter3
+for(var a, b, c = "abc") {}

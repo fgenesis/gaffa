@@ -193,6 +193,7 @@ static void _Register(OpReg& r, const OpDef *def, OperatorId op, LeafFunc lfunc,
     df->dbg.name = 0; // TODO: C function name
     df->dtype = r.tr.lookupDesc(PRIMTYPE_FUNC)->h.dtype;
     df->opdef = def;
+    df->tsig = NULL;
 
     // The assumtion is that the first parameter's type is also the namespace
     // ie. makes sense in the case of uint.+(uint, uint)

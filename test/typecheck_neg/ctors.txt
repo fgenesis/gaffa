@@ -1,0 +1,27 @@
+-- Constructor errors
+### element doesn't fit the specified type
+var a: Array(float) = ["x"]
+### constant can't be converted without loss
+var a: Array(uint) = [1, 2.5]
+### variadic values don't fit the specified type
+func f(uint ...) { var a: Array(string) = [...] }
+### positional values need uint keys
+var t: Table(string, uint) = {1, 2}
+### key doesn't fit the specified type
+var t: Table(string, uint) = {[1]=2}
+### value of a key/value pair must be a single value
+func two() return 1, 2
+var t = {a=two()}
+### no covariance between specialized containers
+var a = [1, 2]
+var b: Array(float) = a
+### deduced element type is checked
+var a = [1, 2]
+var b: Array(string) = a
+### ...#N into fewer targets
+func f(uint ...) { var a = ...#2 }
+### #N beyond a fixed number of values
+func two() return 1, 2
+var a, b, c = two()#3
+### only the last value can be variadic in a constructor
+func f(uint ...) { var a = [..., 1] }

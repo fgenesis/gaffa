@@ -126,6 +126,12 @@ struct InstChunk
     // Optional: Debug info follows
 };
 
+class TypeRegistry;
+
+// The function type of a generic method specialized for the type of self (eg. array:get for Array(float)
+// is func(Const(Array(float)), uint) -> float); PRIMTYPE_AUTO if it doesn't apply to that type.
+typedef Type (*TypeSigFunc)(TypeRegistry& tr, Type self);
+
 // Callable function representation. May have upvalues.
 struct DFunc : public GCobj
 {
@@ -156,6 +162,10 @@ struct DFunc : public GCobj
     // TODO: (DType: Func(Args, Ret))
 
     const OpDef *opdef; // Infos for codegen, if this function can be implemented as VM opcode directly
+
+    // Optional (NULL): for a method of a generic container (array, table) that serves the whole family (Array(T),
+    // Table(K, V)), its signature for a specialized type. Used by the compiler's method lookup.
+    TypeSigFunc tsig;
 
     DebugInfo dbg;
 

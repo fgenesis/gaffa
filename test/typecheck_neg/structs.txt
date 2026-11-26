@@ -1,0 +1,63 @@
+-- Struct errors
+### unknown field in a value
+type P = {x=float}
+P p = {x=1.0, y=2.0}
+### field given twice
+type P = {x=float}
+P p = {x=1.0, x=2.0}
+### positional values for a struct
+type P = {x=float}
+P p = {1.0}
+### writing through a Const struct
+type P = {x=float}
+type CP = Const(P)
+func g(CP p) { p.x = 1.0 }
+### assigned field value doesn't fit
+type P = {x=float}
+P p = {x=1.0}
+p.x = "a"
+### field name not known at compile time
+type P = {x=float}
+P p = {x=1.0}
+string k := "x"
+float f = p[k]
+### nil default in a template
+type P = {x=nil}
+### template value not known at compile time
+float f := 1.0
+type P = {x=f}
+### type() of something that isn't a template
+type T = type(5)
+### P() without a required field
+type P = {x=float}
+var p = P()
+### struct is not a table
+type P = {x=float}
+P p = {x=1.0}
+table t = p
+### optional struct needs an unwrap
+type P = {x=float}
+func f(P? p) return p.x
+### defaults are part of the type
+type A = {x=0}
+type B = {x=1}
+A a = {}
+B b = a
+### calling a type that isn't known at compile time
+func f(type T) return T{}
+### a type without a constructor
+var x = int(5)
+### constructing a struct from something that isn't a table
+type P = {x=float}
+var p = P(5)
+### constructing a struct from several values
+type P = {x=float}
+var p = P(1, 2)
+### T{...} calls the type's own __new
+type P = {x=float}
+func P.__new(float x) -> P return {x=x}
+P p = P{x=1.0}
+### constructing an optional type
+type P = {x=float}
+type PO = optional(P)
+var p = PO{x=1.0}

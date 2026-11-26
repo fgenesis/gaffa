@@ -867,6 +867,8 @@ const char *vmerrstr(int rte)
         case RTE_NOT_ENOUGH_PARAMS:   return "not enough parameters";
         case RTE_TOO_MANY_PARAMS:     return "too many parameters";
         case RTE_NOT_YIELDABLE:       return "can't yield";
+        case RTE_OUT_OF_BOUNDS:       return "index out of bounds";
+        case RTE_KEY_NOT_FOUND:       return "key not found";
     }
 
     return "unknown error";

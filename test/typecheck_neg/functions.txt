@@ -7,6 +7,10 @@ func f() -> int, int return +1
 func f() -> int return +1, +2
 ### missing return in function with return type
 func f() -> int {}
+### missing return on one path with a declared return type
+func f(bool b) -> int { if(b) return +1 }
+### missing return on one path with a deduced return type
+func f(bool b) { if(b) return 1 }
 ### different return types in different branches
 func f(bool b) { if(b) return +1 return 1.5 }
 ### different number of return values in different branches

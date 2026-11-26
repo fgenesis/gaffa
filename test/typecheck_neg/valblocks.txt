@@ -1,0 +1,43 @@
+-- Value block errors
+### emits of different types
+func f(bool c)
+{
+    var x = ${ if(c) emit 1 else emit "x" }
+}
+### emits of a different number of values
+func f(bool c)
+{
+    var x = ${ if(c) emit 1 else emit 1, 2 }
+}
+### can end without emit
+func f(bool c)
+{
+    var x = ${ if(c) emit 1 }
+}
+### a loop doesn't count as emitting
+func f(bool c)
+{
+    var x = ${ while(c) emit 1 }
+}
+### emitted type doesn't fit
+string s = ${ emit 1 }
+### too few values
+uint a, b = ${ emit 1 }
+### too many values
+uint a = ${ emit 1, 2 }
+### used as a value but emits nothing
+uint a = ${ emit }
+### a comptime value that folds to nothing is not a deferred declaration
+uint a = comptime ${ emit }
+### not a compile-time constant
+func f(bool c) -> uint
+{
+    return comptime ${ if(c) emit 1 else emit 2 }
+}
+### import of a value block is not visible after it
+var x = ${ import __testmod(1)
+emit t1 }
+uint y = t1
+### local of a value block is not visible after it
+var x = ${ var a = 1; emit a }
+uint y = a

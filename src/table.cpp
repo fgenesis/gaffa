@@ -226,8 +226,30 @@ Val Table::get(Val k) const
     return vals.dynamicLookup(idx);
 }
 
+bool Table::has(Val k) const
+{
+    if(!keys)
+        return false;
+    const TKey *tk = _getkey(k, idxmask);
+    if(tk->type == PRIMTYPE_NIL)
+        return false;
+    return true;
+}
+
+bool Table::find(Val k, Val& out) const
+{
+    if(!keys)
+        return false;
+    const TKey *tk = _getkey(k, idxmask);
+    if(tk->type == PRIMTYPE_NIL)
+        return false;
+    out = vals.dynamicLookup(tk->validx); // works for typed value storage, unlike getp()
+    return true;
+}
+
 Val* Table::getp(Val k)
 {
+    assert(vals.elementSize == sizeof(Val)); // better than nothing
     if(!keys)
         return NULL;
     const TKey *tk = _getkey(k, idxmask);
@@ -240,6 +262,7 @@ Val* Table::getp(Val k)
 
 const Val* Table::getp(Val k) const
 {
+    assert(vals.elementSize == sizeof(Val)); // better than nothing
     if(!keys)
         return NULL;
     const TKey *tk = _getkey(k, idxmask);

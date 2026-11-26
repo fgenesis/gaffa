@@ -1,0 +1,85 @@
+-- Array and table constructors. Without a specified type: the common type of the values (constants converted to
+-- the type of the others), else any (any? if a value may be nil). With a specified Array/Table type, the values are
+-- fitted to it.
+### array of uints
+var a = [1, 2, 3]
+var b: Array(uint) = a
+### mixed constants widen to any
+var a = [1, 2.5]
+var b: Array(any) = a
+### nil widens to any?
+var a = [1, nil]
+array b = a
+### empty array
+var a = []
+var b: Array(any) = a
+### a variable decides, constants are converted
+float f := 1.0
+var a = [f, 1]
+var b: Array(float) = a
+### optional variable and nil
+uint? o := 1
+var a = [o, nil]
+var b: Array(uint?) = a
+### array with variadic values
+func f(uint ...) { var a = [1, 2, ...]
+var b: Array(uint) = a }
+### array of untyped variadic values is a generic array
+func f(...) { var a = [...]
+array b = a }
+### array with a fixed number of variadic values
+func f(uint ...) { var a = [...#5, 0, 0]
+var b: Array(uint) = a }
+### optional elements take missing variadic values
+func f(uint ...) { var a: Array(uint?) = [...#5] }
+### several values of a call
+func two() return 1, 2
+var a = [two(), two()#1]
+var b: Array(uint) = a
+### specified array type converts constants
+var a: Array(float) = [1, 2]
+### nested specified array types
+var a: Array(Array(float)) = [[1, 2], [3]]
+### specialized array to generic array
+array a = [1, 2]
+### table with positional values
+var t = {1, 2, 3}
+var u: Table(uint, uint) = t
+### table with named keys
+var t = {x=1, y=2}
+var u: Table(string, uint) = t
+### mixed keys widen to any
+var t = {1, x=2, 3}
+var u: Table(any, uint) = t
+### table with variadic values
+func f(uint ...) { var t = {a=1, b=2, ...}
+var u: Table(any, uint) = t }
+### table with only variadic values
+func f(uint ...) { var t = {...}
+var u: Table(uint, uint) = t }
+### empty table
+var t = {}
+var u: Table(any, any) = t
+### key constant converted to the positional key type
+var t = {[+1]=5, 6}
+var u: Table(uint, uint) = t
+### specified table type converts constants
+var t: Table(string, float) = {a=1, b=2}
+### specified table type with positional values
+var t: Table(uint, float) = {1, 2}
+### specified table type with optional values
+var t: Table(uint, uint?) = {1, nil}
+### specialized table to generic table
+table g = {1, 2}
+### constructor as an argument
+type FA = Array(float)
+func f(FA a) {}
+f([1, 2])
+### constructor as a return value
+type T = Table(string, float)
+func f() -> T return {x=1}
+### fixed number of variadic values in a declaration
+func f(uint ...) { var a, b = ...#2 }
+### var? takes missing values of ...#N
+func f(uint ...) { var? a, b, c = ...#3
+uint? x = c }

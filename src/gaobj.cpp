@@ -9,6 +9,8 @@ DObj::DObj(DType * dty)
     const _FieldDefault *def = dty->tdesc->defaults();
     const tsize n = dty->tdesc->numdefaults;
     Val * const m = memberArray();
+    for(tsize i = 0; i < nmembers; ++i) // fields without a default are nil (optional fields can be omitted)
+        m[i] = _Nil();
     for(tsize i = 0; i < n; ++i)
         m[def[i].idx] = Val(def[i].u, def[i].t);
 }
@@ -50,7 +52,11 @@ DType* DType::GCNew(GC& gc, const TDesc *desc, DType* typeType)
 {
     assert(!desc->h.dtype); // The base DType is 1:1 with its TDesc, creating a 2nd instance is a bug
     void *mem = gc_new(gc, sizeof(DType), PRIMTYPE_TYPE);
-    return mem ? GA_PLACEMENT_NEW(mem) DType(desc, typeType, desc->h.tid) : NULL;
+    DType *d = mem ? GA_PLACEMENT_NEW(mem) DType(desc, typeType, desc->h.tid) : NULL;
+    if(d && desc->kind == TKIND_STRUCT) // field name -> index, for DObj::member()
+        for(tsize i = 0; i < desc->n; ++i)
+            d->fieldIndices.set(gc, Val(_Str(desc->names()[i])), Val(uint(i))); // TODO: alloc fail
+    return d;
 }
 
 DType* DType::GCNewVariant(GC& gc, DType* base, Type bits)
@@ -71,7 +77,7 @@ int DFunc::call(VM *vm, Val* a) const
     // TODO: the other function types
     assert((info.flags & FuncInfo::FuncTypeMask) == FuncInfo::LFunc);
     int r = u.lfunc(vm, a);
-    assert(r < 0 || r == info.nrets);
+    assert(r <= 0 || r == info.nrets); // 0: also the end of an iteration (__iterN)
     return r;
 }
 

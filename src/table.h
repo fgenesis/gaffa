@@ -42,7 +42,9 @@ public:
     void dealloc(GC& gc);
     void clear();
     Val get(Val k) const;
-    Val *getp(Val k);
+    bool has(Val k) const;
+    bool find(Val k, Val& out) const;
+    Val *getp(Val k); // only safe if the underlying array uses Val as element
     const Val *getp(Val k) const;
     Val set(GC& gc, Val k, Val v);
     Val pop(Val k);

@@ -142,7 +142,7 @@ static void buildTypeName(std::ostringstream& os, const Runtime& rt, Type t)
         case TKIND_UNION:
             buildTypeNames(os, rt, d->types(), d->n, " | ");
             break;
-        case TKIND_STRUCT:
+        case TKIND_STRUCT: // like a template: name=type, or name=default (the default's type is the field's)
         {
             const sref *names = d->names();
             os << "{";
@@ -151,7 +151,24 @@ static void buildTypeName(std::ostringstream& os, const Runtime& rt, Type t)
                 if(i)
                     os << ", ";
                 os << rt.sp.lookup(names[i]).s << "=";
-                buildTypeName(os, rt, d->types()[i]);
+                const _FieldDefault *def = NULL;
+                for(tsize k = 0; k < d->numdefaults; ++k)
+                    if(d->defaults()[k].idx == i)
+                        def = &d->defaults()[k];
+                if(!def)
+                {
+                    buildTypeName(os, rt, d->types()[i]);
+                    continue;
+                }
+                switch(def->t)
+                {
+                    case PRIMTYPE_UINT: os << def->u.ui; break;
+                    case PRIMTYPE_SINT: os << (def->u.si >= 0 ? "+" : "") << def->u.si; break;
+                    case PRIMTYPE_FLOAT: os << def->u.f << (def->u.f == (sint)def->u.f ? ".0" : ""); break;
+                    case PRIMTYPE_BOOL: os << (def->u.ui ? "true" : "false"); break;
+                    case PRIMTYPE_STRING: os << '"' << rt.sp.lookup(def->u.str).s << '"'; break;
+                    default: os << "<"; buildTypeName(os, rt, d->types()[i]); os << " default>";
+                }
             }
             os << "}";
             break;

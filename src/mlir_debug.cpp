@@ -42,6 +42,7 @@ static const char *cmdName(MLCmd cmd)
         case ML_WHILE:     return "while";
         case ML_FOR:       return "for";
         case ML_GETINDEX:  return "getindex";
+        case ML_SETINDEX:  return "setindex";
         case ML_GETNS:     return "getns";
         case ML_MTHCALL:   return "mthcall";
         case ML_FUNC:      return "func";
@@ -58,6 +59,14 @@ static const char *cmdName(MLCmd cmd)
         case ML_COMPTIME:  return "comptime";
         case ML_OPTIONAL:  return "optional";
         case ML_UNWRAPBIND:return "unwrapbind";
+        case ML_VALBLOCK:  return "valblock";
+        case ML_ITERDECL:  return "iterdecl";
+        case ML_ITERDECLVARIADIC: return "iterdecl ...";
+        case ML_RANGE:     return "range";
+        case ML_VARARGS:   return "...";
+        case ML_VARARGCOUNT: return "#...";
+        case ML_BREAK:     return "break";
+        case ML_CONTINUE:  return "continue";
         case _ML_UPVAL:    return "upval";
         case _ML_LOCAL:    return "local";
         case _ML_FUNCIDX:  return "funcidx";
@@ -133,7 +142,7 @@ static void printDeclVars(const MLIR& ml, const Runtime& rt, const MLNode *typel
         if(i)
             printf(", ");
         if(elems[i].m.cmd == ML_SINK)
-            printf(elems[i].m.p[0] ? "___" : "_");
+            printf(elems[i].m.p[0] == ML_SINK_VARIADIC ? "..." : elems[i].m.p[0] == ML_SINK_WIDE ? "___" : "_");
         else
             printVar(ml, rt, varidx++, flags);
     }
@@ -204,9 +213,19 @@ static void printNode(const MLIR& ml, const Runtime& rt, const MLNode *node, uns
             break;
         }
         case ML_DECL:
+        {
             printDeclVars(ml, rt, node->firstChild(), p0, flags);
-            if(node->firstChild()[1].m.cmd == ML_LIST && !node->firstChild()[1].list.len)
+            const MLNode *vals = node->firstChild() + 1;
+            if((flags & MLDUMP_TYPES) // after folding; values may have folded to nothing
+                ? (node->m.flags & MLDECL_DEFERRED) : (vals->m.cmd == ML_LIST && !vals->list.len))
                 printf(" deferred");
+            break;
+        }
+        case ML_ITERDECL:
+        case ML_ITERDECLVARIADIC:
+            printDeclVars(ml, rt, node->firstChild(), p0, flags);
+            if(node->m.p[1] != ML_ITER_NOHIDDEN) // set by folding
+                printf(" %u values, hidden vars from #%u", node->m.flags, node->m.p[1]);
             break;
         case ML_FUNC:
             if(node->m.flags & MLFUNC_CONST)
@@ -226,8 +245,10 @@ static void printNode(const MLIR& ml, const Runtime& rt, const MLNode *node, uns
 
     if((flags & MLDUMP_TYPES) && !mlirIsStmt(cmd) && cmd != _ML_ERROR && cmd != _ML_DEAD && cmd != _ML_UVAR)
         printf(" :: %s", getTypeName(rt, node->type()).c_str());
-    if(cmd != ML_FUNC && cmd != _ML_VAL && (node->m.flags & MLNODE_RTCHECK))
+    if(!mlirIsStmt(cmd) && cmd != ML_FUNC && cmd != _ML_VAL && (node->m.flags & MLNODE_RTCHECK))
         printf(" [runtime check]");
+    if(!mlirIsStmt(cmd) && cmd != ML_FUNC && cmd != _ML_VAL && (node->m.flags & MLNODE_VARTAKE))
+        printf(" [takes variadic values]");
 
     printf("\n");
 }

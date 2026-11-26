@@ -1,0 +1,26 @@
+-- Variadic errors
+### argument doesn't fit the variadic param
+func f(uint ...) {}
+f("a")
+### forwarded values don't fit
+func f(string ...) {}
+func g(uint ...) { f(...) }
+### return value doesn't fit the variadic return type
+func f() -> uint... return "a"
+### forwarded return values don't fit
+func f(uint ...) -> string... return ...
+### only the last value can be variadic
+func f(uint ...) return ..., 1
+### variadic value doesn't fit a declared type
+func f(uint ...) { string a = ... }
+### untyped variadic values are any? and need an unwrap
+func f(...) { uint a = ... }
+### known excess values before a variadic tail
+func f(uint ...) { var a = 1, 2, ... }
+### variadic values don't fit a typed ___
+func f(uint ...) { var a, string ___ = ... }
+### variadic values don't fit a fixed param
+func g(string a) {}
+func f(uint ...) { g(...) }
+### var? can't make nil optional
+var? a = nil

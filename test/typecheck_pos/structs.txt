@@ -1,0 +1,89 @@
+-- Struct types from table templates: type P = {x=float, y=0.0}; values from table constructors, P{...}, P({...}), P()
+### defaults can be omitted
+type P = {x=float, n=0}
+P p = {x=1.0}
+uint m = p.n
+### only defaults: P()
+type P = {n=0, s="a"}
+var p = P()
+string t = p.s
+### construction sugar P{...}
+type P = {x=float}
+var p = P{x=1.0}
+float f = p.x
+### type() makes a struct type
+type P = type({x=float})
+P p = {x=1.0}
+### field assignment converts constants
+type P = {x=float}
+P p = {x=1.0}
+p.x = 2.0
+p.x = 3
+### optional field defaults to nil
+type P = {x=float?}
+P p = {}
+float? f = p.x
+p.x = nil
+### nested structs
+type In = {v=uint}
+type Out = {i=In}
+Out o = {i={v=1}}
+o.i = {v=2}
+o.i.v = 3
+### array of structs
+type P = {x=float}
+var a: Array(P) = [{x=1.0}, {x=2}]
+float f = a[1].x
+### struct parameter
+type P = {x=float}
+func f(P p) -> float return p.x
+float r = f({x=1})
+### struct return value
+type P = {x=float}
+func mk() -> P return {x=1.0}
+float r = mk().x
+### reading a Const struct
+type P = {x=float}
+type CP = Const(P)
+func g(CP p) -> float return p.x
+### string default gives a string field
+type P = {name="x"}
+P p = {name="y"}
+string s = p.name
+### struct types are structural
+type A = {x=float, n=1}
+type B = {x=float, n=1}
+A a = {x=1.0}
+B b = a
+### method reading a field
+type P = {x=float}
+func P:getx() -> float return self.x
+P p = {x=1.0}
+float f = p:getx()
+-- Constructors: calling a type value T calls type::()(T, args). T::__new is looked up while compiling; a struct type
+-- without one is built from a table constructor now, or from a table value at runtime (type::()).
+### constructing from a table variable (fields checked at runtime)
+type P = {x=float}
+var t = {x=1.0}
+var p = P(t)
+float f = p.x
+### constructing from a generic table
+type P = {x=float}
+table g = {}
+P p = P(g)
+### own constructor T::__new
+type P = {x=float}
+func P.__new(float x) -> P return {x=x}
+P p = P(1.0)
+float f = p.x
+### own constructor taking a table
+type P = {x=float}
+func P.__new(table t) -> P return {x=1.0}
+P p = P{y=2}
+### type() of a constant template folds
+type T = type({x=float})
+T a = {x=1.0}
+### type() of a template with a runtime type
+func f(type T) -> type return type({a=T})
+### type() of a table value
+func g(table t) -> type return type(t)

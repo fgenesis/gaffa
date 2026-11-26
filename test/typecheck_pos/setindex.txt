@@ -1,0 +1,47 @@
+-- Assigning to an index or field: obj[key] = value, obj.name = value
+### array element
+var a = [1, 2]
+a[0] = 5
+### array element from a variable index
+var a = [1, 2]
+uint i := 1
+a[i] = 5
+### constant index converted to uint
+var a = [1]
+a[+0] = 5
+### table field
+var t = {x=1}
+t.x = 2
+### table string key
+var t = {x=1}
+t["y"] = 2
+### table key from a variable
+var t: Table(string, float) = {}
+string k := "a"
+t[k] = 1
+### generic table takes anything
+table t = {}
+t.x = "a"
+t[1] = nil
+### optional element takes nil
+var a: Array(uint?) = [1]
+a[0] = nil
+### nested targets
+var t = {a={b=1}}
+t.a.b = 2
+var a = [[1, 2], [3]]
+a[1][0] = 4
+### several targets
+var t = {x=1, y=2}
+var a = [1]
+uint v := 0
+t.x, a[0], v = 3, 4, 5
+### constructor assigned to an element is fitted to its type
+var t: Table(string, Array(float)) = {}
+t.x = [1, 2]
+### target values from a variadic part
+func f(uint ...) { var a = [0, 0]
+a[0], a[1] = ... }
+### index target in a closure (the container is an upvalue)
+var a = [1]
+var f = func() { a[0] = 2 }

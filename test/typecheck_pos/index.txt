@@ -1,0 +1,58 @@
+-- Indexing: Array(T)[uint] is T, Table(K, V)[K] is V, t.x is t["x"]
+### array index from a variable
+var a = [1, 2]
+uint i := 0
+uint x = a[i]
+### constant index converted to uint
+var a = [1]
+uint x = a[+0]
+### table field
+var t = {x=1}
+uint y = t.x
+### table string key
+var t = {x=1}
+uint y = t["x"]
+### table key from a variable
+var t: Table(string, float) = {}
+string k := "a"
+float f = t[k]
+### generic table values are any?
+table t = {}
+any? v = t.x
+### generic array elements are any?
+array a = [1]
+any? v = a[0]
+### nested arrays
+var a = [[1, 2], [3]]
+uint x = a[1][0]
+### nested tables
+var t = {a={b=1}}
+uint x = t.a.b
+### indexing in an expression
+var a = [1, 2]
+uint s = a[0] + a[1]
+### indexing a Const array gives the element type
+type UA = Array(uint)
+func [const] f(UA a) -> uint return a[0]
+### table of variadic values
+func f(uint ...) { var t = {...}
+uint x = t[0] }
+### element of an optional array type
+var a: Array(uint?) = [1, nil]
+uint? x = a[1]
+### optional element type: [] is getopt, typed T?
+var a: Array(uint?) = [1]
+uint? x = a[5]
+### reading a Const array
+type CA = Const(Array(uint))
+var a: CA = [1]
+uint x = a[0]
+### reading a Const table
+type CT = Const(Table(string, uint))
+var t: CT = {x=1}
+uint x = t.x
+### generic array and table use their own [] and []=
+array a = [1]
+table t = {}
+a[0] = "x"
+t.x = a[0]

@@ -1178,6 +1178,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
 
     HLNode *lasttype = NULL;
     bool varctx = false;
+    bool varopt = false; // 'var?': the deduced types are made optional
     bool variadic = false;
     bool wide = false;
     Lexer::Token widetok;
@@ -1211,6 +1212,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
                 error("Function parameters need a type, 'var' is not allowed here");
             lasttype = NULL;
             varctx = true;
+            varopt = tryeat(Lexer::TOK_QM); // var?
         }
         else // curtok is a type identifier or single identifier
         {
@@ -1230,6 +1232,7 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
             if(istype)
             {
                 varctx = false; // Definitely C-style decl now
+                varopt = false;
                 // Eats ident, optionally followed by '?' or '...'
                 lasttype = typeident(allowVariadic);
                 variadic = lasttype->flags & HLFLAG_VARIADIC; // Case (V3)
@@ -1264,9 +1267,13 @@ HLNode* Parser::_decllist(SymbolRefContext symref, bool allowVariadic)
         }
 
         assert(varctx == !lasttype);
+        if(varopt)
+            def->flags |= IDENTFLAGS_OPTIONALTYPE; // var? x: x gets the optional of the deduced type
 
         if(varctx && tryeat(Lexer::TOK_COLON)) // var x: typeexpr = ...
         {
+            if(varopt)
+                errorAt(prevtok, "'var?' can't have a ':' type", "Use 'var x: T?' instead");
             //if(tryeat(Lexer::TOK_LIKE))
             //    errorAt(prevtok, "FIXME: implement var x: like EXPR"); // TODO, maybe
             def->u.vardef.type = expr(); // includes a trailing '?'
@@ -1565,7 +1572,7 @@ HLNode* Parser::varargs(Context ctx)
     // '...' was just eaten
     if(!_fctx.variadic)
         error("'...' used outside of a variadic function");
-    return ensure(hlir->varargs(), prevtok);
+    return _endcall(ensure(hlir->varargs(), prevtok)); // ...#N like f()#N
 }
 
 // ns::ident

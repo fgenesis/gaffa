@@ -1,0 +1,121 @@
+-- for loops, break, continue. Objects are iterated with T::__iterN(uint idx) -> N values (N = number of loop variables).
+### range with a step
+for(uint i = 0..10..2) {}
+### endless range
+for(uint i = 0..) { break }
+### endless range with a step
+for(var i = 0.. ..2) { break }
+### a constant adapts to the type of a variable bound
+int n = +5
+for(var i = 0..n) { int k = i }
+### a constant step adapts too
+float e = 1.0
+for(var f = 0..e..0.25) { float g = f }
+### untyped loop variable
+for(var i = -3..+3) { int k = i }
+### several iterators in lockstep
+for(uint i = 0..10; int j = -5..+5) { uint a = i int b = j }
+### sink as a loop variable
+for(var _ = 0..3) {}
+### range bound from a value block
+for(uint i = 0..comptime ${ emit 3 }) {}
+### nested loops with break and continue
+for(uint i = 0..3) for(uint j = 0..3) { if(j == 1) continue if(i == 2) break }
+### break and continue in a while loop
+uint i := 0
+while(i < 10) { i = i + 1 if(i == 3) continue if(i == 5) break }
+### break in a value block leaves the loop
+for(uint i = 0..3) { var x = ${ if(i == 1) break; emit i } }
+### import is scoped to the loop body
+for(uint i = 0..3) { import __testmod(1)
+uint x = t1 }
+### object iteration with a method
+func string:__iter1(uint i) -> uint { return i }
+for(uint c = "abc") {}
+### object iteration with two loop variables
+func string:__iter2(uint i) -> uint, string { return i, self }
+for(var i, s = "abc") { uint a = i string b = s }
+### object iteration and a range in lockstep
+func string:__iter1(uint i) -> uint { return i }
+for(var c = "abc"; int k = +0..) { uint a = c int b = k }
+### object iteration with a sink
+func string:__iter2(uint i) -> uint, string { return i, self }
+for(var _, s = "abc") { string b = s }
+### closure over a loop variable
+for(uint i = 0..3) { var f = func() return i }
+### value block that never ends without emit: while(true)
+func f(bool c) -> uint
+{
+    return ${ while(true) { if(c) emit 1 } }
+}
+### value block that never ends without emit: endless range
+func f() -> uint
+{
+    return ${ for(uint i = 0..) { if(i == 3) emit i } }
+}
+### a break in a nested loop doesn't end the outer loop
+func f() -> uint
+{
+    return ${ while(true) { for(uint i = 0..3) break emit 1 } }
+}
+### function ending in an endless loop
+func f() -> uint { while(true) { return 1 } }
+### wide sink takes the value of a range
+for(var ___ = 0..3) {}
+### typed wide sink
+for(uint ___ = 0..3) {}
+### wide sink after a loop variable takes nothing
+for(var i, ___ = 0..3) { uint a = i }
+### wide sink with object iteration selects __iterN by the other loop variables
+func string:__iter1(uint i) -> uint { return i }
+for(var c, ___ = "abc") { uint a = c }
+### sinks in front of a loop variable
+func string:__iter3(uint i) -> uint, string, uint { return i, self, i }
+for(var _, _, k = "abc") { uint a = k }
+### iterating variadic values
+func f(uint ...) { for(uint x = ...) {} }
+### iterating variadic values with the index
+func f(string ...) { for(uint i, string s = ...) { uint a = i string b = s } }
+### untyped variadic values are any?
+func f(...) { for(var x = ...) { any? a = x } }
+### var? loop variable
+func f(uint ...) { for(var? x = ...) { uint? a = x } }
+### variadic values and a range in lockstep
+func f(uint ...) { for(var x = ...; int k = +0..) { uint a = x int b = k } }
+### sink for the index of variadic values
+func f(uint ...) { for(var _, x = ...) { uint a = x } }
+### variadic values in a closure inside the loop
+func f(uint ...) { for(uint x = ...) { var g = func() return x } }
+### array elements
+var a = [1.5, 2.5]
+for(float f = a) {}
+### array index and element
+var a = [1]
+for(uint i, uint v = a) {}
+### table values
+var t = {x=1}
+for(uint v = t) {}
+### table keys and values
+var t = {x=1}
+for(string k, uint v = t) {}
+### generic table
+table g = {}
+for(any k, any? v = g) {}
+### Const array
+type CA = Const(Array(uint))
+var a: CA = [1]
+for(uint v = a) {}
+### optional elements
+var a: Array(uint?) = [1, nil]
+for(uint? v = a) {}
+### array and range in lockstep
+var a = [1, 2]
+for(var v = a; uint i = 0..) { uint x = v }
+### table position, key and value
+var t = {x=1}
+for(uint i, string k, uint v = t) {}
+### string bytes
+for(uint c = "abc") {}
+### string index and byte
+string s := "abc"
+for(uint i, uint c = s) { uint x = i + c }

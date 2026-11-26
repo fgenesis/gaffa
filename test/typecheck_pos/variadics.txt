@@ -1,0 +1,99 @@
+-- Variadic parameters ('T ...', '...' = any...), '...' values, '#...' count, variadic returns
+### variadic params
+func f(uint ...) {}
+f()
+f(1, 2, 3)
+### variadic after a named param takes its type
+func g(uint a, ...) {}
+g(1, 2, 3)
+### untyped variadic params
+func h(...) {}
+h(1, "a", 2.5)
+### count
+func n(...) return #...
+uint c = n(1, "a")
+### forwarding with a deduced return type
+func f(uint ...) return ...
+func g(uint ...) return f(...)
+var ___ = g(1, 2)
+### declared variadic return types
+func f() -> uint... return 1, 2, 3
+func g() -> uint, float... return 1
+func h(uint ...) -> uint... return ...
+### fixed values before forwarded ones
+func f(uint ...) -> uint, uint... return 1, ...
+### fixed args before variadic ones
+func f(uint a, uint ...) {}
+func g(uint ...) { f(1, ...) }
+### variadic call result in a declaration with ___
+func f(uint ...) -> uint, uint... return 1, ...
+var a, ___ = f(1, 2)
+### bare '...' return type is any...
+func f() -> ... return 1, "a"
+var ___ = f()
+### value block emitting the variadic values
+func f(uint ...) return ${ emit ... }
+### closure with its own variadic params
+func f(uint ...) { var g = func(string ...) return #... }
+### namespaced variadic function
+func string.m(uint a, uint ...) -> uint { return a }
+uint x = string::m(1, 2, 3)
+### bare '...' params are any?
+func h(...) {}
+h(1, nil)
+### bare '...' return type is any?...
+func f() -> ... return 1, nil
+### optional variadic params keep the '?'
+func f(uint? ...) {}
+f(1, nil)
+-- Fixed targets take values from a variadic part: missing ones are nil (a runtime error for a non-optional
+-- target), and in strict mode more values than targets are a runtime error. Checked at runtime by LLIR.
+### var? declarations take nil for missing values
+func f(uint ...) { var? a, b, c = ...
+uint? x = c }
+### var declarations require the values at runtime
+func f(uint ...) { var a, b, c = ...
+uint x = c }
+### var? with untyped variadic values
+func f(...) { var? a = ...
+any? x = a }
+### declared optional and non-optional targets
+func f(uint ...) { uint? a, uint b = ... }
+### assignment from variadic values
+func f(uint ...) { uint a := 0
+uint? b := nil
+a, b = ... }
+### untyped sink takes a missing value
+func f(uint ...) { var a, _ = ... }
+### typed ___ takes the rest
+func f(uint ...) { var a, uint ___ = ... }
+### forwarding into a non-variadic function
+func f(uint a) {}
+func g(uint ...) { f(...) }
+### forwarding fills a fixed param
+func f(uint a, uint ...) {}
+func g(uint ...) { f(...) }
+### forwarding into an optional param
+func f(uint? a, uint? b) {}
+func g(uint ...) { f(1, ...) }
+### variadic values into a fixed return
+func f(uint ...) -> uint return ...
+### variadic values into an optional return
+func f(uint ...) -> uint, uint? return ...
+### variadic call result into fixed targets
+func f(uint ...) return ...
+var a, ___ = f(1, 2)
+var b, c = f(1, 2)
+### exactly as many fixed values as targets, nothing more at runtime
+func g() -> uint, uint... return 1
+var a = g()
+### var? on known values
+var? a = 5
+uint? b = a
+### any? values into a typed ___ are checked at runtime
+func f(...) { uint? d, ___ = ... }
+### any? values forwarded into optional variadic params are checked at runtime
+func g(uint? ...) {}
+func f(...) { g(...) }
+### any? values returned as optional variadic values are checked at runtime
+func f(...) -> uint?... return ...

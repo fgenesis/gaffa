@@ -1,0 +1,65 @@
+-- Value blocks: $stmt yields the values of the emit that ends it
+### single value
+uint x = ${ emit 1 }
+### folds to a constant
+uint x = comptime ${ emit 1 }
+### locals with known values fold away
+uint x = comptime ${ var a = 2; var b = a * 3; emit b + 1 }
+### several values
+var a, b = ${ emit 1, "x" }
+uint c = a
+string d = b
+### value block in an expression
+var t := 1000
+var x = 1 + ${ t = t + 100; emit 10 + t }
+### mutable local and a loop
+var x = ${ var a := 0
+while(a < 10) a = a + 1
+emit a }
+uint y = x
+### emit in both branches of an if
+func f(bool c) -> uint
+{
+    return ${ if(c) emit 1 else emit 2 }
+}
+### emit in nested blocks
+func f(bool c) -> uint
+{
+    return ${ { if(c) { emit 1 } else { emit 2 } } }
+}
+### a braceless if as the body
+func f(bool c) -> uint
+{
+    return $ if(c) emit 1 else emit 2
+}
+### branch known at compile time
+uint x = comptime ${ if(true) emit 1 }
+### return inside a value block returns from the function
+func f(bool c) -> uint
+{
+    var x = ${ if(c) return 5
+    emit 1 }
+    return x
+}
+### nested value blocks
+uint x = comptime ${ var a = ${ emit 3 }; emit a + 1 }
+### inner emit belongs to the inner block
+func f(bool c) -> string
+{
+    return ${ var n = ${ if(c) emit 1 else emit 2 }; emit "x" }
+}
+### value block as a type expression
+type T = comptime ${ emit uint }
+T x = 5
+### closure over a value block local
+func g(uint k) -> uint
+{
+    var f = ${ var j = k; emit func(uint a) return a + j }
+    return f(1)
+}
+### import is scoped to the value block
+var x = ${ import __testmod(1)
+emit t1 }
+uint y = x
+### value block in a dead branch
+if(false) { uint x = ${ emit "x" } }

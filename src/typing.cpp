@@ -84,27 +84,26 @@ const TDesc *TypeRegistry::mkstructDesc(const StructMember* m, size_t n, size_t 
         return NULL;
     td->objprimtype = PRIMTYPE_OBJECT;
     _FieldDefault *fd = td->defaults();
+    size_t nd = 0;
     for(size_t i = 0; i < n; ++i)
     {
         td->names()[i] = m[i].name;
         td->types()[i] = m[i].t;
 
         const Val& d = m[i].defaultval;
-        if(d == XNil)
-        {
-            assert(numdefaults);
-            --numdefaults;
+        if(d == XNil) // no default
             continue;
-        }
 
         // Record fields with defaults and their index so setting them is a simple loop on object creation
+        assert(nd < numdefaults);
         fd->idx = i;
         fd->t = d.type;
         fd->u = d.u;
         ++fd;
+        ++nd;
     }
 
-    assert(numdefaults == 0); // Otherwise the allocation size was wrong and we're fucked now.
+    assert(nd == numdefaults); // Otherwise the allocation size was wrong
 
     return _store(td);
 }
@@ -133,8 +132,11 @@ const TDesc *TypeRegistry::mkstructDesc(const Table& t)
         }
         else
         {
+            if(e.v.type == PRIMTYPE_NIL || e.v.type == PRIMTYPE_ERROR) // gives the field no type; use T?
+                goto fail;
             tn[i].defaultval = e.v;
             tn[i].t = e.v.type;
+            ++numdefaults;
         }
         tn[i].name = e.k.u.str;
     }
@@ -226,6 +228,61 @@ DType *TypeRegistry::mkconst(DType *t) const
     return asObj(t->tid | TYPEBIT_CONST);
 }
 
+static bool isContainerPart(const TypeRegistry& tr, Type t)
+{
+    if(t & TYPEBIT_VARIADIC)
+        return false;
+    const TDesc *d = tr.lookupDesc(t);
+    return d && d->kind != TKIND_TYPELIST;
+}
+
+Type TypeRegistry::mkarray(Type elem)
+{
+    if(!isContainerPart(*this, elem))
+        return PRIMTYPE_AUTO;
+    if(elem == (PRIMTYPE_ANY | TYPEBIT_OPTIONAL))
+        return PRIMTYPE_ARRAY;
+    return mksubDesc(PRIMTYPE_ARRAY, &elem, 1)->id();
+}
+
+Type TypeRegistry::mktable(Type key, Type val)
+{
+    if(!isContainerPart(*this, key) || !isContainerPart(*this, val))
+        return PRIMTYPE_AUTO;
+    if(key == PRIMTYPE_ANY && val == (PRIMTYPE_ANY | TYPEBIT_OPTIONAL))
+        return PRIMTYPE_TABLE;
+    const Type kv[] = { key, val };
+    return mksubDesc(PRIMTYPE_TABLE, kv, 2)->id();
+}
+
+Type TypeRegistry::arrayElem(Type t) const
+{
+    t &= ~(TYPEBIT_CONST | TYPEBIT_OPTIONAL);
+    if(t == PRIMTYPE_ARRAY)
+        return PRIMTYPE_ANY | TYPEBIT_OPTIONAL;
+    const TDesc *d = t >= PRIMTYPE_MAX ? lookupDesc(t) : NULL;
+    if(!d || d->kind != TKIND_SUBTYPED || d->n != 2 || d->types()[0] != PRIMTYPE_ARRAY)
+        return PRIMTYPE_NOTYPE;
+    return d->types()[1];
+}
+
+bool TypeRegistry::tableKV(Type t, Type *k, Type *v) const
+{
+    t &= ~(TYPEBIT_CONST | TYPEBIT_OPTIONAL);
+    if(t == PRIMTYPE_TABLE)
+    {
+        *k = PRIMTYPE_ANY;
+        *v = PRIMTYPE_ANY | TYPEBIT_OPTIONAL;
+        return true;
+    }
+    const TDesc *d = t >= PRIMTYPE_MAX ? lookupDesc(t) : NULL;
+    if(!d || d->kind != TKIND_SUBTYPED || d->n != 3 || d->types()[0] != PRIMTYPE_TABLE)
+        return false;
+    *k = d->types()[1];
+    *v = d->types()[2];
+    return true;
+}
+
 DType *TypeRegistry::mkoptional(const DType *t) const
 {
     const Type base = t->tid & TYPEBASE_MASK;
@@ -313,6 +370,17 @@ bool TypeRegistry::isCompatible(Type sub, Type bigger) const
         return false;
     if(bigger == PRIMTYPE_ANY) // any holds any valid value: not nil or errors (any? does)
         return sub != PRIMTYPE_NIL && sub != PRIMTYPE_ERROR;
+    if((sub & TYPEBIT_CONST) && !(bigger & TYPEBIT_CONST)) // Const(T) -> T is never fine
+        return false;
+    // specialized -> generic container: Array(T) -> array, Table(K, V) -> table (also into Const(...))
+    const Type gen = bigger & ~TYPEBIT_CONST;
+    if(gen == PRIMTYPE_ARRAY || gen == PRIMTYPE_TABLE)
+    {
+        const Type s = sub & ~TYPEBIT_CONST;
+        const TDesc *d = s >= PRIMTYPE_MAX ? lookupDesc(s) : NULL;
+        if(d && d->kind == TKIND_SUBTYPED && d->types()[0] == gen)
+            return true;
+    }
     return (bigger & TYPEBIT_CONST) && (sub | TYPEBIT_CONST) == bigger;
 }
 

@@ -92,6 +92,10 @@ bool mlirIsStmt(MLCmd cmd)
     case ML_EMIT:
     case ML_EXPORT:
     case ML_BLOCK:
+    case ML_ITERDECL:
+    case ML_ITERDECLVARIADIC:
+    case ML_BREAK:
+    case ML_CONTINUE:
     case ML_SINK:  // not a stmt, but has no value either
         return true;
     default: ;
@@ -116,6 +120,8 @@ static size_t mlirNumParams(MLCmd cmd)
             return 1;
 
         case ML_NAMEDECL:
+        case ML_ITERDECL:
+        case ML_ITERDECLVARIADIC:
             return 2;
 
         default: ;
@@ -140,6 +146,10 @@ static size_t mlirNumChildren(MLCmd cmd)
         case _ML_FUNCIDX:
         case _ML_ERROR:
         case _ML_EMPTY:
+        case ML_BREAK:
+        case ML_CONTINUE:
+        case ML_VARARGS:
+        case ML_VARARGCOUNT:
             return 0;
 
         case ML_RETURN:
@@ -154,6 +164,8 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_COMPTIME:
         case ML_OPTIONAL:
         case ML_UNWRAPBIND:
+        case ML_VALBLOCK:
+        case ML_ITERDECLVARIADIC:
             return 1;
 
         case ML_NAMEDECL:
@@ -161,7 +173,6 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_ASSIGN:
         case ML_WHILE:
         case ML_FOR:
-        case ML_GETINDEX:
         case ML_GETNS:
         case ML_CALLADJ:
             return 2;
@@ -169,6 +180,10 @@ static size_t mlirNumChildren(MLCmd cmd)
         case ML_IFELSE:
         case ML_MTHCALL:
         case ML_FUNC:
+        case ML_ITERDECL:
+        case ML_RANGE:
+        case ML_GETINDEX:
+        case ML_SETINDEX:
             return 3;
 
         case ML_LIST:
@@ -564,6 +579,18 @@ u32 MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const
     {
         const HLVarDef *vd = dch[i]->as<HLVarDef>();
         MLNode *ch = &nodes[s.chIdx + i]; // _sink() may reallocate
+        if(dch[i]->flags & HLFLAG_VARIADIC) // '...' ends a parameter list; the variadic params have no var
+        {
+            assert(i + 1 == s.n);
+            MLCh vs = _setupCh(ch, ML_SINK);
+            ch->m.p[0] = ML_SINK_VARIADIC;
+            MLNode *te = &nodes[vs.chIdx];
+            if(vd->type) // 'T...' on an identifier only marks the param; the type is T
+                _cons(q, te, vd->type);
+            else
+                makeEmpty(te);
+            continue;
+        }
         if(vd->ident->type == HLNODE_SINK)
         {
             _sink(q, ch, vd->ident, vd->type);
@@ -585,6 +612,11 @@ u32 MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const
 
         if(vd->type)
             _cons(q, ch, vd->type);
+        else if(dch[i]->flags & IDENTFLAGS_OPTIONALTYPE) // var?: deduced, then made optional
+        {
+            MLCh os = _setupCh(ch, ML_OPTIONAL); // may reallocate nodes[]
+            makeEmpty(&nodes[os.chIdx]);
+        }
         else
             makeEmpty(ch); // type deduced from the value
     }
@@ -593,13 +625,15 @@ u32 MLIR::_decllist(Queue<Cons>& q, MLNode *& dst, const HLNode* decllist, const
     return firstvar;
 }
 
-// Unnamed variadic params ('uint ...') and '_' have no var
+// '_' params have no var, but would need a slot (TODO). Variadic params ('uint ...') are fine.
 static bool allParamsNamed(const HLNode *decllist)
 {
     const size_t n = decllist ? decllist->numchildren() : 0;
     const HLNode * const *dch = n ? decllist->children() : NULL;
     for(size_t i = 0; i < n; ++i)
     {
+        if(dch[i]->flags & HLFLAG_VARIADIC)
+            continue;
         const HLNode *id = dch[i]->as<HLVarDef>()->ident;
         if(!id || id->type != HLNODE_IDENT)
             return false;
@@ -650,13 +684,15 @@ void MLIR::_construct(Queue<Cons>& q, MLNode *dst, const HLNode *hl, unsigned fl
         }
 
         case HLNODE_LIST:
+        case HLNODE_ITER_DECLLIST: // the iterators of a for loop
         {
 dolist:
             const MLCh s = _setupList(dst, hl->numchildren()); // add all children
             const HLNode * const *hlch = hl->children();
             MLNode *ch = &nodes[s.chIdx];
+            const unsigned chflags = hltype == HLNODE_ITER_DECLLIST ? CONS_ITERDECL : 0;
             for(size_t i = 0; i < s.n; ++i)
-                _cons(q, &ch[i], hlch[i]);
+                _cons(q, &ch[i], hlch[i], chflags);
             return;
         }
 
@@ -682,20 +718,71 @@ dolist:
 
         case HLNODE_VARDECLASSIGN:
         {
-            MLCh s = _setupCh(dst, ML_DECL);
-            assert(s.n == 2);
+            const bool iter = flags & CONS_ITERDECL;
+            const HLNode *vals = hl->u.vardecllist.vallist;
+            const bool itervar = iter && vals->numchildren() == 1 && vals->children()[0]->type == HLNODE_VARARGS; // x = ...
+            MLCh s = _setupCh(dst, !iter ? ML_DECL : itervar ? ML_ITERDECLVARIADIC : ML_ITERDECL);
+            assert(s.n == (!iter ? 2u : itervar ? 1u : 3u));
 
             const HLNode *decls = hl->u.vardecllist.decllist;
             MLNode *ch = &nodes[s.chIdx];
             const size_t idx = indexOf(dst);
             const u32 firstvar = _decllist(q, ch, decls, sp); // may reallocate nodes[]
             nodes[idx].m.p[0] = firstvar;
+            if(itervar) // nothing else; the hidden vars are allocated while folding
+            {
+                nodes[idx].m.p[1] = ML_ITER_NOHIDDEN;
+                return;
+            }
 
             // Continue expanding RHS expressions
-            const HLNode *vals = hl->u.vardecllist.vallist;
-            _cons(q, &ch[1], vals);
+            if(!iter)
+            {
+                _cons(q, &ch[1], vals);
+                return;
+            }
+
+            // An iterator: a single iterator expr. The hidden vars are allocated while folding.
+            assert(vals->numchildren() == 1);
+            nodes[idx].m.p[1] = ML_ITER_NOHIDDEN;
+            _cons(q, &ch[1], vals->children()[0]);
+            makeEmpty(&ch[2]); // the iteration method, found while folding
             return;
         }
+
+        case HLNODE_FORLOOP:
+        {
+            const HLForLoop& f = hl->u.forloop;
+            MLCh s = _setupCh(dst, ML_FOR);
+            assert(s.n == 2);
+            MLNode *ch = &nodes[s.chIdx];
+            _cons(q, &ch[0], f.iter); // HLNODE_ITER_DECLLIST
+            _cons(q, &ch[1], f.body, CONS_BODY);
+            return;
+        }
+
+        case HLNODE_RANGE: // only as an iterator expr
+        {
+            const HLRange& r = hl->u.range;
+            MLCh s = _setupCh(dst, ML_RANGE);
+            assert(s.n == 3);
+            MLNode *ch = &nodes[s.chIdx];
+            const HLNode * const parts[] = { r.begin, r.end, r.step };
+            for(size_t i = 0; i < 3; ++i)
+            {
+                if(parts[i])
+                    _cons(q, &ch[i], parts[i]);
+                else
+                    makeEmpty(&ch[i]);
+            }
+            return;
+        }
+
+        case HLNODE_BREAK:
+        case HLNODE_CONTINUE:
+            dst->m.cmd = hltype == HLNODE_BREAK ? ML_BREAK : ML_CONTINUE;
+            dst->m.chOffs = 0;
+            return;
 
         case HLNODE_FUNCDECL:
         {
@@ -733,7 +820,7 @@ dolist:
             const HLFunctionHdr *fh = f.hdr->as<HLFunctionHdr>();
             if(!allParamsNamed(fh->paramlist))
             {
-                dst->setError(sp, "Variadic and '_' parameters not implemented yet in MLIR");
+                dst->setError(sp, "'_' parameters not implemented yet in MLIR");
                 return;
             }
 
@@ -751,7 +838,28 @@ dolist:
             const u32 firstvar = _decllist(q, ch, fh->paramlist, sp); // may reallocate nodes[]
             nodes[idx].m.p[0] = firstvar;
 
-            _cons(q, &ch[1], fh->rettypes);
+            // Return types: a trailing 'T...' or '...' (any...) becomes a variadic sink, like variadic params
+            const HLNode *rets = fh->rettypes;
+            const size_t nr = rets ? rets->numchildren() : 0;
+            const HLNode *lastr = nr ? rets->children()[nr - 1] : NULL;
+            if(!lastr || !(lastr->flags & HLFLAG_VARIADIC))
+                _cons(q, &ch[1], rets);
+            else
+            {
+                MLNode *rl = &ch[1];
+                const MLCh ls = _setupList(rl, nr); // may reallocate nodes[]
+                for(size_t i = 0; i + 1 < nr; ++i)
+                    _cons(q, &nodes[ls.chIdx + i], rets->children()[i]);
+                MLNode *vs = &nodes[ls.chIdx + nr - 1];
+                const MLCh sc = _setupCh(vs, ML_SINK); // may reallocate nodes[]
+                vs->m.p[0] = ML_SINK_VARIADIC;
+                MLNode *te = &nodes[sc.chIdx];
+                if(lastr->type == HLNODE_IDENT) // 'T...' (the '...' on the identifier is otherwise ignored)
+                    _cons(q, te, lastr);
+                else
+                    makeEmpty(te); // '...'
+            }
+            ch = &nodes[s.chIdx];
             _cons(q, &ch[2], f.body, CONS_BODY);
             return;
         }
@@ -792,6 +900,14 @@ dolist:
             return;
         }
 
+        case HLNODE_VALBLOCK: // $stmt
+        {
+            MLCh s = _setupCh(dst, ML_VALBLOCK);
+            assert(s.n == 1);
+            _cons(q, &nodes[s.chIdx], hl->u.valblock.body, CONS_BODY);
+            return;
+        }
+
         case HLNODE_COMPTIME:
             _setupChDefault(q, dst, hl, hl->tok == Lexer::TOK_IMPORT ? ML_IMPORT : ML_COMPTIME);
             return;
@@ -814,7 +930,18 @@ dolist:
         }
 
         case HLNODE_UNARY:
+            if(hl->u.unary.opid == OP_ULEN && hl->u.unary.a && hl->u.unary.a->type == HLNODE_VARARGS) // #...
+            {
+                dst->m.cmd = ML_VARARGCOUNT;
+                dst->m.chOffs = 0;
+                return;
+            }
             _opr(q, dst, hl->u.unary.opid, hl);
+            return;
+
+        case HLNODE_VARARGS: // ...
+            dst->m.cmd = ML_VARARGS;
+            dst->m.chOffs = 0;
             return;
 
         case HLNODE_BINARY:
@@ -879,9 +1006,9 @@ dolist:
             for(size_t i = 0; i < n; ++i)
             {
                 const HLNodeType t = (HLNodeType)dsts->children()[i]->type;
-                if(t != HLNODE_IDENT && t != HLNODE_SINK)
+                if(t != HLNODE_IDENT && t != HLNODE_SINK && t != HLNODE_INDEXASSIGN)
                 {
-                    dst->setError(sp, "Assigning to fields, indexes and namespaces is not implemented yet in MLIR");
+                    dst->setError(sp, "Assigning to namespaces is not implemented yet in MLIR");
                     return;
                 }
             }
@@ -902,8 +1029,13 @@ dolist:
             return;
 
         case HLNODE_INDEX:
-            _setupChDefault(q, dst, hl, ML_GETINDEX);
+        case HLNODE_INDEXASSIGN: // an assignment target (the parser makes it from a HLNODE_INDEX)
+        {
+            const MLCh s = _setupChDefault(q, dst, hl, hltype == HLNODE_INDEX ? ML_GETINDEX : ML_SETINDEX);
+            assert(s.n == 3);
+            makeEmpty(&nodes[s.chIdx + 2]); // the function to call, found while folding
             return;
+        }
 
         case HLNODE_NS_INDEX:
             _setupChDefault(q, dst, hl, ML_GETNS);
@@ -1147,6 +1279,25 @@ struct MLFoldTracker
     };
     std::vector<FoldFunc> foldFuncs;
 
+    // Value blocks currently being folded, innermost last. An emit belongs to the innermost one
+    // (the parser doesn't allow emit in a function inside a value block).
+    struct FoldValBlock
+    {
+        u32 nodeidx;
+        Type emitted; // type list; PRIMTYPE_AUTO until the first emit
+        bool failed;  // an emit had an error: the block's type is unknown
+    };
+    std::vector<FoldValBlock> foldValBlocks;
+
+    // Generic family functions specialized for a type, as function values (T::f), see specializedFunc()
+    struct SpecFunc
+    {
+        const DFunc *generic;
+        Type functype;
+        DFunc *spec; // TODO GC: not rooted
+    };
+    std::vector<SpecFunc> specFuncs;
+
     // Scopes currently being folded, innermost last: one per ML_BLOCK and one per ML_FUNC (params; the body
     // is usually an ML_BLOCK with its own scope). The file's root block is the outermost scope.
     // Blocks currently being folded, innermost last; see mlOpensBlock().
@@ -1297,6 +1448,7 @@ bool mlOpensBlock(const MLNode *node, const MLNode *parent)
         case ML_BLOCK:
         case ML_FUNC: // params + body
         case ML_FOR:  // iterators + body
+        case ML_VALBLOCK:
             return true;
         default: ;
     }
@@ -1315,7 +1467,8 @@ static u32 blockStmts(MLIR& mlir, MLNode *node)
 {
     switch((MLCmd)node->m.cmd) // also for the root, which may be a single ML_BLOCK
     {
-        case ML_BLOCK: return (u32)mlir.indexOf(node->firstChild());
+        case ML_BLOCK:
+        case ML_VALBLOCK: return (u32)mlir.indexOf(node->firstChild());
         case ML_FUNC:  return (u32)mlir.indexOf(node->firstChild() + 2);
         case ML_FOR:   return (u32)mlir.indexOf(node->firstChild() + 1);
         default: ;
@@ -1464,10 +1617,12 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
 
         case OP_CALL:
         case ML_MTHCALL:
+        case ML_VALBLOCK:
+        case ML_VARARGS:
         {
             NumValuesResult ret = { NumValuesResult::ERROR, 0 };
             const Type t = node->x.exprtype;
-            if(t == PRIMTYPE_AUTO) // call couldn't be typed; already reported
+            if(t == PRIMTYPE_AUTO) // call or value block couldn't be typed; already reported
                 return ret;
             TypeIdList tl = ft.tr().aslist(t);
             ret.verdict = NumValuesResult::EXACT_NUMBER;
@@ -1487,6 +1642,8 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
 
             MLNode *numexpr = node->firstChild();
             MLNode *myexpr = numexpr + 1;
+            if(numexpr->m.cmd == _ML_ERROR || myexpr->m.cmd == _ML_ERROR)
+                return ret; // reported later
             if(!foldKnown(ft, numexpr) || numexpr->val.type != PRIMTYPE_UINT)
             {
                 numexpr->setError(ft.sp(), "Value-adjustment must result in a compile-time constant uint value");
@@ -1520,14 +1677,21 @@ static NumValuesResult numResultValues(MLNode *node, MLFoldTracker& ft)
         default:
             if(cmd < _OP_MAX) // Operators always return a single value
             {
+                case ML_GETINDEX:
+                case ML_NEW_ARRAY:
+                case ML_NEW_TABLE:
+                    if(node->x.exprtype == PRIMTYPE_AUTO) // folding failed; already reported
+                    {
+                        NumValuesResult ret = { NumValuesResult::ERROR, 0 };
+                        return ret;
+                    }
+                    // fall through
                 case _ML_VAL:
                 case ML_VAR:
-                case ML_GETINDEX:
                 case ML_GETNS:
                 case ML_FUNC:
                 case ML_ITERPACK:
-                case ML_NEW_ARRAY:
-                case ML_NEW_TABLE:
+                case ML_VARARGCOUNT:
                 {
                     NumValuesResult ret = { NumValuesResult::EXACT_NUMBER, 1 };
                     return ret;
@@ -1727,11 +1891,12 @@ static int tryFoldCall(MLNode *call, const DFunc& func, MLNode *args, size_t arg
     return status;
 }
 
-// A single value has its own type, more than one are a type list
+// A single value has its own type, more than one are a type list. A lone T... stays a list, since it's
+// any number of values (and aslist() of a single type drops its modifier bits).
 static Type singleOrList(MLFoldTracker& ft, Type list)
 {
     TypeIdList tl = ft.tr().aslist(list);
-    return tl.n == 1 ? tl.ptr[0] : list;
+    return tl.n == 1 && !(tl.ptr[0] & TYPEBIT_VARIADIC) ? tl.ptr[0] : list;
 }
 
 static void collectTypes(MLNode *ch, size_t n, std::vector<Type>& ts)
@@ -1753,7 +1918,10 @@ static Type typeListOf(MLFoldTracker& ft, const MLSub& exprs)
     return ft.tr().mklistDesc(ts.data(), ts.size())->id();
 }
 
-// Type list from a list of type expressions; PRIMTYPE_AUTO if empty or not all are known types
+static Type sinkType(MLFoldTracker& ft, MLNode *sink);
+
+// Type list from a list of type expressions (a function's return types); PRIMTYPE_AUTO if empty or not all are
+// known types. A trailing variadic sink is T... (any?... if untyped).
 static Type typeListFromTypeExprs(MLFoldTracker& ft, MLNode *typeexprs)
 {
     MLSub s = typeexprs->aslist();
@@ -1763,6 +1931,15 @@ static Type typeListFromTypeExprs(MLFoldTracker& ft, MLNode *typeexprs)
     for(size_t i = 0; i < s.n; ++i)
     {
         MLNode *te = &s.ch[i];
+        if(te->m.cmd == ML_SINK && te->m.p[0] == ML_SINK_VARIADIC)
+        {
+            assert(i + 1 == s.n);
+            const Type t = sinkType(ft, te);
+            if(t == PRIMTYPE_AUTO && te->firstChild()->m.cmd != _ML_EMPTY) // not a type; reported
+                return PRIMTYPE_AUTO;
+            ts[i] = (t != PRIMTYPE_AUTO ? t : (PRIMTYPE_ANY | TYPEBIT_OPTIONAL)) | TYPEBIT_VARIADIC; // '...' is any?...
+            continue;
+        }
         if(!foldKnown(ft, te) || te->val.type != PRIMTYPE_TYPE)
         {
             if(te->m.cmd != _ML_ERROR)
@@ -1774,15 +1951,28 @@ static Type typeListFromTypeExprs(MLFoldTracker& ft, MLNode *typeexprs)
     return ft.tr().mklistDesc(ts.data(), ts.size())->id();
 }
 
-// func(params) -> rets, with param types taken from the function's locals
+// The type T of a function's variadic params ('T ...'; any? for an untyped '...'), PRIMTYPE_NOTYPE if it has none
+static Type variadicParamType(MLFoldTracker& ft, MLNode *func)
+{
+    const MLSub ps = func->firstChild()->aslist();
+    MLNode *last = ps.n ? &ps.ch[ps.n - 1] : NULL;
+    if(!last || last->m.cmd != ML_SINK || last->m.p[0] != ML_SINK_VARIADIC)
+        return PRIMTYPE_NOTYPE;
+    const Type t = sinkType(ft, last); // reports a type expr that isn't a type
+    return t != PRIMTYPE_AUTO ? t : (PRIMTYPE_ANY | TYPEBIT_OPTIONAL); // '...' is any?...
+}
+
+// func(params) -> rets, with param types taken from the function's locals; variadic params are T...
 static Type funcType(MLFoldTracker& ft, MLNode *func, Type rets)
 {
-    const size_t firstvar = func->m.p[0];
-    const size_t nargs = func->firstChild()->aslist().n;
-    std::vector<Type> ts(nargs);
-    for(size_t i = 0; i < nargs; ++i)
-        ts[i] = ft.mlir.vars[firstvar + i].u.local.type;
-    if(nargs && (func->m.flags & MLFUNC_CONST))
+    u32 varidx = func->m.p[0];
+    const MLSub ps = func->firstChild()->aslist();
+    std::vector<Type> ts(ps.n);
+    for(size_t i = 0; i < ps.n; ++i)
+        ts[i] = ps.ch[i].m.cmd == ML_SINK // only the variadic params, '_' isn't supported
+            ? variadicParamType(ft, func) | TYPEBIT_VARIADIC
+            : ft.mlir.vars[varidx++].u.local.type;
+    if(ps.n && ps.ch[0].m.cmd != ML_SINK && (func->m.flags & MLFUNC_CONST))
         if(DType *d = ft.tr().asObj(ts[0]))
             if(DType *c = ft.tr().mkconst(d))
                 ts[0] = c->tid;
@@ -1797,6 +1987,7 @@ struct ValueSlot
     Type t;
     bool single;  // expr produces only this value
     u32 idx;      // index of this value among expr's values
+    bool maybeMissing; // taken from a variadic part (MLNODE_VARTAKE): nil if expr gives fewer values
 };
 
 static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl);
@@ -2129,7 +2320,23 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
     MLFoldTracker& ft = *(MLFoldTracker*)ud;
     MLPreVisitResult res = { VISIT_CONTINUE, 0 };
 
-    switch((MLCmd)node->m.cmd)
+    // A branch known not to run isn't folded (the if/while drops it)
+    if(parent != node && (parent->m.cmd == ML_IFELSE || parent->m.cmd == ML_WHILE) && node != parent->firstChild())
+    {
+        const MLNode *cond = parent->firstChild();
+        const int known = knownBranch(ft, cond);
+        const bool dead = parent->m.cmd == ML_IFELSE
+            ? (known == 1 && node == cond + 2) || (known == 2 && node == cond + 1)
+            : known == 2;
+        if(dead)
+        {
+            res.res = VISIT_NOREC;
+            res.aux |= FOLDAUX_DEAD;
+        }
+    }
+
+    // Not for a dead node: foldPost doesn't fold it, so nothing would be popped
+    if(!(res.aux & FOLDAUX_DEAD)) switch((MLCmd)node->m.cmd)
     {
         case ML_CONST:
             assert(false && "This should have been taken care of during loading");
@@ -2150,22 +2357,19 @@ static MLPreVisitResult foldPre(MLNode *node, MLNode *parent, void *ud)
         }
         break;
 
-        default: ;
-    }
-
-    // A branch known not to run isn't folded (the if/while drops it)
-    if(parent != node && (parent->m.cmd == ML_IFELSE || parent->m.cmd == ML_WHILE) && node != parent->firstChild())
-    {
-        const MLNode *cond = parent->firstChild();
-        const int known = knownBranch(ft, cond);
-        const bool dead = parent->m.cmd == ML_IFELSE
-            ? (known == 1 && node == cond + 2) || (known == 2 && node == cond + 1)
-            : known == 2;
-        if(dead)
+        case ML_VALBLOCK:
         {
-            res.res = VISIT_NOREC;
-            res.aux |= FOLDAUX_DEAD;
+            const MLFoldTracker::FoldValBlock vb = { (u32)ft.mlir.indexOf(node), PRIMTYPE_AUTO, false };
+            ft.foldValBlocks.push_back(vb);
         }
+        break;
+
+        case ML_DECL:
+            if(!node->firstChild()[1].aslist().n)
+                node->m.flags |= MLDECL_DEFERRED;
+            break;
+
+        default: ;
     }
 
     // Checked before the node opens its own block
@@ -2237,9 +2441,13 @@ static bool flattenValues(MLFoldTracker& ft, MLNode *ch, size_t n, std::vector<V
         const NumValuesResult nv = numResultValues(e, ft);
         if(nv.verdict == NumValuesResult::ERROR)
             return false;
+        // An f()#N or ...#N with values from a variadic part: those after the ones the expr is known to give may be missing
+        size_t sure = nv.n;
+        if(e->m.cmd == ML_CALLADJ && (e->m.flags & MLNODE_VARTAKE))
+            sure = numResultValues(e->firstChild() + 1, ft).n;
         if(nv.n == 1 && nv.verdict == NumValuesResult::EXACT_NUMBER)
         {
-            ValueSlot vs = { e, e->type(), true, 0 };
+            ValueSlot vs = { e, e->type(), true, 0, sure == 0 };
             slots.push_back(vs);
         }
         else if(nv.n)
@@ -2248,12 +2456,34 @@ static bool flattenValues(MLFoldTracker& ft, MLNode *ch, size_t n, std::vector<V
             assert(tl.n >= nv.n);
             for(size_t k = 0; k < nv.n; ++k)
             {
-                ValueSlot vs = { e, tl.ptr[k], false, (u32)k };
+                ValueSlot vs = { e, tl.ptr[k], false, (u32)k, k >= sure };
                 slots.push_back(vs);
             }
         }
     }
     return true;
+}
+
+// e (the last expr of a list) gives any number of values (T...); its statement needs 'need' values in total, slots holds
+// those known so far. Adds a slot per value taken from the variadic part and sets e's exprtype to the values used,
+// keeping T... only if more values are fine (keepRest). See MLNODE_VARTAKE.
+static void takeVariadic(MLFoldTracker& ft, MLNode *e, std::vector<ValueSlot>& slots, size_t need, bool keepRest)
+{
+    const TypeIdList tl = ft.tr().aslist(e->type());
+    assert(tl.n && (tl.ptr[tl.n - 1] & TYPEBIT_VARIADIC));
+    const size_t efixed = tl.n - 1;
+    const Type t = tl.ptr[tl.n - 1] & ~TYPEBIT_VARIADIC;
+    std::vector<Type> ts(tl.ptr, tl.ptr + efixed);
+    for(size_t k = 0; slots.size() < need; ++k)
+    {
+        const ValueSlot vs = { e, t, false, (u32)(efixed + k), true };
+        slots.push_back(vs);
+        ts.push_back(t);
+    }
+    if(keepRest)
+        ts.push_back(t | TYPEBIT_VARIADIC);
+    e->x.exprtype = ft.tr().mklistDesc(ts.data(), ts.size())->id(); // a list even with one element: keeps T?
+    e->m.flags |= MLNODE_VARTAKE;
 }
 
 // Check that the values fit the targets: nfixed targets take exactly 1 value each, a trailing '___' (wide) takes the rest.
@@ -2267,34 +2497,28 @@ static bool balanceValues(MLFoldTracker& ft, const MLNode *where, size_t nfixed,
         return false;
     const bool variadic = nv.verdict == NumValuesResult::MIN_NUMBER;
     const size_t n = slots.size();
+    const MLCmd lastcmd = exprs.n ? (MLCmd)exprs.ch[exprs.n - 1].m.cmd : ML_LIST;
+    const bool adjustable = lastcmd == OP_CALL || lastcmd == ML_MTHCALL; // f()#N
+    const bool exact = !wide && ft.assignMode == MLFoldTracker::ASSIGN_EXACT; // no excess values
 
-    if(n < nfixed)
+    if(n < nfixed && !variadic)
     {
         std::ostringstream os;
-        os << "Getting " << n << (variadic ? " or more" : "") << " values, but " << nfixed << " are needed";
-        if(variadic)
-            os << " (use #N to set the number of values)";
+        os << "Getting " << n << " values, but " << nfixed << " are needed";
         ft.error(where, os.str().c_str());
         return false;
     }
-
-    if(wide || ft.assignMode == MLFoldTracker::ASSIGN_DROP_EXCESS)
-        return true;
-
-    if(variadic)
+    if(n > nfixed && exact)
     {
         std::ostringstream os;
-        os << "Getting " << n << " or more values, but " << nfixed << " are assigned (use ___ to ignore the rest, or #N to set the number of values)";
+        os << "Getting " << n << (variadic ? " or more" : "") << " values, but only " << nfixed
+           << " are assigned (use ___ to ignore the rest" << (variadic && adjustable ? ", or #N to set the number of values)" : ")");
         ft.error(where, os.str().c_str());
         return false;
     }
-    if(n > nfixed)
-    {
-        std::ostringstream os;
-        os << "Getting " << n << " values, but only " << nfixed << " are assigned (use ___ to ignore the rest)";
-        ft.error(where, os.str().c_str());
-        return false;
-    }
+    // The fixed targets take values from the variadic part; their count is checked at runtime
+    if(variadic && (n < nfixed || exact))
+        takeVariadic(ft, &exprs.ch[exprs.n - 1], slots, nfixed, !exact);
     return true;
 }
 
@@ -2308,7 +2532,8 @@ static bool fitsWithRuntimeCheck(Type st, Type t)
 }
 
 // The value vs gets the static type t, checked at runtime (MLNODE_RTCHECK)
-static void markRuntimeCheck(MLFoldTracker& ft, const ValueSlot& vs, Type t)
+// The static type of value vs (its element of a multi-value expr's type list) becomes t
+static void setSlotType(MLFoldTracker& ft, const ValueSlot& vs, Type t)
 {
     MLNode *e = vs.expr;
     if(vs.single)
@@ -2321,10 +2546,68 @@ static void markRuntimeCheck(MLFoldTracker& ft, const ValueSlot& vs, Type t)
         ts[vs.idx] = t;
         e->x.exprtype = ft.tr().mklistDesc(ts.data(), ts.size())->id();
     }
-    e->m.flags |= MLNODE_RTCHECK;
 }
 
+static Type slotType(MLFoldTracker& ft, const ValueSlot& vs)
+{
+    if(vs.single)
+        return vs.expr->type();
+    const TypeIdList tl = ft.tr().aslist(vs.expr->type());
+    assert(vs.idx < tl.n);
+    return tl.ptr[vs.idx];
+}
+
+static void markRuntimeCheck(MLFoldTracker& ft, const ValueSlot& vs, Type t)
+{
+    setSlotType(ft, vs, t);
+    vs.expr->m.flags |= MLNODE_RTCHECK;
+}
+
+// T?; PRIMTYPE_AUTO if T can't be optional (typelists, nil, error values)
+static Type optionalOf(MLFoldTracker& ft, Type t)
+{
+    if(t & TYPEBIT_OPTIONAL)
+        return t;
+    const DType *dt = ft.tr().asObj(t);
+    const DType *opt = dt ? ft.tr().mkoptional(dt) : NULL;
+    return opt ? opt->tid : PRIMTYPE_AUTO;
+}
+
+// A value taken from a variadic part goes where nil is fine: its entry becomes optional, so LLIR doesn't
+// require it to be there (see MLNODE_VARTAKE)
+static void allowMissing(MLFoldTracker& ft, const ValueSlot& vs)
+{
+    if(!vs.maybeMissing)
+        return;
+    const Type t = optionalOf(ft, slotType(ft, vs));
+    if(t != PRIMTYPE_AUTO)
+        setSlotType(ft, vs, t);
+}
+
+// The type expr of a 'var?' target
+static bool isDeducedOptional(const MLNode *te)
+{
+    return te->m.cmd == ML_OPTIONAL && te->firstChild()->m.cmd == _ML_EMPTY;
+}
+
+static bool fitValueImpl(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl);
+static int fitCtor(MLFoldTracker& ft, const ValueSlot& vs, Type t, const MLNode *decl);
+
+// A value taken from a variadic part that may be missing is nil then, which is fine if t is optional.
+// A constructor going into a specified container type is fitted to it (fitCtor()).
 static bool fitValue(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl)
+{
+    const int c = fitCtor(ft, vs, t, decl);
+    if(c >= 0)
+        return !!c;
+    if(!fitValueImpl(ft, vs, t, what, decl))
+        return false;
+    if(t & TYPEBIT_OPTIONAL)
+        allowMissing(ft, vs);
+    return true;
+}
+
+static bool fitValueImpl(MLFoldTracker& ft, const ValueSlot& vs, Type t, const char *what, const MLNode *decl)
 {
     if(ft.tr().isCompatible(vs.t, t))
         return true;
@@ -2398,6 +2681,388 @@ static void checkSinkValue(MLFoldTracker& ft, MLNode *sink, const ValueSlot& vs,
     const Type t = sinkType(ft, sink);
     if(t != PRIMTYPE_AUTO)
         fitValue(ft, vs, t, "Value", stmt);
+    else if(sink->firstChild()->m.cmd == _ML_EMPTY) // untyped: takes anything, nil too
+        allowMissing(ft, vs);
+}
+
+static Type variadicTailType(MLFoldTracker& ft, const MLSub& exprs, MLNode **pexpr);
+
+// The values of a variadic part (T..., the last entry of tail's type list) must fit t. Like fitValue() for a
+// value whose value isn't known: an any (any?) fits T (T?) with a check at runtime (the entry becomes t...).
+static bool fitTail(MLFoldTracker& ft, MLNode *tail, Type tt, Type t, const char *what, const MLNode *decl)
+{
+    if(ft.tr().isCompatible(tt, t))
+        return true;
+    if(!fitsWithRuntimeCheck(tt, t))
+        return ft.checktype(tt, t, what, tail, decl);
+    const TypeIdList tl = ft.tr().aslist(tail->type());
+    std::vector<Type> ts(tl.ptr, tl.ptr + tl.n);
+    assert(tl.n && (ts.back() & TYPEBIT_VARIADIC));
+    ts.back() = t | TYPEBIT_VARIADIC;
+    tail->x.exprtype = ft.tr().mklistDesc(ts.data(), ts.size())->id();
+    tail->m.flags |= MLNODE_RTCHECK;
+    return true;
+}
+
+// The values a typed '___' takes from a variadic part must fit its type
+static void checkWideTail(MLFoldTracker& ft, MLNode *sink, const MLSub& exprs, const MLNode *stmt)
+{
+    MLNode *tail;
+    const Type tt = variadicTailType(ft, exprs, &tail);
+    const Type st = tt != PRIMTYPE_NOTYPE ? sinkType(ft, sink) : PRIMTYPE_AUTO;
+    if(st != PRIMTYPE_AUTO)
+        fitTail(ft, tail, tt, st, "Value", stmt);
+}
+
+static bool mayBeNil(Type t)
+{
+    return (t & TYPEBIT_OPTIONAL) || t == PRIMTYPE_NIL || t == PRIMTYPE_ERROR;
+}
+
+// Common type of values (array elements, table keys or values), for a constructor without a specified type.
+// The types of the values that aren't constants (and 'fixed' types: the T of a variadic part, uint for positional
+// keys) decide, if all of them fit one of them; constants are converted to it if that loses nothing. If all are
+// constants, they must have the same type. Otherwise, and without values, it's any (any? if a value may be nil or
+// an error). Converts the constants in place.
+static Type commonType(MLFoldTracker& ft, const std::vector<ValueSlot>& slots, std::vector<Type> fixed)
+{
+    bool opt = false;
+    std::vector<size_t> consts;
+    for(size_t i = 0; i < slots.size(); ++i)
+    {
+        if(slots[i].single && slots[i].expr->isconst())
+            consts.push_back(i);
+        else
+            fixed.push_back(slots[i].t);
+        opt = opt || mayBeNil(slots[i].t);
+    }
+    for(size_t i = 0; i < fixed.size(); ++i)
+        opt = opt || mayBeNil(fixed[i]);
+
+    Type t = PRIMTYPE_AUTO;
+    std::vector<Val> conv(consts.size());
+    if(fixed.empty())
+    {
+        if(!consts.empty())
+            t = slots[consts[0]].t;
+        for(size_t i = 0; i < consts.size(); ++i)
+            if(slots[consts[i]].t != t)
+                t = PRIMTYPE_AUTO;
+        for(size_t i = 0; t != PRIMTYPE_AUTO && i < consts.size(); ++i)
+            conv[i] = slots[consts[i]].expr->asVal();
+    }
+    else
+    {
+        for(size_t c = 0; c < fixed.size() && t == PRIMTYPE_AUTO; ++c)
+        {
+            bool all = true;
+            for(size_t i = 0; i < fixed.size() && all; ++i)
+                all = ft.tr().isCompatible(fixed[i], fixed[c]);
+            if(all)
+                t = fixed[c];
+        }
+        for(size_t i = 0; t != PRIMTYPE_AUTO && i < consts.size(); ++i)
+        {
+            const ValueSlot& vs = slots[consts[i]];
+            conv[i] = vs.expr->asVal();
+            if(!ft.tr().isCompatible(vs.t, t) && !convertImplicit(&conv[i], vs.expr->asVal(), t))
+                t = PRIMTYPE_AUTO;
+        }
+    }
+    if(t == PRIMTYPE_AUTO || t == PRIMTYPE_NIL || t == PRIMTYPE_ERROR)
+        return opt || t != PRIMTYPE_AUTO ? (PRIMTYPE_ANY | TYPEBIT_OPTIONAL) : PRIMTYPE_ANY;
+    for(size_t i = 0; i < consts.size(); ++i) // all fit, apply the conversions
+    {
+        MLNode *e = slots[consts[i]].expr;
+        if(conv[i].type != e->asVal().type)
+            e->setVal(conv[i]);
+    }
+    return t;
+}
+
+// One slot per value of a constructor's value list (array elements, positional table values); the T of a variadic
+// part goes into 'fixed'. False on error (reported).
+static bool ctorValueSlots(MLFoldTracker& ft, const MLSub& vals, std::vector<ValueSlot>& slots, std::vector<Type>& fixed)
+{
+    if(numResultValuesOfList(vals.ch, vals.n, ft).verdict == NumValuesResult::ERROR)
+        return false;
+    if(!flattenValues(ft, vals.ch, vals.n, slots))
+        return false;
+    MLNode *tail;
+    const Type tt = variadicTailType(ft, vals, &tail);
+    if(tt != PRIMTYPE_NOTYPE)
+        fixed.push_back(tt);
+    return true;
+}
+
+// The positional values of a table constructor (after the key/value pairs)
+static MLSub tablePositional(MLNode *ctor)
+{
+    const MLSub all = ctor->firstChild()->aslist();
+    const size_t skip = 2 * ctor->m.p[0];
+    assert(skip <= all.n);
+    const MLSub pos = { all.ch + skip, all.n - skip };
+    return pos;
+}
+
+// [a, b, ...] without a specified type: Array(common type)
+static void foldArrayCtor(MLFoldTracker& ft, MLNode *node)
+{
+    node->x.exprtype = PRIMTYPE_AUTO; // until it's known to be fine
+    std::vector<ValueSlot> slots;
+    std::vector<Type> fixed;
+    if(!ctorValueSlots(ft, node->firstChild()->aslist(), slots, fixed))
+        return;
+    node->x.exprtype = ft.tr().mkarray(commonType(ft, slots, fixed));
+}
+
+// {k=v, [k]=v, a, b, ...} without a specified type: Table(common key type, common value type)
+static void foldTableCtor(MLFoldTracker& ft, MLNode *node)
+{
+    node->x.exprtype = PRIMTYPE_AUTO; // until it's known to be fine
+    const size_t numkv = node->m.p[0];
+    MLNode *pairs = numkv ? node->firstChild()->aslist().ch : NULL;
+    std::vector<ValueSlot> keys, vals;
+    std::vector<Type> kfixed, vfixed;
+    for(size_t i = 0; i < 2 * numkv; ++i)
+    {
+        MLNode *e = &pairs[i];
+        const NumValuesResult nv = numResultValues(e, ft);
+        if(nv.verdict == NumValuesResult::ERROR)
+            return;
+        if(nv.verdict != NumValuesResult::EXACT_NUMBER || nv.n != 1)
+        {
+            e->setError(ft.sp(), i & 1 ? "A table value given with its key must be a single value"
+                                       : "A table key must be a single value");
+            return;
+        }
+        const ValueSlot vs = { e, e->type(), true, 0, false };
+        (i & 1 ? vals : keys).push_back(vs);
+    }
+    const MLSub pos = tablePositional(node);
+    if(pos.n)
+    {
+        if(!ctorValueSlots(ft, pos, vals, vfixed))
+            return;
+        kfixed.push_back(PRIMTYPE_UINT); // keys 0, 1, ...
+    }
+    const Type k = commonType(ft, keys, kfixed);
+    const Type v = commonType(ft, vals, vfixed);
+    node->x.exprtype = ft.tr().mktable(k, v);
+}
+
+// The values of a constructor's value list fit et
+static bool fitCtorValues(MLFoldTracker& ft, const MLSub& vals, Type et, const char *what, const MLNode *decl)
+{
+    std::vector<ValueSlot> slots;
+    if(!flattenValues(ft, vals.ch, vals.n, slots))
+        return false;
+    bool ok = true;
+    for(size_t i = 0; i < slots.size(); ++i)
+        ok = fitValue(ft, slots[i], et, what, decl) && ok;
+    MLNode *tail;
+    const Type tt = variadicTailType(ft, vals, &tail);
+    if(tt != PRIMTYPE_NOTYPE)
+        ok = fitTail(ft, tail, tt, et, what, decl) && ok;
+    return ok;
+}
+
+// The descriptor of struct type t (ignoring modifier bits), NULL if t isn't a struct type
+static const TDesc *structDesc(MLFoldTracker& ft, Type t)
+{
+    const Type b = t & TYPEBASE_MASK;
+    if(b < PRIMTYPE_MAX)
+        return NULL;
+    const TDesc *d = ft.tr().lookupDesc(b);
+    return d && d->kind == TKIND_STRUCT ? d : NULL;
+}
+
+static int structField(const TDesc *sd, sref name)
+{
+    for(tsize i = 0; i < sd->n; ++i)
+        if(sd->names()[i] == name)
+            return (int)i;
+    return -1;
+}
+
+static bool structFieldHasDefault(const TDesc *sd, tsize idx)
+{
+    for(tsize i = 0; i < sd->numdefaults; ++i)
+        if(sd->defaults()[i].idx == idx)
+            return true;
+    return false;
+}
+
+// A struct type from a table constructor used as a template, {x=float, y=0.0}: a type value is a field's type, any
+// other constant is the field's default and gives it its type. Keys are constant names, in order (the order is part
+// of the type). Returns the struct type, or PRIMTYPE_AUTO after reporting an error.
+static Type templateToStruct(MLFoldTracker& ft, MLNode *ctor)
+{
+    if(tablePositional(ctor).n)
+    {
+        ft.error(ctor, "A struct template needs named fields (name=type or name=default)");
+        return PRIMTYPE_AUTO;
+    }
+    const size_t numkv = ctor->m.p[0];
+    MLNode *pairs = numkv ? ctor->firstChild()->aslist().ch : NULL;
+    std::vector<StructMember> ms(numkv);
+    size_t ndefaults = 0;
+    for(size_t i = 0; i < numkv; ++i)
+    {
+        MLNode *k = &pairs[2 * i];
+        MLNode *v = k + 1;
+        if(!foldKnown(ft, k) || k->asVal().type != PRIMTYPE_STRING)
+        {
+            ft.error(v, "A struct field name must be a compile-time constant string"); // (a name= key has no line info)
+            return PRIMTYPE_AUTO;
+        }
+        const sref name = k->asVal().u.str;
+        for(size_t j = 0; j < i; ++j)
+            if(ms[j].name == name)
+            {
+                std::ostringstream os;
+                os << "Struct field '" << ft.str(name).s << "' is given twice";
+                ft.error(v, os.str().c_str());
+                return PRIMTYPE_AUTO;
+            }
+        if(!foldKnown(ft, v))
+        {
+            ft.error(v, "A struct template value must be a compile-time constant: a type, or a default value");
+            return PRIMTYPE_AUTO;
+        }
+        const Val dv = v->asVal();
+        ms[i].name = name;
+        if(dv.type == PRIMTYPE_TYPE)
+        {
+            ms[i].t = dv.asDType()->tid;
+            ms[i].defaultval = _Xnil();
+        }
+        else if(dv.type == PRIMTYPE_NIL || dv.type == PRIMTYPE_ERROR)
+        {
+            ft.error(v, "A nil or error default doesn't give a struct field a type (use name=T?, which defaults to nil)");
+            return PRIMTYPE_AUTO;
+        }
+        else
+        {
+            ms[i].t = dv.type;
+            ms[i].defaultval = dv;
+            ++ndefaults;
+        }
+    }
+    const TDesc *td = ft.tr().mkstructDesc(ms.data(), ms.size(), ndefaults);
+    const DType *dt = td ? ft.tr().asObj(td) : NULL;
+    if(!dt)
+    {
+        ft.error(ctor, "Failed to create the struct type");
+        return PRIMTYPE_AUTO;
+    }
+    return dt->tid;
+}
+
+// A table constructor as a value of struct type st: every named field must exist and fit its type (constants are
+// converted); fields without a default that aren't optional must be given. Reports errors.
+static bool fitStructCtor(MLFoldTracker& ft, MLNode *e, Type st, const TDesc *sd, const MLNode *decl)
+{
+    const std::string sname = getTypeName(ft.rt(), st);
+    if(tablePositional(e).n)
+    {
+        ft.error(e, ("A value of struct type '" + sname + "' needs named fields").c_str());
+        return false;
+    }
+    const size_t numkv = e->m.p[0];
+    MLNode *pairs = numkv ? e->firstChild()->aslist().ch : NULL;
+    std::vector<bool> given(sd->n, false);
+    bool ok = true;
+    for(size_t i = 0; i < numkv; ++i)
+    {
+        MLNode *k = &pairs[2 * i];
+        MLNode *v = k + 1;
+        if(!foldKnown(ft, k) || k->asVal().type != PRIMTYPE_STRING)
+        {
+            ft.error(v, "A struct field name must be a compile-time constant string"); // (a name= key has no line info)
+            ok = false;
+            continue;
+        }
+        const std::string fname = ft.str(k->asVal().u.str).s;
+        const int fi = structField(sd, k->asVal().u.str);
+        if(fi < 0 || given[fi])
+        {
+            ft.error(v, (fi < 0 ? "'" + sname + "' has no field '" + fname + "'"
+                                : "Field '" + fname + "' is given twice").c_str());
+            ok = false;
+            continue;
+        }
+        given[fi] = true;
+        const ValueSlot vs = { v, v->type(), true, 0, false };
+        ok = fitValue(ft, vs, sd->types()[fi], ("Field '" + fname + "'").c_str(), decl) && ok;
+    }
+    for(tsize f = 0; f < sd->n; ++f)
+        if(!given[f] && !structFieldHasDefault(sd, f) && !(sd->types()[f] & TYPEBIT_OPTIONAL))
+        {
+            ft.error(e, ("Field '" + std::string(ft.str(sd->names()[f]).s) + "' of '" + sname + "' is missing").c_str());
+            ok = false;
+        }
+    if(ok)
+        e->x.exprtype = st;
+    return ok;
+}
+
+// A constructor going into a specified Array(T) / Table(K, V) (or T?, Const(T) of it): its values are fitted to the
+// element types (constants converted), and it gets that type. -1 if this doesn't apply (not a constructor, or a
+// generic array/table, which takes a specialized one anyway), else whether it fits (errors are reported).
+static int fitCtor(MLFoldTracker& ft, const ValueSlot& vs, Type t, const MLNode *decl)
+{
+    MLNode *e = vs.expr;
+    if(!vs.single || (e->m.cmd != ML_NEW_ARRAY && e->m.cmd != ML_NEW_TABLE) || e->type() == PRIMTYPE_AUTO)
+        return -1;
+    const Type base = t & ~(TYPEBIT_OPTIONAL | TYPEBIT_CONST);
+    if(base == PRIMTYPE_ARRAY || base == PRIMTYPE_TABLE)
+        return -1;
+    if(e->m.cmd == ML_NEW_TABLE && t == PRIMTYPE_TYPE) // a struct template where a type is needed: type P = {x=float}
+    {
+        const Type st = templateToStruct(ft, e);
+        if(st == PRIMTYPE_AUTO)
+            return 0;
+        e->setVal(Val(ft.tr().asObj(st)));
+        return 1;
+    }
+    if(e->m.cmd == ML_NEW_TABLE)
+        if(const TDesc *sd = structDesc(ft, base)) // a struct value: P p = {x=1.0}
+            return fitStructCtor(ft, e, base, sd, decl);
+    bool ok = true;
+    if(e->m.cmd == ML_NEW_ARRAY)
+    {
+        const Type et = ft.tr().arrayElem(base);
+        if(et == PRIMTYPE_NOTYPE)
+            return -1;
+        ok = fitCtorValues(ft, e->firstChild()->aslist(), et, "Array element", decl);
+    }
+    else
+    {
+        Type kt, vt;
+        if(!ft.tr().tableKV(base, &kt, &vt))
+            return -1;
+        const size_t numkv = e->m.p[0];
+        MLNode *pairs = numkv ? e->firstChild()->aslist().ch : NULL;
+        for(size_t i = 0; i < 2 * numkv; ++i)
+        {
+            const ValueSlot ks = { &pairs[i], pairs[i].type(), true, 0, false };
+            ok = fitValue(ft, ks, i & 1 ? vt : kt, i & 1 ? "Table value" : "Table key", decl) && ok;
+        }
+        const MLSub pos = tablePositional(e);
+        if(pos.n && !ft.tr().isCompatible(PRIMTYPE_UINT, kt))
+        {
+            std::ostringstream os;
+            os << "Positional table values have uint keys, which don't fit '" << getTypeName(ft.rt(), kt) << "'";
+            ft.error(e, os.str().c_str());
+            ok = false;
+        }
+        if(pos.n)
+            ok = fitCtorValues(ft, pos, vt, "Table value", decl) && ok;
+    }
+    if(ok)
+        e->x.exprtype = base;
+    return ok;
 }
 
 // Count fixed targets and check for a trailing '___'
@@ -2407,7 +3072,7 @@ static size_t countTargets(const MLSub& targets, bool *pwide)
     if(targets.n)
     {
         MLNode *last = &targets.ch[targets.n - 1];
-        wide = last->m.cmd == ML_SINK && last->m.p[0];
+        wide = last->m.cmd == ML_SINK && last->m.p[0] == ML_SINK_WIDE;
     }
     *pwide = wide;
     return targets.n - wide;
@@ -2429,7 +3094,7 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
             continue;
         MLVar *v = &ft.mlir.vars[varidx++];
         v->decl = declidx;
-        if(te->m.cmd == _ML_EMPTY)
+        if(te->m.cmd == _ML_EMPTY || isDeducedOptional(te))
             continue;
         switch(v->kind)
         {
@@ -2488,33 +3153,69 @@ static void doDecl(MLFoldTracker& ft, u32 localid, MLNode& declroot, MLNode& typ
         const Type declt = v->u.local.type; // from the declared type, if any
         if(declt != PRIMTYPE_AUTO && !fitValue(ft, vs, declt, "Value", &declroot))
             continue;
+        Type t = declt != PRIMTYPE_AUTO ? declt : vs.t;
+        if(declt == PRIMTYPE_AUTO && isDeducedOptional(te)) // var?
+        {
+            t = optionalOf(ft, vs.t);
+            if(t == PRIMTYPE_AUTO)
+            {
+                std::ostringstream os;
+                os << "'var?' can't make '" << getTypeName(ft.rt(), vs.t) << "' optional";
+                ft.error(&declroot, os.str().c_str());
+                v->u.local.type = PRIMTYPE_ANY;
+                continue;
+            }
+            allowMissing(ft, vs);
+        }
         // TODO: support multiple values constant expr (_ML_MULTIVAL using an array internally?)
         Val kv;
         if(!v->isMutable() && vs.single && knownValue(ft, vs.expr, &kv)) // value converted to the declared type
-            setVarValue(v, kv, declt != PRIMTYPE_AUTO ? declt : vs.t);
+            setVarValue(v, kv, t);
         else if(declt == PRIMTYPE_AUTO)
-            assignVarType(v, vs.t, ft);
+            assignVarType(v, t, ft);
     }
     if(wide)
+    {
         for(size_t i = nfixed; i < slots.size(); ++i)
             checkSinkValue(ft, &targets.ch[nfixed], slots[i], &declroot);
+        checkWideTail(ft, &targets.ch[nfixed], exprlist->aslist(), &declroot);
+    }
 
     // DO NOT ELIMINATE DECLS, even if all vars became constants: post-folding needs them
+}
+
+// If the last expr of a list gives any number of values (T...), the type T of those, else PRIMTYPE_NOTYPE.
+// The list must have passed numResultValuesOfList().
+static Type variadicTailType(MLFoldTracker& ft, const MLSub& exprs, MLNode **pexpr)
+{
+    MLNode *last = exprs.n ? &exprs.ch[exprs.n - 1] : NULL;
+    if(!last || last->m.cmd == ML_LIST || numResultValues(last, ft).verdict != NumValuesResult::MIN_NUMBER)
+        return PRIMTYPE_NOTYPE;
+    const TypeIdList tl = ft.tr().aslist(last->type());
+    assert(tl.n && (tl.ptr[tl.n - 1] & TYPEBIT_VARIADIC));
+    *pexpr = last;
+    return tl.ptr[tl.n - 1] & ~TYPEBIT_VARIADIC;
 }
 
 static void fitReturnValues(MLFoldTracker& ft, MLNode *ret, MLSub vals, Type declrets, const MLNode *func)
 {
     const TypeIdList tl = ft.tr().aslist(declrets);
-    if(tl.n && (tl.ptr[tl.n - 1] & TYPEBIT_VARIADIC)) // TODO: variadic returns
-    {
-        ft.checktype(typeListOf(ft, vals), declrets, "Return value", ret, func);
-        return;
-    }
+    const bool variadic = tl.n && (tl.ptr[tl.n - 1] & TYPEBIT_VARIADIC); // -> A, B, T...
+    const size_t nfixed = tl.n - variadic;
     std::vector<ValueSlot> slots;
-    if(!balanceValues(ft, ret, tl.n, false, vals, slots))
+    if(!balanceValues(ft, ret, nfixed, variadic, vals, slots))
         return;
-    for(size_t i = 0; i < tl.n; ++i)
+    for(size_t i = 0; i < nfixed; ++i)
         fitValue(ft, slots[i], tl.ptr[i], "Return value", func);
+    if(!variadic)
+        return;
+    const Type vt = tl.ptr[nfixed] & ~TYPEBIT_VARIADIC;
+    for(size_t i = nfixed; i < slots.size(); ++i)
+        fitValue(ft, slots[i], vt, "Return value", func);
+    MLNode *tail;
+    const Type tt = variadicTailType(ft, vals, &tail); // eg. return ...
+    if(tt != PRIMTYPE_NOTYPE)
+        fitTail(ft, tail, tt, vt, "Variadic return value", func);
 }
 
 static void doAssign(MLFoldTracker& ft, MLNode *node)
@@ -2546,13 +3247,227 @@ static void doAssign(MLFoldTracker& ft, MLNode *node)
             }
             break;
 
+            case ML_SETINDEX: // obj[key] = value
+                if(dst->type() != PRIMTYPE_AUTO) // else folding it failed; reported
+                    fitValue(ft, vs, dst->type(), "Assigned value", dst);
+                break;
+
             case _ML_ERROR: // reported later
                 break;
 
             default:
-                assert(false); // _construct() only lets idents and sinks through
+                assert(false); // _construct() only lets idents, sinks and indexes through
         }
     }
+    if(wide)
+    {
+        for(size_t i = nfixed; i < slots.size(); ++i)
+            checkSinkValue(ft, &targets.ch[nfixed], slots[i], node);
+        checkWideTail(ft, &targets.ch[nfixed], ch[1].aslist(), node);
+    }
+}
+
+static void foldNode(MLNode *node, MLFoldTracker& ft);
+
+struct ResolvedFunc
+{
+    const DFunc *df;
+    Type functype; // df's function type for the type it was looked up for
+    const char *err; // if !df and the lookup found something unusable: why (no fallback then)
+};
+
+// The function for method or operator function 'name' of type t, with its function type for t. Looked up in t's
+// namespace (imports, then externs). A specialized container (Array(T), Table(K, V)) without such a function falls
+// back to its type family (array, table): the generic function with its signature specialized for t (DFunc::tsig).
+// There, [] is __getindex or __getindexopt by whether the element/value type is optional, []= is __setindex.
+// This special case exists because [...] and {...} create these types without importing anything.
+// Used by indexing, __iterN, method calls (after locally declared methods) and T::f (after nsLocals and an exact match).
+static ResolvedFunc resolveMethod(MLFoldTracker& ft, Type t, sref name)
+{
+    ResolvedFunc r = { NULL, PRIMTYPE_AUTO, NULL };
+    const Val *v = ft.symbols().lookupInNamespace(t, name);
+    if(SymTable::isAmbiguous(v))
+    {
+        r.err = "is provided by more than one import";
+        return r;
+    }
+    if(v)
+    {
+        r.df = v->asFunc();
+        if(!r.df)
+            r.err = "is not a function";
+        else
+            r.functype = r.df->info.functype;
+        return r;
+    }
+    const Type self = t & ~(TYPEBIT_CONST | TYPEBIT_OPTIONAL);
+    Type family = PRIMTYPE_NOTYPE, elem, k;
+    if(self != PRIMTYPE_ARRAY && (elem = ft.tr().arrayElem(self)) != PRIMTYPE_NOTYPE)
+        family = PRIMTYPE_ARRAY;
+    else if(self != PRIMTYPE_TABLE && ft.tr().tableKV(self, &k, &elem))
+        family = PRIMTYPE_TABLE;
+    if(family == PRIMTYPE_NOTYPE)
+        return r;
+    sref fname = name;
+    if(name == ft.rt().cs.operatorNames[OP_GETINDEX])
+        fname = ft.putstr(elem & TYPEBIT_OPTIONAL ? "__getindexopt" : "__getindex").id;
+    else if(name == ft.rt().cs.operatorNames[OP_SETINDEX])
+        fname = ft.putstr("__setindex").id;
+    const DFunc *df = ft.getMethod(family, fname);
+    if(!df)
+        return r;
+    r.functype = df->tsig ? df->tsig(ft.tr(), self) : df->info.functype;
+    if(r.functype != PRIMTYPE_AUTO)
+        r.df = df;
+    return r;
+}
+
+// A generic family function used with the signature resolveMethod() specialized for a type, as a function value
+// (T::f): a copy of the DFunc with that signature, so the value carries its type. Cached per fold.
+// TODO GC: the copies aren't rooted.
+static const DFunc *specializedFunc(MLFoldTracker& ft, const ResolvedFunc& rf)
+{
+    if(rf.functype == rf.df->info.functype)
+        return rf.df;
+    for(size_t i = 0; i < ft.specFuncs.size(); ++i)
+        if(ft.specFuncs[i].generic == rf.df && ft.specFuncs[i].functype == rf.functype)
+            return ft.specFuncs[i].spec;
+    FuncTypes fty;
+    DFunc *df = DFunc::GCNew(ft.gc());
+    if(!df || !ft.tr().lookupFunc(&fty, rf.functype))
+        return rf.df;
+    df->u = rf.df->u;
+    df->info = rf.df->info;
+    df->info.functype = rf.functype;
+    df->info.paramtype = ft.tr().mklistDesc(fty.params.ptr, fty.params.n)->id();
+    df->info.rettype = ft.tr().mklistDesc(fty.rets.ptr, fty.rets.n)->id();
+    df->info.nargs = fty.params.n;
+    df->info.nrets = fty.rets.n;
+    df->opdef = rf.df->opdef;
+    df->dbg = rf.df->dbg;
+    df->tsig = NULL;
+    df->dtype = rf.df->dtype;
+    const MLFoldTracker::SpecFunc sf = { rf.df, rf.functype, df };
+    ft.specFuncs.push_back(sf);
+    return df;
+}
+
+static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *funcexpr, MLNode *argsexpr);
+
+// A table constructor whose keys and values are all known (a struct template that can be folded now)
+static bool isConstTemplate(MLFoldTracker& ft, MLNode *ctor)
+{
+    if(ctor->m.cmd != ML_NEW_TABLE || tablePositional(ctor).n)
+        return false;
+    const size_t numkv = ctor->m.p[0];
+    MLNode *pairs = numkv ? ctor->firstChild()->aslist().ch : NULL;
+    Val v;
+    for(size_t i = 0; i < 2 * numkv; ++i)
+        if(!knownValue(ft, &pairs[i], &v))
+            return false;
+    return true;
+}
+
+// Calling a known type value T. Calling a value calls its type's () operator with the value as self, so this is
+// type::()(T, args); that dispatches without symbol lookups (there are none at runtime), and everything that needs a
+// lookup is resolved here:
+// - T::__new (a locally declared func T.__new, then imports and externs): the call becomes a plain call of it.
+//   type::__new(table) builds a struct type; a template with known entries is folded right here.
+// - A struct type P without one: P({...}) / P{...} / P() become the constructor (checked now, typed P);
+//   P(t) with a table value stays a call of the type value (type::() builds the object at runtime), typed P.
+static void foldTypeCall(MLFoldTracker& ft, MLNode *node, const DType *dt, MLNode *funcexpr, MLNode *argsexpr)
+{
+    const MLSub args = argsexpr->aslist();
+    const Type tt = dt->tid;
+    const std::string tname = getTypeName(ft.rt(), tt);
+    node->x.exprtype = PRIMTYPE_AUTO; // until it's known to be fine
+    std::ostringstream os;
+    if(tt & (TYPEBIT_OPTIONAL | TYPEBIT_CONST))
+    {
+        node->setError(ft.sp(), ("Can't construct '" + tname + "': construct the base type").c_str());
+        return;
+    }
+
+    // T's own constructor
+    const sref newname = ft.putstr("__new").id;
+    if(const MLFoldTracker::NsLocal *loc = ft.findNsLocal(tt, newname))
+    {
+        funcexpr->m.cmd = ML_VAR;
+        funcexpr->m.p[0] = loc->varidx;
+        funcexpr->m.chOffs = 0;
+        funcexpr->m.flags = 0;
+        foldNode(funcexpr, ft);
+        foldCall(node, ft, NULL, funcexpr, argsexpr);
+        return;
+    }
+    const Val *nv = ft.symbols().lookupInNamespace(tt, newname);
+    if(SymTable::isAmbiguous(nv) || (nv && !nv->asFunc()))
+    {
+        node->setError(ft.sp(), (tname + "::__new " + (nv && !SymTable::isAmbiguous(nv)
+            ? "is not a function" : "is provided by more than one import")).c_str());
+        return;
+    }
+    if(nv)
+    {
+        if(tt == PRIMTYPE_TYPE && args.n == 1 && isConstTemplate(ft, &args.ch[0])) // type({x=float}): folds now
+        {
+            const Type st = templateToStruct(ft, &args.ch[0]); // reports errors
+            if(st != PRIMTYPE_AUTO)
+                node->setVal(Val(ft.tr().asObj(st)));
+            return;
+        }
+        funcexpr->setVal(*nv);
+        foldCall(node, ft, NULL, funcexpr, argsexpr);
+        return;
+    }
+
+    const TDesc *sd = structDesc(ft, tt);
+    if(!sd)
+    {
+        node->setError(ft.sp(), ("'" + tname + "' has no constructor (" + tname + "::__new)").c_str());
+        return;
+    }
+    if(args.n > 1)
+    {
+        node->setError(ft.sp(), ("Constructing '" + tname + "' takes a table: T{...}, T({...}) or T(t)").c_str());
+        return;
+    }
+    if(args.n == 1 && args.ch[0].m.cmd != ML_NEW_TABLE) // P(t): built from the table at runtime by type::()
+    {
+        MLNode *a = &args.ch[0];
+        const NumValuesResult nv1 = numResultValues(a, ft);
+        if(nv1.verdict == NumValuesResult::ERROR)
+            return;
+        DType *ctab = ft.tr().mkconst(ft.tr().asObj(PRIMTYPE_TABLE));
+        if(nv1.verdict != NumValuesResult::EXACT_NUMBER || nv1.n != 1 || !ft.tr().isCompatible(a->type(), ctab->tid))
+        {
+            node->setError(ft.sp(), ("Constructing '" + tname + "' takes a table: T{...}, T({...}) or T(t), not '"
+                + getTypeName(ft.rt(), a->type()) + "'").c_str());
+            return;
+        }
+        node->x.exprtype = tt; // the call of the type value stays; its fields are checked at runtime
+        return;
+    }
+    if(!args.n) // P(): a constructor without fields, only defaults
+    {
+        assert(argsexpr->m.cmd == ML_LIST);
+        node->m.cmd = ML_NEW_TABLE;
+        node->m.p[0] = 0;
+        node->m.flags = 0;
+        node->m.chOffs = (u32)(argsexpr - node);
+    }
+    else // the call becomes the constructor (its children come after it, so they stay after the call node)
+    {
+        MLNode *c = &args.ch[0];
+        assert(c > node);
+        const u32 delta = (u32)(c - node);
+        *node = *c;
+        if(node->m.chOffs)
+            node->m.chOffs += delta;
+        c->makedummy();
+    }
+    if(!fitStructCtor(ft, node, tt, sd, node))
+        node->x.exprtype = PRIMTYPE_AUTO;
 }
 
 // selfexpr is NULL for regular function calls, otherwise it's a method call
@@ -2569,11 +3484,11 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
     Val self;
     Val *pself = NULL; // valid when self is a known constant
     bool methodcall = false;
-    Type functype = PRIMTYPE_NIL;
+    Type functype = PRIMTYPE_NIL; // set by a method lookup, else from df or the callee's type
+    Type selftype = PRIMTYPE_AUTO;
     if(selfexpr)
     {
         methodcall = true;
-        Type selftype;
         if(knownValue(ft, selfexpr, &self))
         {
             selftype = self.getRtType();
@@ -2582,14 +3497,57 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         else
             selftype = selfexpr->type();
 
+        std::ostringstream os;
+        if((selftype & TYPEBASE_MASK) == PRIMTYPE_ANY)
+            os << "Can't call a method of '" << getTypeName(ft.rt(), selftype) << "', put it into a variable of a specific type first";
+        else if(selftype & TYPEBIT_OPTIONAL)
+            os << "Can't call a method of an optional ('" << getTypeName(ft.rt(), selftype) << "'), unwrap it first (*x, or if(x => v))";
+        if(!os.str().empty())
+        {
+            node->setError(ft.sp(), os.str().c_str());
+            return;
+        }
+
         // Usually a method name is a string.
         if(foldKnown(ft, funcexpr))
         {
-            if(sref mth = funcexpr->asVal().asString())
-                df = ft.getMethod(selftype, mth);
-            else
+            const sref mth = funcexpr->asVal().asString();
+            if(!mth)
             {
                 funcexpr->setError(ft.sp(), "A method name must be a string");
+                return;
+            }
+            // A locally declared method (func T:m) first, then imports, externs and the array/table family.
+            // funcexpr becomes the function to call.
+            const std::string mname = getTypeName(ft.rt(), selftype) + ":" + ft.str(mth).s;
+            if(const MLFoldTracker::NsLocal *loc = ft.findNsLocal(selftype, mth))
+            {
+                funcexpr->m.cmd = ML_VAR;
+                funcexpr->m.p[0] = loc->varidx;
+                funcexpr->m.chOffs = 0;
+                funcexpr->m.flags = 0;
+                foldNode(funcexpr, ft);
+                functype = funcexpr->type();
+                if(functype == PRIMTYPE_ANY || functype == PRIMTYPE_AUTO) // eg. declared later with defer
+                    os << "Type of " << mname << " isn't known here";
+            }
+            else
+            {
+                const ResolvedFunc rf = resolveMethod(ft, selftype, mth);
+                if(rf.err)
+                    os << mname << " " << rf.err;
+                else if(!rf.df)
+                    os << "'" << getTypeName(ft.rt(), selftype) << "' has no method " << ft.str(mth).s;
+                else
+                {
+                    df = rf.df;
+                    functype = rf.functype;
+                    funcexpr->setVal(Val(const_cast<DFunc*>(df)));
+                }
+            }
+            if(!os.str().empty())
+            {
+                node->setError(ft.sp(), os.str().c_str());
                 return;
             }
         }
@@ -2616,6 +3574,11 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         Val fv;
         if(knownValue(ft, funcexpr, &fv))
         {
+            if(const DType *dt = fv.asDType()) // calling a type: its constructor
+            {
+                foldTypeCall(ft, node, dt, funcexpr, argsexpr);
+                return;
+            }
             GCobj *obj = fv.asAnyObj(); // Maybe function or some object. Can be NULL.
             MLFoldTracker::Callable cc = ft.getCallable(obj); // Might be __call operator (it's a method!)
             df = cc.func;
@@ -2629,10 +3592,16 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         else
         {
             functype = funcexpr->type();
+            if((functype & TYPEBASE_MASK) == PRIMTYPE_TYPE) // a type value that isn't known here
+            {
+                node->setError(ft.sp(), "Can't call a type that isn't known at compile time: its constructor (T::__new) "
+                    "is looked up while compiling, there are no symbol tables at runtime");
+                return;
+            }
         }
     }
 
-    if(df)
+    if(df && functype == PRIMTYPE_NIL)
         functype = df->info.functype;
 
     FuncTypes fty;
@@ -2667,10 +3636,10 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         node->setError(ft.sp(), os.str().c_str());
         return;
     }
-    if(nv.n > fty.params.n && !variadic)
+    if(nv.n + methodcall > fty.params.n && !variadic)
     {
         std::ostringstream os;
-        os << "Function takes " << fty.params.n << " arguments, got " << nv.n
+        os << "Function takes " << fty.params.n - methodcall << " arguments, got " << nv.n
             << (nv.verdict == NumValuesResult::MIN_NUMBER ? " or more" : "");
         node->setError(ft.sp(), os.str().c_str());
         return;
@@ -2684,7 +3653,8 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         selfslot.expr = selfexpr;
         selfslot.single = true;
         selfslot.idx = 0;
-        selfslot.t = self.getRtType();
+        selfslot.t = selftype; // self's value isn't necessarily known
+        selfslot.maybeMissing = false;
         argslots.push_back(selfslot);
     }
     if(!flattenValues(ft, args.ch, args.n, argslots))
@@ -2693,11 +3663,21 @@ static void foldCall(MLNode *node, MLFoldTracker& ft, MLNode *selfexpr, MLNode *
         return;
     }
     bool argsok = true;
+    const size_t nfixed = fty.minargs(); // argslots includes self
+    // Any number of values (eg. '...') fill the remaining fixed params, checked at runtime (missing ones are nil);
+    // more values than params are a runtime error unless the function is variadic
+    if(nv.verdict == NumValuesResult::MIN_NUMBER && (argslots.size() < nfixed || !variadic))
+        takeVariadic(ft, &args.ch[args.n - 1], argslots, variadic ? nfixed : fty.params.n, variadic);
+    const Type vt = variadic ? fty.params.ptr[fty.params.n - 1] & ~TYPEBIT_VARIADIC : PRIMTYPE_NOTYPE;
     for(size_t i = 0; i < argslots.size(); ++i) // too many args were reported above
     {
-        const Type pt = i < minargs ? fty.params.ptr[i] : (fty.params.ptr[fty.params.n - 1] & TYPEBASE_MASK);
+        const Type pt = i < nfixed ? fty.params.ptr[i] : vt;
         argsok = fitValue(ft, argslots[i], pt, "Argument", funcexpr) && argsok;
     }
+    MLNode *tail;
+    const Type tt = variadicTailType(ft, args, &tail); // eg. f(...)
+    if(tt != PRIMTYPE_NOTYPE)
+        argsok = fitTail(ft, tail, tt, vt, "Variadic argument", funcexpr) && argsok;
 
     const TDesc *td = ft.tr().lookupFunc(NULL, functype);
     node->x.exprtype = singleOrList(ft, td->types()[2]);
@@ -2786,6 +3766,571 @@ static void replaceByValues(MLNode *node, const MLSub& vals, size_t skip)
     }
 }
 
+static void foldNode(MLNode *node, MLFoldTracker& ft);
+
+// Whether a loop body has a break that leaves this loop: not one in a nested loop's body or in a function.
+// (A nested loop's condition or iterators belong to this loop, eg. a value block there.)
+static bool hasBreak(const MLNode *body)
+{
+    std::vector<const MLNode*> todo(1, body);
+    while(!todo.empty())
+    {
+        const MLNode *n = todo.back();
+        todo.pop_back();
+        size_t nch;
+        switch((MLCmd)n->m.cmd)
+        {
+            case ML_BREAK:
+                return true;
+            case ML_WHILE:
+            case ML_FOR:
+                nch = 1; // only the condition / iterators
+                break;
+            case ML_FUNC:
+            case _ML_VAL:
+            case _ML_ERROR:
+            case _ML_EMPTY:
+            case _ML_DEAD:
+                continue;
+            default:
+                nch = n->numchildren();
+        }
+        const MLNode *ch = nch ? n->firstChild() : NULL;
+        for(size_t i = 0; i < nch; ++i)
+            todo.push_back(&ch[i]);
+    }
+    return false;
+}
+
+// A for loop whose iterators are all ranges without an end never ends by itself
+static bool isEndlessFor(const MLNode *forloop)
+{
+    const MLSub iters = const_cast<MLNode*>(forloop)->firstChild()->aslist();
+    for(size_t i = 0; i < iters.n; ++i)
+    {
+        if(iters.ch[i].m.cmd != ML_ITERDECL)
+            return false;
+        const MLNode *it = iters.ch[i].firstChild() + 1;
+        if(it->m.cmd != ML_RANGE || it->firstChild()[1].m.cmd != _ML_EMPTY)
+            return false;
+    }
+    return iters.n != 0;
+}
+
+// Whether every path through a (folded) statement ends in an emit, a return, a break or a continue (which can
+// only leave a loop outside of the statement, since loop bodies aren't looked into). Structural: the last
+// statement of a list or block, both branches of an if. A loop counts only if it never ends by itself (known
+// condition, or only ranges without an end) and has no break. An error counts, it's reported anyway.
+static bool alwaysLeaves(MLFoldTracker& ft, const MLNode *stmt)
+{
+    std::vector<const MLNode*> todo(1, stmt);
+    while(!todo.empty())
+    {
+        const MLNode *n = todo.back();
+        todo.pop_back();
+        switch((MLCmd)n->m.cmd)
+        {
+            case ML_EMIT:
+            case ML_RETURN:
+            case ML_BREAK:
+            case ML_CONTINUE:
+            case _ML_ERROR:
+                break;
+            case ML_WHILE:
+                if(knownBranch(ft, n->firstChild()) != 1 || hasBreak(n->firstChild() + 1))
+                    return false;
+                break;
+            case ML_FOR:
+                if(!isEndlessFor(n) || hasBreak(n->firstChild() + 1))
+                    return false;
+                break;
+            case ML_LIST: // also a folded if: the taken branch, or [unwrapbind, ifbranch]
+                if(!n->list.len)
+                    return false;
+                todo.push_back(n->firstChild() + n->list.len - 1);
+                break;
+            case ML_BLOCK:
+                todo.push_back(n->firstChild());
+                break;
+            case ML_IFELSE:
+                todo.push_back(n->firstChild() + 1);
+                todo.push_back(n->firstChild() + 2); // no else: an empty list
+                break;
+            default:
+                return false;
+        }
+    }
+    return true;
+}
+
+// a..b..step: all parts get the same type, uint, int or float. Parts that aren't constants decide it (and must
+// agree); constants are converted to it if that loses nothing. If all parts are constants, they must have the same
+// type (so 0..+10 is an error, like a uint loop variable with 0.0..1.0).
+static void foldRange(MLFoldTracker& ft, MLNode *node)
+{
+    static const char * const partNames[] = { "begin", "end", "step" };
+    MLNode *ch = node->firstChild();
+    node->x.exprtype = PRIMTYPE_AUTO; // until it's known to be fine
+    Type t = PRIMTYPE_AUTO;
+    bool fixed = false; // t comes from a non-constant part
+    for(int pass = 0; pass < 2; ++pass) // non-constants first
+        for(size_t i = 0; i < 3; ++i)
+        {
+            MLNode *p = &ch[i];
+            if(p->m.cmd == _ML_EMPTY || p->isconst() != (pass == 1))
+                continue;
+            if(p->m.cmd == _ML_ERROR)
+                return; // reported later
+            const NumValuesResult nv = numResultValues(p, ft);
+            if(nv.verdict == NumValuesResult::ERROR)
+                return;
+            if(nv.verdict != NumValuesResult::EXACT_NUMBER || nv.n != 1)
+            {
+                std::ostringstream os;
+                os << "Range " << partNames[i] << " must be a single value";
+                p->setError(ft.sp(), os.str().c_str());
+                return;
+            }
+            const Type pt = p->type();
+            std::ostringstream os;
+            if(pt != PRIMTYPE_UINT && pt != PRIMTYPE_SINT && pt != PRIMTYPE_FLOAT)
+                os << "Range " << partNames[i] << " must be uint, int or float, not '" << getTypeName(ft.rt(), pt) << "'";
+            else if(t == PRIMTYPE_AUTO)
+            {
+                t = pt;
+                fixed = pass == 0;
+            }
+            else if(pt != t)
+            {
+                Val cv;
+                if(fixed && pass == 1 && convertImplicit(&cv, p->asVal(), t))
+                    p->setVal(cv);
+                else
+                    os << "Range parts must have the same type ('" << getTypeName(ft.rt(), t)
+                       << "' and '" << getTypeName(ft.rt(), pt) << "')";
+            }
+            if(!os.str().empty())
+            {
+                p->setError(ft.sp(), os.str().c_str());
+                return;
+            }
+        }
+    assert(t != PRIMTYPE_AUTO); // the parser ensures that there is a begin or an end
+
+    Val sv;
+    MLNode *step = &ch[2];
+    if(step->m.cmd != _ML_EMPTY && knownValue(ft, step, &sv)
+        && (t == PRIMTYPE_FLOAT ? sv.u.f == 0 : t == PRIMTYPE_SINT ? sv.u.si == 0 : sv.u.ui == 0))
+    {
+        step->setError(ft.sp(), "Range step can't be 0");
+        return;
+    }
+    node->x.exprtype = t;
+}
+
+// The function type of T::__iterN for object iteration, or PRIMTYPE_AUTO after reporting an error.
+// Looked up like T::f: a locally declared method, then resolveMethod() (imports, externs, the array/table family).
+// fn (the iterdecl's iterfunc) becomes a reference to it.
+static Type resolveIterMethod(MLFoldTracker& ft, MLNode *it, Type ot, size_t n, MLNode *fn)
+{
+    char name[32];
+    snprintf(name, sizeof(name), "__iter%u", (unsigned)n);
+    const sref nameid = ft.putstr(name).id;
+    const std::string mname = getTypeName(ft.rt(), ot) + "::" + name;
+    std::ostringstream os;
+    Type functype = PRIMTYPE_AUTO;
+    if(const MLFoldTracker::NsLocal *loc = ft.findNsLocal(ot, nameid))
+    {
+        fn->m.cmd = ML_VAR;
+        fn->m.p[0] = loc->varidx;
+        fn->m.chOffs = 0;
+        fn->m.flags = 0;
+        foldNode(fn, ft);
+        functype = fn->type();
+        if(functype == PRIMTYPE_ANY || functype == PRIMTYPE_AUTO) // eg. declared later with defer
+            os << "Type of " << mname << " isn't known here";
+    }
+    else // imports, externs, and for Array(T) / Table(K, V) the generic array / table methods
+    {
+        const ResolvedFunc rf = resolveMethod(ft, ot, nameid);
+        if(rf.err)
+            os << mname << " " << rf.err;
+        else if(!rf.df)
+            os << "Can't iterate over '" << getTypeName(ft.rt(), ot) << "' with " << n
+               << " loop variable(s): it has no method " << name;
+        else
+        {
+            fn->setVal(Val(const_cast<DFunc*>(rf.df)));
+            functype = rf.functype;
+        }
+    }
+
+    FuncTypes fty;
+    if(os.str().empty() && !ft.tr().lookupFunc(&fty, functype))
+        os << mname << " is not callable";
+    if(os.str().empty())
+    {
+        // (self, uint idx) -> n values
+        if(fty.params.n != 2 || fty.isVariadicParams() || !ft.tr().isCompatible(ot, fty.params.ptr[0])
+            || !ft.tr().isCompatible(PRIMTYPE_UINT, fty.params.ptr[1]))
+            os << mname << " must take (" << getTypeName(ft.rt(), ot) << ", uint), not '"
+               << getTypeName(ft.rt(), functype) << "'";
+        else if(fty.rets.n != n || fty.isVariadicRets())
+            os << mname << " must return " << n << " value(s), not '" << getTypeName(ft.rt(), functype) << "'";
+    }
+    if(!os.str().empty())
+    {
+        ft.error(it, os.str().c_str());
+        return PRIMTYPE_AUTO;
+    }
+    return functype;
+}
+
+// One iterator of a for loop: find the values per iteration, type the loop variables, and allocate the hidden
+// vars: the iteration state (ML_ITER_HIDDEN), then one scratch var per value that goes into a sink ('_', or each
+// value a trailing '___' takes). Split pass 1 makes the used state vars and then one var per value (a loop var or
+// a scratch var) consecutive locals, so LLIR only needs the slot of the first hidden var.
+static void foldIterDecl(MLFoldTracker& ft, MLNode *node)
+{
+    MLNode *ch = node->firstChild();
+    MLNode *typelist = &ch[0];
+    MLNode *it = node->m.cmd == ML_ITERDECL ? &ch[1] : NULL; // NULL: ML_ITERDECLVARIADIC
+    MLNode *fn = it ? &ch[2] : NULL;
+    MLNode *where = it ? it : node; // for errors
+    const u32 firstvar = node->m.p[0];
+
+    doDecl(ft, firstvar, *node, *typelist, NULL); // declared types
+    const MLSub targets = typelist->aslist();
+    bool wide;
+    const size_t nfixed = countTargets(targets, &wide);
+
+    Type state[ML_ITER_HIDDEN] = { PRIMTYPE_ANY, PRIMTYPE_ANY, PRIMTYPE_ANY }; // types of the hidden state vars
+    std::vector<Type> vals; // type of each value per iteration; empty after an error
+    if(!it) // for(T x = ...), for(uint i, T x = ...)
+    {
+        assert(!ft.foldFuncs.empty()); // the parser allows '...' only in variadic functions
+        const Type t = variadicParamType(ft, &ft.mlir.nodes[ft.foldFuncs.back().nodeidx]);
+        assert(t != PRIMTYPE_NOTYPE);
+        state[ML_ITER_VARARGS_IDX] = PRIMTYPE_UINT;
+        state[ML_ITER_VARARGS_END] = PRIMTYPE_UINT;
+        if(!wide && nfixed == 1)
+            vals.push_back(t);
+        else if(!wide && nfixed == 2)
+        {
+            vals.push_back(PRIMTYPE_UINT);
+            vals.push_back(t);
+        }
+        else
+            ft.error(node, "Iterating '...' needs 1 loop variable (the values) or 2 (the index and the values), and no '___'");
+    }
+    else if(it->m.cmd == ML_RANGE)
+    {
+        const Type t = it->type();
+        if(t != PRIMTYPE_AUTO) // else already reported
+        {
+            for(size_t i = 0; i < ML_ITER_RANGE_USED; ++i)
+                state[i] = t;
+            if(nfixed <= 1) // '___' alone takes the value
+                vals.push_back(t);
+            else
+            {
+                std::ostringstream os;
+                os << "A range gives 1 value per iteration, but " << nfixed << " loop variables are declared";
+                ft.error(node, os.str().c_str());
+            }
+        }
+    }
+    else if(it->m.cmd != _ML_ERROR)
+    {
+        const NumValuesResult nv = numResultValues(it, ft);
+        if(nv.verdict != NumValuesResult::ERROR && (nv.verdict != NumValuesResult::EXACT_NUMBER || nv.n != 1))
+            ft.error(it, "Iterating needs a single value");
+        else if(nv.verdict != NumValuesResult::ERROR && !nfixed)
+            ft.error(node, "Iterating an object needs a loop variable other than '___' (it selects __iterN)");
+        else if(nv.verdict != NumValuesResult::ERROR)
+        {
+            const Type ot = it->type();
+            state[ML_ITER_OBJ_OBJ] = ot;
+            state[ML_ITER_OBJ_IDX] = PRIMTYPE_UINT;
+            // N is the number of loop variables; a trailing '___' doesn't count (so it takes no values for now)
+            const Type functype = resolveIterMethod(ft, it, ot, nfixed, fn);
+            FuncTypes fty;
+            if(functype != PRIMTYPE_AUTO && ft.tr().lookupFunc(&fty, functype))
+                vals.assign(fty.rets.ptr, fty.rets.ptr + fty.rets.n);
+        }
+    }
+    assert(vals.empty() || vals.size() >= nfixed);
+    if(vals.size() > 255) // m.flags is a byte
+    {
+        ft.error(node, "Too many values per iteration (more than 255)");
+        vals.clear();
+    }
+
+    // After an error, the fixed targets still get a value each, so every loop var gets a slot
+    const size_t nvalues = vals.empty() ? nfixed : vals.size();
+    size_t nscratch = nvalues - nfixed; // values a trailing '___' takes
+    for(size_t i = 0; i < nfixed; ++i)
+        nscratch += isSink(&targets.ch[i]);
+    node->m.flags = (byte)nvalues;
+
+    // The loop variables and sinks take the values; loop variables are never known while folding
+    std::vector<Type> scratch;
+    u32 varidx = firstvar;
+    for(size_t i = 0; i < nvalues; ++i)
+    {
+        MLNode *te = &targets.ch[i < nfixed ? i : nfixed]; // past the fixed targets: the '___'
+        const Type vt = vals.empty() ? PRIMTYPE_AUTO : vals[i];
+        if(isSink(te))
+        {
+            const Type st = vt != PRIMTYPE_AUTO ? sinkType(ft, te) : PRIMTYPE_AUTO;
+            if(st != PRIMTYPE_AUTO)
+                ft.checktype(vt, st, "Loop value", where, node);
+            scratch.push_back(vt != PRIMTYPE_AUTO ? vt : PRIMTYPE_ANY);
+            continue;
+        }
+        MLVar *v = &ft.mlir.vars[varidx++];
+        if(vt == PRIMTYPE_AUTO) // error: avoid follow-up errors
+        {
+            if(v->u.local.type == PRIMTYPE_AUTO)
+                v->u.local.type = PRIMTYPE_ANY;
+        }
+        else if(v->u.local.type == PRIMTYPE_AUTO)
+        {
+            const Type ot = isDeducedOptional(te) ? optionalOf(ft, vt) : vt; // var?
+            assignVarType(v, ot != PRIMTYPE_AUTO ? ot : PRIMTYPE_ANY, ft);
+        }
+        else if(te->m.cmd != _ML_ERROR)
+            ft.checktype(vt, v->u.local.type, "Loop value", where, node);
+    }
+    assert(scratch.size() == nscratch);
+
+    // Allocate the hidden vars. Folding is the first place that knows how many values a '___' takes.
+    const u32 hidden = (u32)ft.mlir.vars.size();
+    MLVar *hv = ft.mlir.vars.alloc_n(ft.gc(), ML_ITER_HIDDEN + nscratch); // TODO: alloc fail
+    const sref hname = ft.putstr("(iter)").id;
+    const sref sname = ft.putstr("(sink)").id;
+    for(size_t i = 0; i < ML_ITER_HIDDEN + nscratch; ++i)
+    {
+        MLVar& v = hv[i];
+        v.name = i < ML_ITER_HIDDEN ? hname : sname;
+        v.kind = MLVar::MUTVAR;
+        v.decl = (u32)ft.mlir.indexOf(node);
+        v.u.local.type = i < ML_ITER_HIDDEN ? state[i] : scratch[i - ML_ITER_HIDDEN];
+        v.known.type = PRIMTYPE_NOTYPE;
+        v.known.u.opaque = 0;
+    }
+    node->m.p[1] = hidden;
+}
+
+// Whether every value of an expression list is known
+static bool allValuesKnown(MLFoldTracker& ft, MLNode *exprs)
+{
+    Val v;
+    const MLSub s = exprs->aslist();
+    for(size_t i = 0; i < s.n; ++i)
+    {
+        MLNode *e = &s.ch[i];
+        if(e->m.cmd == ML_LIST) // a call folded into several values
+        {
+            MLSub cv;
+            if(!constValues(e, &cv))
+                return false;
+        }
+        else if(!knownValue(ft, e, &v))
+            return false;
+    }
+    return true;
+}
+
+// A value block that does nothing but declare locals with known values and then emit known values
+// is replaced by those values. Its locals aren't used anywhere else, so they go away with it.
+static void tryFoldValBlock(MLFoldTracker& ft, MLNode *node)
+{
+    const MLSub stmts = node->firstChild()->aslist();
+    if(!stmts.n)
+        return;
+    MLNode *emit = &stmts.ch[stmts.n - 1];
+    if(emit->m.cmd != ML_EMIT)
+        return;
+    for(size_t i = 0; i + 1 < stmts.n; ++i)
+    {
+        MLNode *s = &stmts.ch[i];
+        if(s->m.cmd == ML_LIST && !s->list.len) // folded away, eg. an import
+            continue;
+        if(s->m.cmd != ML_DECL || !allValuesKnown(ft, s->firstChild() + 1))
+            return;
+    }
+    MLNode *vals = emit->firstChild();
+    if(!allValuesKnown(ft, vals))
+        return;
+    const MLSub vs = vals->aslist();
+    for(size_t i = 0; i < vs.n; ++i)
+        if(vs.ch[i].m.cmd != ML_LIST)
+            foldKnown(ft, &vs.ch[i]);
+    MLSub cv;
+    if(constValues(vals, &cv)) // not if a call folded into several values is mixed with other values
+        replaceByValues(node, cv, 0);
+}
+
+// f()#N, ...#N: the first N values. Constants are taken as they are; values beyond those the expr is known to give
+// are taken from its variadic part (MLNODE_VARTAKE: they may be missing).
+static void foldCallAdj(MLFoldTracker& ft, MLNode *node)
+{
+    MLNode *e = node->firstChild() + 1;
+    node->x.exprtype = PRIMTYPE_AUTO; // until it's known to be fine
+    if(e->m.cmd == _ML_ERROR)
+        return; // reported later
+    const NumValuesResult nv = numResultValues(node, ft); // checks N against what e gives; reports errors
+    if(nv.verdict == NumValuesResult::ERROR)
+        return;
+    const size_t n = nv.n;
+    MLSub cv;
+    if(constValues(e, &cv) && cv.n >= n)
+    {
+        const MLSub first = { cv.ch, n };
+        replaceByValues(node, first, 0);
+        return;
+    }
+    const NumValuesResult env = numResultValues(e, ft);
+    std::vector<Type> ts;
+    if(env.verdict == NumValuesResult::EXACT_NUMBER && env.n == 1)
+        ts.push_back(e->type()); // a single type keeps its modifier bits
+    else
+    {
+        const TypeIdList tl = ft.tr().aslist(e->type());
+        ts.assign(tl.ptr, tl.ptr + tl.n);
+    }
+    if(n > env.n) // from the variadic part
+    {
+        assert(env.verdict == NumValuesResult::MIN_NUMBER && !ts.empty());
+        const Type t = ts.back() & ~TYPEBIT_VARIADIC;
+        ts.resize(env.n);
+        ts.resize(n, t);
+        node->m.flags |= MLNODE_VARTAKE;
+    }
+    ts.resize(n);
+    node->x.exprtype = n == 1 ? ts[0] : ft.tr().mklistDesc(ts.data(), ts.size())->id();
+}
+
+// obj[key] / obj.name: ML_GETINDEX reads, ML_SETINDEX is an assignment target (its type is what a value must fit)
+static void foldIndex(MLFoldTracker& ft, MLNode *node)
+{
+    const bool write = node->m.cmd == ML_SETINDEX;
+    MLNode *obj = node->firstChild();
+    MLNode *key = obj + 1;
+    node->x.exprtype = PRIMTYPE_AUTO; // until it's known to be fine
+    if(obj->m.cmd == _ML_ERROR || key->m.cmd == _ML_ERROR)
+        return; // reported later
+    MLNode * const parts[] = { obj, key };
+    for(size_t i = 0; i < 2; ++i)
+    {
+        const NumValuesResult nv = numResultValues(parts[i], ft);
+        if(nv.verdict == NumValuesResult::ERROR)
+            return;
+        if(nv.verdict != NumValuesResult::EXACT_NUMBER || nv.n != 1)
+        {
+            parts[i]->setError(ft.sp(), i ? "An index must be a single value" : "Indexing needs a single value");
+            return;
+        }
+    }
+
+    Type ot = obj->type();
+    std::ostringstream os;
+    if(ot & TYPEBIT_OPTIONAL) // only with a known value (like operator operands)
+    {
+        Val kv;
+        if(knownValue(ft, obj, &kv) && kv.isValidValue())
+        {
+            ot &= ~TYPEBIT_OPTIONAL;
+            obj->x.exprtype = ot;
+        }
+        else
+        {
+            os << "Can't index an optional ('" << getTypeName(ft.rt(), ot) << "'), unwrap it first (*x, or if(x => v))";
+            node->setError(ft.sp(), os.str().c_str());
+            return;
+        }
+    }
+    if((ot & TYPEBASE_MASK) == PRIMTYPE_ANY)
+    {
+        os << "Can't index '" << getTypeName(ft.rt(), ot) << "', put it into a variable of an indexable type first";
+        node->setError(ft.sp(), os.str().c_str());
+        return;
+    }
+    if(write && (ot & TYPEBIT_CONST))
+    {
+        os << "Can't assign to an element of a Const ('" << getTypeName(ft.rt(), ot) << "')";
+        node->setError(ft.sp(), os.str().c_str());
+        return;
+    }
+
+    if((ot & TYPEBASE_MASK) == PRIMTYPE_TYPE) // T.f is T::f; types have no fields
+    {
+        if(write)
+        {
+            node->setError(ft.sp(), "Can't assign to T.name: types have no fields (namespaced functions are declared with func T.f)");
+            return;
+        }
+        node->m.cmd = ML_GETNS; // [ns, key] are its first two children
+        foldNode(node, ft);
+        return;
+    }
+
+    if(const TDesc *sd = structDesc(ft, ot)) // p.x: a field
+    {
+        if(!foldKnown(ft, key) || key->asVal().type != PRIMTYPE_STRING)
+        {
+            node->setError(ft.sp(), "A struct field name must be a compile-time constant string");
+            return;
+        }
+        const int fi = structField(sd, key->asVal().u.str);
+        if(fi < 0)
+        {
+            os << "'" << getTypeName(ft.rt(), ot) << "' has no field '" << ft.str(key->asVal().u.str).s << "'";
+            node->setError(ft.sp(), os.str().c_str());
+            return;
+        }
+        node->firstChild()[2].setVal(Val(uint(fi))); // the field index, for LLIR
+        node->x.exprtype = sd->types()[fi];
+        return;
+    }
+
+    // The [] (or []=) operator function (self, key) -> V, or (self, key, value)
+    const char *opname = write ? "[]=" : "[]";
+    const ResolvedFunc rf = resolveMethod(ft, ot, ft.rt().cs.operatorNames[write ? OP_SETINDEX : OP_GETINDEX]);
+    FuncTypes fty;
+    if(!rf.df || !ft.tr().lookupFunc(&fty, rf.functype) || fty.params.n != (write ? 3u : 2u) || fty.isVariadicParams()
+        || (!write && (fty.rets.n != 1 || fty.isVariadicRets())))
+    {
+        if(rf.err)
+            os << getTypeName(ft.rt(), ot) << "::" << opname << " " << rf.err;
+        else if(rf.df)
+            os << getTypeName(ft.rt(), ot) << "::" << opname << (write ? " must take (self, key, value), not '"
+               : " must take (self, key) and return 1 value, not '") << getTypeName(ft.rt(), rf.functype) << "'";
+        else
+            os << "Can't " << (write ? "assign to an index of '" : "index '") << getTypeName(ft.rt(), ot)
+               << "': it has no " << opname << " operator";
+        node->setError(ft.sp(), os.str().c_str());
+        return;
+    }
+    Type kt, vt;
+    const char *keywhat = ft.tr().arrayElem(ot) != PRIMTYPE_NOTYPE ? "Array index"
+        : ft.tr().tableKV(ot, &kt, &vt) ? "Table key" : "Index";
+    const ValueSlot ks = { key, key->type(), true, 0, false };
+    if(!fitValue(ft, ks, fty.params.ptr[1], keywhat, node))
+        return;
+    node->firstChild()[2].setVal(Val(const_cast<DFunc*>(rf.df))); // the function to call
+    if(write)
+    {
+        node->x.exprtype = fty.params.ptr[2];
+        return;
+    }
+    node->x.exprtype = fty.rets.ptr[0];
+    Val self;
+    if(rf.df->isPure() && knownValue(ft, obj, &self)) // a pure [] with known values folds
+        tryFoldCall(node, *rf.df, key, 1, 1, ft, &self);
+}
+
 static void foldNode(MLNode *node, MLFoldTracker& ft)
 {
     const MLCmd cmd = (MLCmd)node->m.cmd;
@@ -2804,6 +4349,11 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         case ML_OPTIONAL:
         {
             MLNode *te = node->firstChild();
+            if(te->m.cmd == _ML_EMPTY) // var?: the target type is deduced, see isDeducedOptional()
+            {
+                node->x.exprtype = PRIMTYPE_AUTO;
+                return;
+            }
             if(te->m.cmd == _ML_ERROR)
             {
                 node->setError(te->m.p[0]);
@@ -2897,9 +4447,97 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
                 rets = ff.deducedrets;
             if(rets == PRIMTYPE_AUTO) // no return
                 rets = ft.tr().mklistDesc(NULL, 0)->id();
+            const TypeIdList tl = ft.tr().aslist(rets);
+            const size_t minvals = tl.n && (tl.ptr[tl.n - 1] & TYPEBIT_VARIADIC) ? tl.n - 1 : tl.n;
+            if(minvals && !alwaysLeaves(ft, node->firstChild() + 2)) // falling off the end returns nothing
+                ft.error(node, "Function can end without returning a value");
             node->x.exprtype = funcType(ft, node, rets);
             return;
         }
+
+        case ML_RANGE:
+            foldRange(ft, node);
+            return;
+
+        case ML_VARARGS:
+        {
+            assert(!ft.foldFuncs.empty()); // the parser allows '...' only in variadic functions
+            MLNode *func = &ft.mlir.nodes[ft.foldFuncs.back().nodeidx];
+            const Type t = variadicParamType(ft, func);
+            assert(t != PRIMTYPE_NOTYPE);
+            const Type vt = t | TYPEBIT_VARIADIC;
+            node->x.exprtype = ft.tr().mklistDesc(&vt, 1)->id(); // a list: any number of values
+            return;
+        }
+
+        case ML_VARARGCOUNT:
+            node->x.exprtype = PRIMTYPE_UINT;
+            return;
+
+        case ML_NEW_ARRAY:
+            foldArrayCtor(ft, node);
+            return;
+
+        case ML_NEW_TABLE:
+            foldTableCtor(ft, node);
+            return;
+
+        case ML_CALLADJ:
+            foldCallAdj(ft, node);
+            return;
+
+        case ML_GETINDEX:
+        case ML_SETINDEX:
+            foldIndex(ft, node);
+            return;
+
+        case ML_ITERDECL:
+        case ML_ITERDECLVARIADIC:
+            foldIterDecl(ft, node);
+            break;
+
+        case ML_VALBLOCK:
+        {
+            const MLFoldTracker::FoldValBlock vb = ft.foldValBlocks.back();
+            ft.foldValBlocks.pop_back();
+            assert(vb.nodeidx == ft.mlir.indexOf(node));
+            if(!alwaysLeaves(ft, node->firstChild()))
+                ft.error(node, "Value block can end without 'emit'");
+            if(vb.failed) // already reported
+            {
+                node->x.exprtype = PRIMTYPE_AUTO;
+                return;
+            }
+            Type t = vb.emitted;
+            if(t == PRIMTYPE_AUTO) // never emits (eg. always returns)
+                t = ft.tr().mklistDesc(NULL, 0)->id();
+            node->x.exprtype = singleOrList(ft, t);
+            tryFoldValBlock(ft, node);
+            return;
+        }
+
+        case ML_EMIT:
+        {
+            assert(!ft.foldValBlocks.empty()); // the parser allows emit only in a value block
+            MLFoldTracker::FoldValBlock& vb = ft.foldValBlocks.back();
+            MLSub vals = node->firstChild()->aslist();
+            NumValuesResult nv = numResultValuesOfList(vals.ch, vals.n, ft);
+            if(nv.verdict == NumValuesResult::ERROR)
+            {
+                vb.failed = true;
+                break;
+            }
+            const Type t = typeListOf(ft, vals);
+            if(vb.emitted == PRIMTYPE_AUTO)
+                vb.emitted = t;
+            else if(vb.emitted != t)
+            {
+                vb.failed = true;
+                node->setError(ft.sp(), "Emitted values have a different type than an earlier emit in the same value block");
+                return;
+            }
+        }
+        break;
 
         case ML_RETURN:
         {
@@ -3035,13 +4673,17 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
                 node->setVal(*val);
                 return;
             }
-            else
+            // Array(T)::f / Table(K, V)::f: the generic family function, specialized for the type
+            const ResolvedFunc rf = resolveMethod(ft, nstype->tid, keyval.u.str);
+            if(rf.df)
             {
-                std::ostringstream os;
-                os << "Failed to resolve namespaced symbol " << getTypeName(ft.rt(), nstype->tid) << "::" << ft.str(keyval.u.str).s;
-                node->setError(ft.sp(), os.str().c_str());
+                node->setVal(Val(const_cast<DFunc*>(specializedFunc(ft, rf))));
                 return;
             }
+            std::ostringstream os;
+            os << "Failed to resolve namespaced symbol " << getTypeName(ft.rt(), nstype->tid) << "::" << ft.str(keyval.u.str).s;
+            node->setError(ft.sp(), os.str().c_str());
+            return;
         }
         unreachable(); // Namespace lookup must either be folded or error
         break;
@@ -3083,7 +4725,7 @@ static void foldNode(MLNode *node, MLFoldTracker& ft)
         {
             MLNode *ch = node->firstChild();
             const size_t localid = node->m.p[0];
-            const bool deferred = !ch[1].aslist().n; // x = defer; declared again later
+            const bool deferred = node->m.flags & MLDECL_DEFERRED; // x = defer; declared again later
             doDecl(ft, localid, *node, ch[0], deferred ? NULL : &ch[1]);
         }
         break;
@@ -3196,7 +4838,10 @@ static void declareNsLocal(MLFoldTracker& ft, MLNode *namedecl, MLNode *ns)
     {
         MLNode *func = namedecl->firstChild() + 1;
         const size_t arity = GetOperatorArity(op);
-        if(func->m.cmd == ML_FUNC && op != OP_CALL && func->firstChild()->aslist().n != arity)
+        const MLSub ps = func->m.cmd == ML_FUNC ? func->firstChild()->aslist() : MLSub();
+        if(op != OP_CALL && ps.n && ps.ch[ps.n - 1].m.cmd == ML_SINK) // variadic params (param types aren't folded yet); __call may be
+            os << "Operator function " << getTypeName(ft.rt(), dt->tid) << "::" << s.s << " can't be variadic";
+        else if(func->m.cmd == ML_FUNC && op != OP_CALL && func->firstChild()->aslist().n != arity)
             os << "Operator function " << getTypeName(ft.rt(), dt->tid) << "::" << s.s
                << " must have " << arity << " parameter(s), including self";
         else
@@ -3297,11 +4942,13 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
 
             ft.funcStack.push_back(ft.mlir.funcs.size() - 1);
 
-            // Func params are the first locals
+            // Func params are the first locals (the variadic ones have no var)
             const u32 firstvar = node->m.p[0];
-            const size_t nargs = node->firstChild()->aslist().n;
-            for(size_t i = 0; i < nargs; ++i)
-                addLocal(ft, firstvar + i);
+            const MLSub ps = node->firstChild()->aslist();
+            u32 nargs = 0;
+            for(size_t i = 0; i < ps.n; ++i)
+                if(!isSink(&ps.ch[i]))
+                    addLocal(ft, firstvar + nargs++);
         }
         break;
 
@@ -3325,6 +4972,28 @@ static MLPreVisitResult foldPreErrorCheck(MLNode *node, MLNode *parent, void *ud
         case ML_UNWRAPBIND:
             addLocal(ft, node->m.p[0]);
             break;
+
+        case ML_ITERDECL: // consecutive slots: the state vars the iterator kind uses, then one per value
+        case ML_ITERDECLVARIADIC:
+        {
+            MLNode *ch = node->firstChild();
+            const u32 hidden = node->m.p[1];
+            assert(hidden != ML_ITER_NOHIDDEN); // set by folding
+            const u32 nstate = cmd == ML_ITERDECLVARIADIC ? ML_ITER_VARARGS_USED
+                : ch[1].m.cmd == ML_RANGE ? ML_ITER_RANGE_USED : ML_ITER_OBJ_USED;
+            for(u32 i = 0; i < nstate; ++i)
+                addLocal(ft, hidden + i);
+            const MLSub targets = ch[0].aslist();
+            const size_t nvalues = node->m.flags;
+            u32 named = node->m.p[0], scratch = hidden + ML_ITER_HIDDEN;
+            for(size_t i = 0; i < nvalues; ++i)
+            {
+                // past the targets, values go into a trailing '___' (which is a sink as well)
+                const MLNode *te = &targets.ch[i < targets.n ? i : targets.n - 1];
+                addLocal(ft, isSink(te) ? scratch++ : named++);
+            }
+        }
+        break;
 
         default:
             break; // Nothing to do
@@ -3465,6 +5134,7 @@ bool MLIR::fold(VM& vm, Symstore& syms, SymTable &extSyms)
     // This does constant folding & propagation
     visit(foldPre, foldPost, &ft);
     assert(ft.foldFuncs.empty());
+    assert(ft.foldValBlocks.empty());
     assert(ft.scopes.empty());
     assert(ft.nsLocals.empty());
 

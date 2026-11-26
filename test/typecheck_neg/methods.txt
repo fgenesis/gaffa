@@ -1,0 +1,26 @@
+-- Method call errors
+### unknown method
+var a = [1]
+a:nope()
+### method of an any whose value isn't known
+func f(any x) return x:len()
+### method of an optional
+string? s := "a"
+uint n = s:len()
+### writing through a Const container
+type CA = Const(Array(uint))
+var a: CA = [1]
+a:__setindex(0, 1)
+### argument doesn't fit the specialized signature
+var a = [1]
+a:__setindex(0, "x")
+### int index
+var a = [1]
+int i := +0
+uint x = a:__getindex(i)
+### specialized family function value checks its arguments
+var a: Array(float) = [1]
+var g = Array(float)::__getindex
+float f = g(a, "x")
+### unknown namespaced symbol of a family type
+var g = Array(float)::nope

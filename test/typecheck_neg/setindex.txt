@@ -1,0 +1,36 @@
+-- Index assignment errors
+### value doesn't fit the array's element type
+var a = [1]
+a[0] = "x"
+### int index
+var a = [1]
+int i := +0
+a[i] = 1
+### key doesn't fit the table's key type
+var t = {x=1}
+t[0] = 1
+### value doesn't fit the table's value type
+var t = {x=1}
+t.x = 1.5
+### nil into a non-optional element
+var a = [1]
+a[0] = nil
+### element of a Const array
+type CA = Const(Array(uint))
+var a: CA = [1]
+a[0] = 1
+### field of a Const table
+type CT = Const(Table(string, uint))
+func f(CT t) { t.x = 1 }
+### index of any
+any a = [1]
+a[0] = 1
+### index of a string
+string s := "abc"
+s[0] = 1
+### index of an optional
+type UA = Array(uint)
+func f(UA? a) { a[0] = 1 }
+### too few values
+var a = [1, 2]
+a[0], a[1] = 1

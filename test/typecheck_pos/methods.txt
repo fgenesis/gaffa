@@ -1,0 +1,47 @@
+-- Method calls a:m() and T::f: a locally declared method, then imports and externs, and for Array(T) / Table(K, V)
+-- the generic array / table methods with their signatures specialized for the type
+### builtin method, folded on a known value
+uint n = "abc":len()
+### builtin method on a variable
+string t := "x"
+uint n = t:len()
+### locally declared method with an argument
+func string:rep(uint n) -> string return self
+string s = "a":rep(2)
+### locally declared method used in a closure
+func string:twice() return self ++ self
+var f = func() return "a":twice()
+### array methods
+var a = [1, 2]
+uint x = a:__getindex(0)
+a:__setindex(1, 5)
+uint? y = a:__getindexopt(9)
+### table methods
+var t = {x=1}
+uint? v = t:__getindexopt("y")
+t:__setindex("z", 3)
+### generic table methods
+table g = {}
+any? v = g:__getindex(1)
+### reading methods take a Const container
+type CA = Const(Array(uint))
+var a: CA = [1]
+uint x = a:__getindex(0)
+### constant index converted
+var a = [1]
+uint x = a:__getindex(+0)
+### specialized family function as a value
+var a: Array(float) = [1]
+var g = Array(float)::__getindex
+float f = g(a, 0)
+### exact builtin function as a value
+var l = string::len
+uint n = l("ab")
+### iteration method called directly
+var t = {x=1}
+var k, w = t:__iter2(0)
+string kk = k
+uint ww = w
+### method of an any with a known value uses the value's type
+any x = "a"
+uint n = x:len()

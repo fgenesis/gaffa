@@ -1,0 +1,32 @@
+-- Indexing errors
+### int index into an array
+var a = [1]
+int i := +0
+uint x = a[i]
+### negative constant index
+var a = [1]
+uint x = a[-1]
+### string index into an array
+var a = [1]
+uint x = a["x"]
+### key doesn't fit the table's key type
+var t = {x=1}
+uint y = t[0]
+### value doesn't fit
+var t = {x=1}
+string s = t.x
+### indexing any
+any a = [1]
+var x = a[0]
+### indexing an optional
+type UA = Array(uint)
+func f(UA? a) return a[0]
+### generic table values need an unwrap
+table t = {}
+uint x = t.x
+### several values as an index
+func two() return 1, 2
+var a = [1]
+uint x = a[two()]
+### index on a string without a [] operator
+var x = "abc"[0]

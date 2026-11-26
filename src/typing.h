@@ -188,6 +188,14 @@ public:
     // NULL if t is a plain type list.
     DType *mkconst(DType *t) const;
     DType *mkoptional(const DType *t) const; // T? (T?? is T?); NULL if T can't be optional (typelists, nil, error)
+    // Array(T), Table(K, V). Array(any?) is the generic 'array', Table(any, any?) the generic 'table'.
+    // PRIMTYPE_AUTO for typelists and variadic types.
+    Type mkarray(Type elem);
+    Type mktable(Type key, Type val);
+    // Element type of Array(T) (the generic array: any?), PRIMTYPE_NOTYPE if t isn't an array type
+    Type arrayElem(Type t) const;
+    // Key and value types of Table(K, V) (the generic table: any, any?); false if t isn't a table type
+    bool tableKV(Type t, Type *k, Type *v) const;
 
     // Pointer to list start if plain typelist, or to single element
     TypeIdList aslist(Type t) const;
